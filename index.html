@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bluebook Emulator — Ace STEM</title>
+<!-- KaTeX (schema v1.1 math rendering). Loaded from cdnjs like Desmos; if
+     offline, fmt() falls back to showing raw LaTeX instead of crashing. -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ SIGN IN ============ -->
+<div id="screen-signin">
+  <div class="bb-logo"><span class="star">✦</span>Bluebook<sup>™</sup></div>
+  <div class="signin-card">
+    <h1>Sign In</h1>
+    <label for="nameInput">Student name</label>
+    <input type="text" id="nameInput" placeholder="Enter your name" autocomplete="off">
+    <button class="pill yellow" id="signinBtn">✦&nbsp; Sign in to practice</button>
+    <div class="signin-note">Ace STEM practice emulator — no College Board account needed.</div>
+  </div>
+  <div class="signin-footer">Ace STEM · Bluebook Emulator</div>
+</div>
+
+<!-- ============ HOME ============ -->
+<div id="screen-home" class="hidden">
+  <div class="home-top">
+    <div class="bb-logo-sm"><span>✦</span>Bluebook<sup style="font-size:9px;">™</sup></div>
+    <div class="home-user"><span id="homeUserName">Student</span><span class="avatar" id="homeAvatar">S</span></div>
+  </div>
+  <div class="welcome-band"><h1 id="welcomeMsg">Welcome. Good luck on test day!</h1></div>
+  <div class="home-main">
+    <div class="home-sectionrow">
+      <h2>Your Tests</h2>
+      <div class="seg"><span class="on">✓ Active</span><span>Past</span></div>
+    </div>
+    <div class="no-tests-card">
+      <h3>You Have No Upcoming Tests</h3>
+      <p>Tests appear here a few weeks before test day. This emulator is for practice — scroll down to Practice and Prepare.</p>
+    </div>
+
+    <div class="home-sectionrow">
+      <h2>Practice and Prepare</h2>
+      <div class="seg"><span class="on">✓ Active</span><span>Past</span></div>
+    </div>
+    <div class="practice-cards" id="practiceCards"></div>
+
+    <div class="home-sectionrow"><h2>Explore BigFuture</h2></div>
+    <div class="bigfuture">
+      <div class="bf-img">🎓</div>
+      <div class="bf-body">
+        <h3>Plan for Life After High School</h3>
+        <p>Whether you're interested in a four-year university, community college, or career training, BigFuture has what you need to start planning your future, your way.</p>
+        <button class="pill ghost" style="padding:10px 22px;">Go to BigFuture</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ LOADING ============ -->
+<div id="screen-loading" class="hidden">
+  <h1>We're Preparing Your Practice Test</h1>
+  <div class="loading-card">
+    <span class="hourglass">⏳</span>
+    <p>This may take up to a minute. Please don't refresh this page or quit the app.</p>
+  </div>
+</div>
+
+<!-- ============ GET READY / INTERSTITIAL ============ -->
+<div id="screen-ready" class="hidden">
+  <div class="ready-body">
+    <h1 id="readyTitle">Practice Test</h1>
+    <div class="ready-card" id="readyCard"></div>
+  </div>
+  <div class="ready-footer">
+    <button class="pill" id="readyBackBtn">Back</button>
+    <button class="pill" id="readyNextBtn">Next</button>
+  </div>
+</div>
+
+<!-- ============ MODULE OVER ============ -->
+<div id="screen-moduleover" class="hidden">
+  <h1>This Module Is Over</h1>
+  <p>All your work has been saved.</p>
+  <p>You'll move on automatically in just a moment.</p>
+  <p>Do not refresh this page or quit the app.</p>
+  <div class="dotspin"><span></span><span></span><span></span><span></span><span></span></div>
+</div>
+
+<!-- ============ BREAK ============ -->
+<div id="screen-break" class="hidden">
+  <div class="brk-batt">100% 🔋</div>
+  <div class="brk-timer" id="brkTimer">10:00</div>
+  <h1 id="brkTitle">Take a Break</h1>
+  <p id="brkText">Testing will resume when the timer ends, or select Resume Testing to continue now.</p>
+  <button class="pill yellow" id="brkResumeBtn" style="padding:14px 34px;">Resume Testing</button>
+  <div class="brk-name" id="brkName">Student</div>
+</div>
+
+<!-- ============ TEST ============ -->
+<div id="screen-test" class="hidden">
+  <div class="t-header">
+    <div class="th-left">
+      <h1 id="thTitle">Section 1, Module 1: Reading and Writing</h1>
+      <button class="dir-toggle" id="dirToggle">Directions <span class="chev">▼</span></button>
+    </div>
+    <div class="th-center">
+      <div class="t-timer" id="timerDisplay"><span id="timerVal">32:00</span></div>
+      <button class="timer-btn" id="timerBtn">Hide</button>
+    </div>
+    <div class="th-right">
+      <div class="battery">100% 🔋</div>
+      <div class="th-tools" id="thTools"></div>
+    </div>
+  </div>
+
+  <div class="t-body" id="tBody">
+    <div class="pane pane-left" id="paneLeft"></div>
+    <div id="divider"><div class="grip">◀▶</div></div>
+    <div class="pane pane-right" id="paneRight"></div>
+
+    <!-- directions popup lives inside t-body so header stays visible -->
+    <div class="dir-overlay hidden" id="dirOverlay">
+      <div class="dir-panel" id="dirPanel"></div>
+    </div>
+
+    <!-- highlight popup -->
+    <div class="hl-popup hidden" id="hlPopup">
+      <button class="hl-dot y" data-color="yellow" title="Yellow highlight"></button>
+      <button class="hl-dot b" data-color="blue" title="Blue highlight"></button>
+      <button class="hl-dot p" data-color="pink" title="Pink highlight"></button>
+      <span class="hl-sep"></span>
+      <button class="hl-tool hl-u" id="hlUBtn" title="Underline">U
+        <span class="u-menu hidden" id="uMenu">
+          <button class="u-solid" data-u="solid">U</button>
+          <button class="u-dashed" data-u="dashed">U</button>
+          <button class="u-dotted" data-u="dotted">U</button>
+          <button data-u="none">None</button>
+        </span>
+      </button>
+      <span class="hl-sep"></span>
+      <button class="hl-tool" id="hlTrash" title="Remove highlight">🗑</button>
+    </div>
+
+    <!-- Desmos calculator panel -->
+    <div class="calc-panel hidden" id="calcPanel">
+      <div class="calc-head" id="calcHead">
+        <div class="calc-tabs">
+          <button id="calcTabG" class="on">Graphing</button>
+          <button id="calcTabS">Scientific</button>
+        </div>
+        <span class="calc-drag">⠿</span>
+        <button class="panel-x" id="calcClose">✕</button>
+      </div>
+      <div class="calc-body">
+        <div id="calcGraph"></div>
+        <div id="calcSci" class="hidden"></div>
+        <div class="calc-msg" id="calcMsg">Loading calculator…</div>
+      </div>
+    </div>
+
+    <!-- Reference sheet panel -->
+    <div class="ref-panel hidden" id="refPanel">
+      <div class="ref-head">
+        <h2>Reference</h2>
+        <div class="rh-btns">
+          <button id="refExpand" title="Expand">⤢</button>
+          <button class="panel-x" id="refClose" style="color:#111;">✕</button>
+        </div>
+      </div>
+      <div class="ref-body" id="refBody"></div>
+    </div>
+
+    <!-- Figure expand overlay -->
+    <div class="fig-overlay hidden" id="figOverlay">
+      <div class="fo-card">
+        <button class="panel-x" id="figOverlayClose">✕</button>
+        <img id="figOverlayImg" alt="Figure enlarged">
+      </div>
+    </div>
+  </div>
+
+  <div class="t-footer">
+    <div class="tf-name" id="tfName">Student</div>
+    <button class="qnav-btn" id="qnavBtn"><span id="qnavBtnLabel">Question 1 of 27</span> <span class="chev">▲</span></button>
+    <div class="tf-right">
+      <button class="pill hidden" id="btnBack">Back</button>
+      <button class="pill" id="btnNext">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- Question navigator popup -->
+<div class="qnav-overlay hidden" id="qnavOverlay"></div>
+<div class="qnav-popup hidden" id="qnavPopup">
+  <button class="qnav-close" id="qnavClose">✕</button>
+  <div class="qnav-title" id="qnavTitle">Questions</div>
+  <div class="qnav-legend">
+    <span><span class="lg-pin">📍</span> Current</span>
+    <span><span class="lg-dash"></span> Unanswered</span>
+    <span><span class="lg-flag">⚑</span> For Review</span>
+  </div>
+  <div class="qnav-grid" id="qnavGrid"></div>
+  <div class="qnav-gotoreview"><button class="pill ghost" id="gotoReviewBtn" style="padding:10px 24px;">Go to Review Page</button></div>
+</div>
+
+<!-- ============ RESULTS ============ -->
+<div id="screen-results" class="hidden">
+  <h1 id="resTitle">Results</h1>
+  <p class="sub" id="resSub"></p>
+  <div class="score-grid" id="scoreGrid"></div>
+  <div style="margin-bottom:36px;">
+    <h3 style="font-size:16px;margin:0 0 4px;">Section breakdown</h3>
+    <div id="breakdownList"></div>
+  </div>
+  <h3 style="font-size:16px;margin:0 0 12px;">Question-by-question review</h3>
+  <div id="qReviewList"></div>
+  <div class="results-actions">
+    <button class="pill ghost" id="resRestartBtn">Back to home</button>
+  </div>
+</div>
+
+<script src="test-data.js"></script>
+<script src="render.js"></script>
+<script src="grading.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
