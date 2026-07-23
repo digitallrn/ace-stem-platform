@@ -17,10 +17,17 @@
   <div class="bb-logo"><span class="star">✦</span>Bluebook<sup>™</sup></div>
   <div class="signin-card">
     <h1>Sign In</h1>
-    <label for="nameInput">Student name</label>
-    <input type="text" id="nameInput" placeholder="Enter your name" autocomplete="off">
+    <label for="nameInput">Student code</label>
+    <input type="text" id="nameInput" placeholder="Enter the code your tutor gave you" autocomplete="off">
+    <div class="cond-row">
+      <span class="cond-label">Test conditions</span>
+      <div class="cond-toggle" id="condToggle">
+        <button data-cond="proctored">Proctored</button>
+        <button data-cond="self-administered">At home</button>
+      </div>
+    </div>
     <button class="pill yellow" id="signinBtn">✦&nbsp; Sign in to practice</button>
-    <div class="signin-note">Ace STEM practice emulator — no College Board account needed.</div>
+    <div class="signin-note">Ace STEM practice emulator — no College Board account needed. Don't have a code? Ask your tutor.</div>
   </div>
   <div class="signin-footer">Ace STEM · Bluebook Emulator</div>
 </div>
@@ -220,12 +227,48 @@
   <div id="qReviewList"></div>
   <div class="results-actions">
     <button class="pill ghost" id="resRestartBtn">Back to home</button>
+    <button class="pill" id="resDownloadBtn">Download Results JSON</button>
+  </div>
+  <p class="res-save-note" id="resSaveNote"></p>
+</div>
+
+<!-- ============ TUTOR DASHBOARD (admin sign-in only) ============ -->
+<div id="screen-dashboard" class="hidden">
+  <div class="dash-top">
+    <div class="bb-logo-sm"><span>✦</span>Bluebook<sup style="font-size:9px;">™</sup> <span class="dash-tag">Tutor Dashboard</span></div>
+    <div class="dash-topbtns">
+      <button class="pill ghost" id="dashRefreshBtn">↻ Refresh</button>
+      <button class="pill ghost" id="dashExportBtn">⬇ Download all attempts (JSON)</button>
+      <button class="pill ghost danger" id="dashDeleteBtn" disabled title="Enabled after a successful download this session">🗑 Delete archived attempts</button>
+      <button class="pill ghost" id="dashSignoutBtn">Sign out</button>
+    </div>
+  </div>
+  <div class="dash-status" id="dashStatus">Loading…</div>
+  <div class="dash-filters">
+    <label>Test <select id="dashFilterTest"><option value="">All tests</option></select></label>
+    <label>Student <select id="dashFilterStudent"><option value="">All students</option></select></label>
+    <label class="dash-loadfile">Load archive file <input type="file" id="dashLoadFile" accept=".json,application/json"></label>
+  </div>
+  <div class="dash-tabs" id="dashTabs">
+    <button data-tab="attempts" class="on">Attempts</button>
+    <button data-tab="students">Students</button>
+    <button data-tab="items">Item analysis</button>
+    <button data-tab="insights">Insights</button>
+  </div>
+  <div class="dash-body" id="dashBody"></div>
+  <div class="dash-detail hidden" id="dashDetail">
+    <div class="dash-detail-card">
+      <button class="panel-x" id="dashDetailClose">✕</button>
+      <div id="dashDetailBody"></div>
+    </div>
   </div>
 </div>
 
 <script src="test-data.js"></script>
 <script src="render.js"></script>
 <script src="grading.js"></script>
+<script src="attempts.js"></script>
 <script src="app.js"></script>
+<script src="dashboard.js"></script>
 </body>
 </html>

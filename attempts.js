@@ -1,0 +1,341 @@
+/* attempts.js — attempt recording per ATTEMPTS-SPEC.md.
+   Load order: test-data.js, render.js, grading.js, THEN attempts.js, THEN
+   app.js (which calls Attempts.*), then dashboard.js.
+   Plain script, no IIFE-private globals leaked beyond window.AttemptStore
+   and window.Attempts.
+
+   Fault tolerance is the design driver (spec §10): every storage call is
+   wrapped, saves are retried on the next checkpoint, and nothing here ever
+   throws into the test flow. A student's sitting must survive storage being
+   absent (local file), flaky, or rate-limited. */
+
+/* ================= storage adapter =================
+   Artifact shared storage API (as used by the shipped fork):
+     await storage.set(key, jsonString, true)   // true = shared
+     await storage.get(key, true)      -> {value: string}
+     await storage.list(prefix, true)  -> {keys: [string]}
+     await storage.delete(key, true)
+   Dev shim: append ?devstorage=1 to the URL to back the same API with
+   localStorage (for local testing of recording + dashboard). */
+window.AttemptStore = (function(){
+  "use strict";
+
+  const devMode = /[?&]devstorage=1/.test(location.search);
+
+  const devBackend = {
+    async set(key, value){ localStorage.setItem("devstore:" + key, value); return true; },
+    async get(key){ const v = localStorage.getItem("devstore:" + key); return v === null ? null : { value: v }; },
+    async list(prefix){
+      const keys = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf("devstore:" + prefix) === 0) keys.push(k.slice("devstore:".length));
+      }
+      return { keys };
+    },
+    async delete(key){ localStorage.removeItem("devstore:" + key); return true; }
+  };
+
+  function backend(){
+    if(devMode) return devBackend;
+    return window.storage || null;
+  }
+
+  return {
+    available(){ return !!backend(); },
+    isDev(){ return devMode; },
+
+    /* All four return-or-null / return-false, never throw. */
+    async set(key, obj){
+      const b = backend();
+      if(!b) return false;
+      try{
+        await b.set(key, JSON.stringify(obj), true);
+        return true;
+      }catch(e){ return false; }
+    },
+    async get(key){
+      const b = backend();
+      if(!b) return null;
+      try{
+        const r = await b.get(key, true);
+        if(!r || typeof r.value !== "string") return null;
+        return JSON.parse(r.value);
+      }catch(e){ return null; }
+    },
+    async list(prefix){
+      const b = backend();
+      if(!b) return null;                       // null = storage unavailable (≠ empty)
+      try{
+        const r = await b.list(prefix, true);
+        return (r && Array.isArray(r.keys)) ? r.keys : [];
+      }catch(e){ return null; }
+    },
+    async remove(key){
+      const b = backend();
+      if(!b) return false;
+      try{
+        const fn = b.delete || b.remove;
+        if(!fn) return false;
+        await fn.call(b, key, true);
+        return true;
+      }catch(e){ return false; }
+    }
+  };
+})();
+
+/* ================= attempt recorder ================= */
+window.Attempts = (function(){
+  "use strict";
+
+  const CHECKPOINT_MS = 45000;                   // spec §3 debounced timer
+  const iso = t => new Date(t).toISOString();
+
+  let rec = null;          // the live attempt record (spec §2 shape)
+  let appState = null;     // app.js state object (moduleState is read at build time)
+  let qMeta = {};          // qid -> {firstGiven, lastCommitted, changeCount, visitCount, timeMs, everAnswered, visited}
+  let clock = null;        // {qid, shownAt} while a question is on screen
+  let liveSpr = {};        // qid -> current SPR input value (committed on question exit)
+  let curModule = null;    // {moduleId, startedAt} while a module is in progress
+  let dirty = false;
+  let saving = false;
+  let ticker = null;
+  let lastSaveOk = null;   // null = never tried, true/false = last result
+
+  function meta(qid){
+    if(!qMeta[qid]) qMeta[qid] = {
+      firstGiven: null, lastCommitted: null, changeCount: 0,
+      visitCount: 0, timeMs: 0, everAnswered: false, visited: false
+    };
+    return qMeta[qid];
+  }
+
+  function closeClock(){
+    if(!clock) return;
+    meta(clock.qid).timeMs += Date.now() - clock.shownAt;
+    commitLiveSpr(clock.qid);
+    clock = null;
+  }
+
+  function commitLiveSpr(qid){
+    if(!(qid in liveSpr)) return;
+    commitAnswer(qid, liveSpr[qid]);
+    delete liveSpr[qid];
+  }
+
+  function commitAnswer(qid, value){
+    const m = meta(qid);
+    const norm = (value === undefined || value === "" ) ? null : value;
+    if(norm !== null){
+      m.everAnswered = true;
+      if(m.firstGiven === null) m.firstGiven = norm;
+    }
+    if(m.lastCommitted !== null && norm !== null && norm !== m.lastCommitted) m.changeCount++;
+    m.lastCommitted = norm;
+    dirty = true;
+  }
+
+  /* ---- record assembly (reads app state fresh every save) ---- */
+  function buildScore(test){
+    const score = { correct:0, graded:0, noKey:0, bySection:{}, byModule:{} };
+    test.modules.forEach(mod => {
+      const ms = (appState.moduleState || {})[mod.moduleId];
+      if(!ms) return;
+      const bySec = score.bySection[mod.section] = score.bySection[mod.section] || {correct:0, graded:0};
+      const byMod = score.byModule[mod.moduleId] = {correct:0, graded:0};
+      mod.questions.forEach(q => {
+        if(!hasKey(q)){ score.noKey++; return; }
+        score.graded++; bySec.graded++; byMod.graded++;
+        const given = ms.answers.hasOwnProperty(q.id) ? ms.answers[q.id] : null;
+        if(given !== null && answerMatches(q, given)){
+          score.correct++; bySec.correct++; byMod.correct++;
+        }
+      });
+    });
+    return score;
+  }
+
+  function buildAnswers(test){
+    const answers = {};
+    test.modules.forEach(mod => {
+      const ms = (appState.moduleState || {})[mod.moduleId];
+      if(!ms) return;
+      mod.questions.forEach(q => {
+        const m = meta(q.id);
+        const inLive = (clock && clock.qid === q.id && (q.id in liveSpr));
+        const given = inLive ? (liveSpr[q.id] || null)
+          : (ms.answers.hasOwnProperty(q.id) ? ms.answers[q.id] : null);
+        const elim = ms.eliminated[q.id] ? Array.from(ms.eliminated[q.id]).sort() : [];
+        const openMs = (clock && clock.qid === q.id) ? (Date.now() - clock.shownAt) : 0;
+        answers[q.id] = {
+          given: given,
+          firstGiven: m.firstGiven,
+          correct: hasKey(q) ? (given !== null && answerMatches(q, given)) : null,
+          markedForReview: ms.flags.has(q.id),
+          eliminated: elim,
+          timeSpentSeconds: Math.round((m.timeMs + openMs) / 1000),
+          visitCount: m.visitCount,
+          changeCount: m.changeCount,
+          blankReason: given !== null ? null : (m.everAnswered ? "cleared" : "never-answered")
+        };
+      });
+    });
+    return answers;
+  }
+
+  function build(){
+    if(!rec || !appState || !appState.currentTest) return null;
+    /* module entries already carry their state: created with
+       endedBy:"abandoned"/endedAt:null at moduleStart, finalized by
+       moduleEnd — a crash mid-module therefore persists as "abandoned". */
+    rec.lastSavedAt = iso(Date.now());
+    rec.answers = buildAnswers(appState.currentTest);
+    rec.score = buildScore(appState.currentTest);
+    return rec;
+  }
+
+  let pendingSave = false;
+  async function save(){
+    if(!rec) return;
+    if(saving){ pendingSave = true; return; }    // queue — a dropped save would lose
+    saving = true;                               // the final submit if it raced a
+    do {                                         // module-boundary write
+      pendingSave = false;
+      const snapshot = build();
+      if(!snapshot) break;
+      dirty = false;
+      const ok = await AttemptStore.set(rec.attemptId, snapshot);
+      lastSaveOk = ok;
+      if(!ok) dirty = true;                      // retry at the next checkpoint
+    } while(pendingSave);
+    saving = false;
+  }
+
+  function startTicker(){
+    stopTicker();
+    ticker = setInterval(() => { if(dirty) save(); }, CHECKPOINT_MS);
+  }
+  function stopTicker(){ if(ticker){ clearInterval(ticker); ticker = null; } }
+
+  /* best-effort flush when the tab hides or closes (spec §3) */
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "hidden" && rec){ closeClock(); save(); }
+  });
+  window.addEventListener("beforeunload", () => { if(rec){ closeClock(); save(); } });
+
+  return {
+    /* ---- lifecycle (called from app.js) ---- */
+    begin(test, studentCode, conditions, stateRef){
+      try{
+        appState = stateRef;
+        qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
+        const now = Date.now();
+        const rand = Math.random().toString(16).slice(2, 6);
+        rec = {
+          recordVersion: 1,
+          attemptId: `attempt:${test.testId}:${Math.floor(now/1000)}:${rand}`,
+          student: {
+            code: String(studentCode || "").trim(),
+            key: String(studentCode || "").trim().toUpperCase()
+          },
+          testId: test.testId,
+          testName: test.testName,
+          testVersion: test.testVersion || "unversioned",
+          conditions: conditions || "unknown",
+          startedAt: iso(now),
+          lastSavedAt: iso(now),
+          submittedAt: null,
+          status: "in-progress",
+          modules: [],
+          answers: {},
+          score: null,
+          client: {
+            userAgent: navigator.userAgent,
+            screen: (screen && screen.width) ? screen.width + "x" + screen.height : ""
+          }
+        };
+        dirty = true;
+        save();
+        startTicker();
+      }catch(e){ /* recording must never block the test */ }
+    },
+
+    moduleStart(mod){
+      try{
+        closeClock();
+        curModule = { moduleId: mod.moduleId, startedAt: Date.now() };
+        rec && rec.modules.push({
+          moduleId: mod.moduleId,
+          section: mod.section,
+          moduleLabel: mod.moduleLabel,
+          timeLimitMinutes: mod.timeLimitMinutes,
+          startedAt: iso(Date.now()),
+          endedAt: null,
+          timeSpentSeconds: 0,
+          endedBy: "abandoned"
+        });
+        dirty = true;
+      }catch(e){}
+    },
+
+    moduleEnd(mod, endedBy){
+      try{
+        closeClock();
+        if(rec){
+          const m = rec.modules.find(x => x.moduleId === mod.moduleId && !x.endedAt);
+          if(m){
+            m.endedAt = iso(Date.now());
+            m.timeSpentSeconds = curModule ? Math.round((Date.now() - curModule.startedAt)/1000) : null;
+            m.endedBy = endedBy || "submitted";
+          }
+        }
+        curModule = null;
+        save();                                   // module boundary — the important write
+      }catch(e){}
+    },
+
+    finalize(lastEndedBy){
+      try{
+        if(!rec) return;
+        closeClock();
+        stopTicker();
+        rec.submittedAt = iso(Date.now());
+        rec.status = (lastEndedBy === "timer-expired") ? "timed-out" : "completed";
+        save();
+      }catch(e){}
+    },
+
+    /* ---- instrumentation (spec §8) ---- */
+    questionShown(qid){
+      try{
+        if(clock && clock.qid === qid) return;    // re-render of the same question
+        closeClock();
+        const m = meta(qid);
+        m.visitCount++; m.visited = true;
+        clock = { qid, shownAt: Date.now() };
+        dirty = true;
+      }catch(e){}
+    },
+    reviewShown(){ try{ closeClock(); }catch(e){} },
+    answerCommitted(qid, value){ try{ commitAnswer(qid, value); }catch(e){} },
+    answerLive(qid, value){ try{ liveSpr[qid] = value; dirty = true; }catch(e){} },
+
+    /* ---- results-screen support (spec §6 fallback) ---- */
+    isRecording(){ return !!rec; },
+    storageWorking(){ return lastSaveOk === true; },
+    downloadJson(){
+      try{
+        const snapshot = build();
+        if(!snapshot) return;
+        const blob = new Blob([JSON.stringify(snapshot, null, 2)], {type: "application/json"});
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = (snapshot.student.code || "student") + "-" + snapshot.testId + "-" +
+          snapshot.startedAt.slice(0,10) + ".json";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      }catch(e){}
+    }
+  };
+})();

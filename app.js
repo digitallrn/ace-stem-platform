@@ -5,6 +5,7 @@
   const state = {
     tests: (window.TEST_DATA || []),
     userName: "Student",
+    conditions: "unknown",       // "proctored" | "self-administered" (ATTEMPTS-SPEC §10)
     currentTest: null,
     moduleIndex: 0,
     questionIndex: 0,
@@ -21,16 +22,28 @@
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-results"];
+  const SCREENS = ["screen-signin","screen-home","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-results","screen-dashboard"];
   function showOnly(id){ SCREENS.forEach(s => s===id ? show(s) : hide(s)); }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
 
   /* ================= SIGN IN / HOME ================= */
   el("signinBtn").addEventListener("click", doSignin);
   el("nameInput").addEventListener("keydown", e => { if(e.key === "Enter") doSignin(); });
+  document.querySelectorAll("#condToggle button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#condToggle button").forEach(b => b.classList.toggle("on", b === btn));
+      state.conditions = btn.dataset.cond;
+    });
+  });
   function doSignin(){
     const v = el("nameInput").value.trim();
-    state.userName = v || "Student";
+    if(!v){ el("nameInput").focus(); return; }
+    if(v.toLowerCase() === "acestem-admin"){        // tutor dashboard — never records (spec §4)
+      el("nameInput").value = "";
+      if(window.Dashboard) Dashboard.open(showOnly);
+      return;
+    }
+    state.userName = v;
     el("homeUserName").textContent = state.userName;
     el("homeAvatar").textContent = state.userName.charAt(0).toUpperCase();
     el("welcomeMsg").textContent = "Welcome, " + firstName(state.userName) + ". Good luck on test day!";
@@ -64,6 +77,7 @@
     test.modules.forEach(m=>{
       state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{} };
     });
+    Attempts.begin(test, state.userName, state.conditions, state);   // spec §3: record on test start
     showOnly("screen-loading");
     setTimeout(()=>{ showReady(true); }, 2200);
   }
@@ -113,6 +127,7 @@
     renderTest();
     openDirections();
     startTimer();
+    Attempts.moduleStart(mod);
   }
 
   function startTimer(){
@@ -124,7 +139,7 @@
         state.timeRemainingSec = 0;
         updateTimerDisplay();
         clearInterval(state.timerInterval);
-        submitModule();               // real Bluebook auto-advances at 0:00
+        submitModule("timer-expired");   // real Bluebook auto-advances at 0:00
         return;
       }
       if(state.timeRemainingSec === 300 && state.timerHidden){
@@ -223,6 +238,7 @@
     el("qnavBtn").style.visibility = "visible";
     el("btnBack").classList.toggle("hidden", state.questionIndex === 0);
     el("btnNext").textContent = "Next";
+    Attempts.questionShown(q.id);      // no-op on re-renders of the same question
   }
 
   function buildQuestionHtml(q, ms){
@@ -310,6 +326,7 @@
         const val = input.value.trim();
         if(val === "") delete ms.answers[q.id]; else ms.answers[q.id] = val;
         el("sprPreview").innerHTML = sprPreviewHtml(val);
+        Attempts.answerLive(q.id, val || null);   // committed when the question leaves the screen
       };
       input.addEventListener("input", sync);
 
@@ -347,6 +364,7 @@
         const elimSet = ms.eliminated[q.id];
         if(elimSet && elimSet.has(idx)) return;   // can't select a crossed-out choice
         ms.answers[q.id] = idx;
+        Attempts.answerCommitted(q.id, idx);
         renderQuestionView();
       });
     });
@@ -370,7 +388,10 @@
     if(ms.eliminated[qid].has(idx)) ms.eliminated[qid].delete(idx);
     else {
       ms.eliminated[qid].add(idx);
-      if(ms.answers[qid] === idx) delete ms.answers[qid];
+      if(ms.answers[qid] === idx){
+        delete ms.answers[qid];
+        Attempts.answerCommitted(qid, null);   // crossing out the selected choice clears it
+      }
     }
     renderQuestionView();
   }
@@ -431,6 +452,7 @@
 
   /* ================= CHECK YOUR WORK (review view) ================= */
   function renderReviewView(){
+    Attempts.reviewShown();               // closes the per-question clock
     const mod = currentModule();
     el("thTitle").textContent = sectionTitle(mod);
     el("tBody").classList.add("single");
@@ -459,12 +481,13 @@
     el("btnNext").textContent = "Next";
   }
 
-  function submitModule(){
+  function submitModule(endedBy){
     clearInterval(state.timerInterval);
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
+    const cur = currentModule();
+    Attempts.moduleEnd(cur, endedBy || "submitted");
     const nextIdx = state.moduleIndex + 1;
     if(nextIdx < state.currentTest.modules.length){
-      const cur = currentModule();
       const next = state.currentTest.modules[nextIdx];
       state.moduleIndex = nextIdx;
       if(next.section === cur.section){
@@ -473,6 +496,7 @@
         showBreak();
       }
     } else {
+      Attempts.finalize(endedBy || "submitted");
       showModuleOver(true);
     }
   }
@@ -934,6 +958,12 @@
     }).join("");
 
     el("resRestartBtn").onclick = ()=>{ renderHome(); showOnly("screen-home"); };
+    el("resDownloadBtn").onclick = ()=> Attempts.downloadJson();
+    /* spec §6: the JSON download is the fallback archive when shared storage
+       is absent (local copy) or the final write failed. */
+    el("resSaveNote").textContent = Attempts.storageWorking()
+      ? "Your attempt was recorded automatically."
+      : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
     showOnly("screen-results");
   }
 

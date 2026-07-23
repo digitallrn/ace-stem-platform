@@ -12,21 +12,26 @@ for real editing/version control:
 
 ```
 index.html    — dev shell: markup + KaTeX CDN tags + local <script>/<link>
-styles.css    — all app styling
-render.js     — fmt() token/LaTeX renderer (schema v1.1 §2)
+styles.css    — all app styling (incl. tutor-dashboard section at the end)
+render.js     — fmt() token/LaTeX renderer (schema §2)
 grading.js    — answerMatches, toFraction, hasKey, sprValueMatches
+attempts.js   — AttemptStore (shared-storage adapter, ?devstorage=1 local
+                shim) + Attempts (recording per ATTEMPTS-SPEC.md)
 app.js        — state machine, screens, event handlers, results
-test-data.js  — window.TEST_DATA = [tests...] — David's actual test bank
+dashboard.js  — tutor dashboard (hidden admin sign-in acestem-admin)
+test-data.js  — window.TEST_DATA = [tests...] — generated from the
+                test-bank repo's validated JSON; carries testVersion
+                (frozen once students take a test — ATTEMPTS-SPEC §9)
 assemble.py   — inlines the local files above into dist/index-live.html,
                 the single-file preview used in the claude.ai panel
-tsv_to_bluebook_json.py — the extraction→JSON converter (schema v1.1)
+tsv_to_bluebook_json.py — the extraction→JSON converter
 ```
 
-Load order matters: `test-data.js`, then `render.js`, then `grading.js`,
-then `app.js` — the last three are plain (non-module) scripts, so
-top-level function declarations in `render.js`/`grading.js` are globals
-`app.js` calls directly. Don't wrap them in their own IIFEs, and don't
-redefine `escapeHtml`, `fmt`, `answerMatches`, etc. inside `app.js`.
+Load order matters: `test-data.js`, `render.js`, `grading.js`,
+`attempts.js`, `app.js`, `dashboard.js` — plain (non-module) scripts, so
+top-level declarations are globals used across files. Don't wrap
+`render.js`/`grading.js` in IIFEs, and don't redefine `escapeHtml`,
+`fmt`, `answerMatches`, etc. inside `app.js`.
 
 ## Absolutely do not touch
 `sat-2026-june-asia-v1.html` and anything about its publish state — that's
@@ -50,16 +55,17 @@ that fork.
    regex or an off-by-one in the tokenizer fails quietly (wrong rendering)
    rather than loudly (a thrown error).
 
-## Known open items (from EMULATOR-HANDOFF.md, still true)
-- Attempt recording (`persistAttempt` → shared storage `attempt:*` keys) +
-  Download Results JSON fallback — not yet backported from the fork.
-- Tutor dashboard (attempt list, per-student wrong answers, item analysis,
-  hardest-first) behind a hidden admin sign-in name — not yet backported.
+## Known open items
+- ✅ 2026-07-23: Attempt recording + tutor dashboard implemented per
+  ATTEMPTS-SPEC.md (students sign in with a CODE, records are
+  pseudonymous; dashboard has export + archive-then-delete). Read that
+  spec before touching attempts.js/dashboard.js.
 - David wants changes to the Results page; scope not yet defined — ask
   before restructuring `renderResults()` in `app.js` beyond small tweaks,
   since the tutor dashboard and future score-report generation both read
   the same results data.
-- `test-data.js` currently holds "2024 March C" (40 questions, pre-v1.1
-  plain text). It'll be superseded once the extraction pipeline's pilot
-  (see the test-bank repo) produces a v1.1 JSON with real math/tokens —
-  that's the first real test of `render.js` against real content.
+- `test-data.js` holds "2026 June Asia v1" (97 questions, converted from
+  the frozen fork; m2-q11 pending key adjudication in the test-bank
+  repo). Regenerate from the test-bank repo's JSON — never hand-edit —
+  and bump `testVersion` on any content change after students have
+  taken it (ATTEMPTS-SPEC §9).
