@@ -14,6 +14,7 @@
     --hl-yellow: #FBF3B6;
     --hl-blue:   #CDE4FB;
     --hl-pink:   #F8D2E2;
+    --note-yellow: #FEDB00;   /* saturated noted-span yellow, sampled from screenshot 13 */
   }
   *{ box-sizing:border-box; }
   html,body{ height:100%; }
@@ -191,6 +192,9 @@
   .hl.u-solid{ text-decoration:underline; text-decoration-style:solid; text-decoration-thickness:2px; }
   .hl.u-dashed{ text-decoration:underline; text-decoration-style:dashed; text-decoration-thickness:2px; }
   .hl.u-dotted{ text-decoration:underline; text-decoration-style:dotted; text-decoration-thickness:2px; }
+  /* BLUEBOOK-PARITY B: a noted span goes fully saturated yellow only while the
+     notes rail is open (screenshot 13); collapsed rail = normal highlight (14) */
+  .t-body.notes-open .hl[data-note-id]{ background:var(--note-yellow); }
 
   .q-head{
     display:flex; align-items:stretch; margin-bottom:18px; border-bottom:2px solid var(--ink); position:relative;
@@ -354,6 +358,46 @@
     display:flex; align-items:center; justify-content:center;
   }
   .hl-trash:hover{ background:#F5F5F5; }
+  .hl-note{
+    width:44px; height:44px; border-radius:50%; border:1.5px solid var(--ink);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .hl-note:hover{ background:#F5F5F5; }
+
+  /* Notes rail (Phase B — screenshots 13/14) */
+  .notes-rail{
+    width:290px; flex-shrink:0; background:#F0F0F0; position:relative;
+    display:flex; flex-direction:column;
+  }
+  .notes-rail.collapsed{ width:20px; }
+  .notes-rail.collapsed .notes-cards{ display:none; }
+  .notes-cards{
+    flex:1; overflow-y:auto; padding:16px 12px 60px; display:flex; flex-direction:column; gap:14px;
+  }
+  .note-card{ background:#fff; border:2px solid var(--ink); border-radius:12px; overflow:hidden; }
+  .note-head{ background:var(--note-yellow); display:flex; align-items:center; gap:8px; padding:7px 8px 7px 12px; }
+  .note-title{
+    flex:1; min-width:0; font-size:13.5px; font-weight:700; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .note-trash{
+    width:32px; height:32px; border-radius:50%; background:#fff; border:none; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; color:var(--ink);
+  }
+  .note-body-ta{
+    display:block; width:100%; border:none; resize:none; outline:none; background:#fff;
+    font-family:var(--sans); font-size:14.5px; line-height:1.5; color:var(--ink);
+    padding:10px 12px 14px; min-height:64px;
+  }
+  .note-body-ta::placeholder{ color:#9E9E9E; }
+  .notes-chev{
+    position:absolute; bottom:44px; width:30px; height:36px; padding:0; z-index:5;
+    background:#757575; border:2px solid #E4E4E4; display:flex; align-items:center; justify-content:center;
+  }
+  .notes-rail:not(.collapsed) .notes-chev{ left:0; border-left:none; border-radius:0 20px 20px 0; }
+  .notes-rail.collapsed .notes-chev{ left:-30px; border-right:none; border-radius:20px 0 0 20px; }
+  .notes-rail.collapsed .notes-chev svg{ transform:scaleX(-1); }
+  .notes-chev:hover{ background:#5F5F5F; }
   .u-menu{
     position:absolute; top:44px; left:50%; transform:translateX(-50%); background:#fff; border-radius:10px;
     box-shadow:0 4px 16px rgba(0,0,0,.28); padding:6px 0; display:flex; flex-direction:column; min-width:74px; z-index:70;

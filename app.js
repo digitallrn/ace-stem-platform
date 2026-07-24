@@ -16,7 +16,9 @@
     timerHidden: false,
     elimMode: false,
     hlTarget: null,              // existing .hl span being edited, or null (new selection)
-    savedRange: null
+    savedRange: null,
+    noteSeq: 0,                  // session-unique note id counter (Phase B)
+    notesCollapsed: false        // notes rail collapse preference, survives navigation
   };
 
   function el(id){ return document.getElementById(id); }
@@ -75,7 +77,7 @@
     state.moduleIndex = 0;
     state.moduleState = {};
     test.modules.forEach(m=>{
-      state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{} };
+      state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} };
     });
     Attempts.begin(test, state.userName, state.conditions, state);   // spec §3: record on test start
     showOnly("screen-loading");
@@ -198,8 +200,9 @@
 
   /* ================= RENDER TEST ================= */
   function renderTest(){
-    if(state.view === "review"){ renderReviewView(); return; }
-    renderQuestionView();
+    if(state.view === "review") renderReviewView();
+    else renderQuestionView();
+    renderNotesRail();
   }
 
   function renderQuestionView(){
@@ -780,6 +783,10 @@
     const bodyRect = el("tBody").getBoundingClientRect();
     hlPopup.classList.remove("hidden");
     setUMenu(false);
+    // notes are Reading & Writing only (spec Phase B) — Math never shows the button
+    const isRW = currentModule().section === "Reading and Writing";
+    el("hlNote").classList.toggle("hidden", !isRW);
+    el("hlNoteSep").classList.toggle("hidden", !isRW);
     const top = Math.max(6, rect.top - bodyRect.top - 64);
     let left = rect.left - bodyRect.left;
     left = Math.max(8, Math.min(left, bodyRect.width - hlPopup.offsetWidth - 8));
@@ -853,13 +860,97 @@
   el("hlTrash").addEventListener("click", ()=>{
     const span = state.hlTarget;
     if(span){
+      if(span.dataset.noteId) removeNoteRecord(span.dataset.noteId);   // don't orphan the note
       const parent = span.parentNode;
       while(span.firstChild) parent.insertBefore(span.firstChild, span);
       parent.removeChild(span);
       parent.normalize();
       savePassage();
+      renderNotesRail();
     }
     hideHlPopup();
+  });
+
+  /* ================= NOTES (Phase B — screenshots 6, 13, 14) ================= */
+  el("hlNote").addEventListener("click", ()=>{
+    const span = getOrCreateTargetSpan();
+    if(!span) return hideHlPopup();
+    const q = currentQuestion();
+    const ms = currentModState();
+    if(!ms.notes) ms.notes = {};
+    if(!ms.notes[q.id]) ms.notes[q.id] = [];
+    let id = span.dataset.noteId;
+    if(!id){
+      id = "n" + (++state.noteSeq);
+      span.dataset.noteId = id;
+      // a noted span must read as a real highlight underneath, so deleting the
+      // note later downgrades to a normal highlight instead of stripping it
+      if(!/\bc-(yellow|blue|pink)\b/.test(span.className)){
+        span.classList.remove("c-none");
+        span.classList.add("c-yellow");
+      }
+      ms.notes[q.id].push({ id, snippet: (span.textContent || "").trim().slice(0, 80), text: "" });
+    }
+    state.notesCollapsed = false;
+    savePassage();
+    hideHlPopup();
+    renderNotesRail();
+    const ta = document.querySelector('.note-card[data-note="' + id + '"] .note-body-ta');
+    if(ta) ta.focus();
+  });
+
+  function removeNoteRecord(id){
+    const q = currentQuestion();
+    const ms = currentModState();
+    if(ms.notes && ms.notes[q.id]){
+      ms.notes[q.id] = ms.notes[q.id].filter(n => n.id !== id);
+    }
+  }
+
+  function deleteNote(id){
+    removeNoteRecord(id);
+    // downgrade the span to a normal highlight — keep the highlight itself
+    const span = document.querySelector('#passageText .hl[data-note-id="' + id + '"]');
+    if(span) span.removeAttribute("data-note-id");
+    savePassage();
+    renderNotesRail();
+  }
+
+  function renderNotesRail(){
+    const rail = el("notesRail");
+    const mod = currentModule();
+    const q = currentQuestion();
+    const ms = currentModState();
+    const notes = (ms.notes && ms.notes[q.id]) || [];
+    const visible = state.view === "question" &&
+                    mod.section === "Reading and Writing" &&
+                    !!q.passage && notes.length > 0;
+    rail.classList.toggle("hidden", !visible);
+    rail.classList.toggle("collapsed", state.notesCollapsed);
+    el("tBody").classList.toggle("notes-open", visible && !state.notesCollapsed);
+    el("notesChev").title = state.notesCollapsed ? "Expand notes" : "Collapse notes";
+    if(!visible){ el("notesCards").innerHTML = ""; return; }
+
+    const trashSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6"/><path d="M19 6l-1 13.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5L5 6"/><path d="M10 10.5v6M14 10.5v6"/></svg>';
+    el("notesCards").innerHTML = notes.map(n => `
+      <div class="note-card" data-note="${n.id}">
+        <div class="note-head">
+          <span class="note-title">${escapeHtml(n.snippet)}</span>
+          <button class="note-trash" title="Delete note">${trashSvg}</button>
+        </div>
+        <textarea class="note-body-ta" placeholder="Notes are saved automatically.">${escapeHtml(n.text)}</textarea>
+      </div>`).join("");
+
+    el("notesCards").querySelectorAll(".note-card").forEach(card => {
+      const note = notes.find(n => n.id === card.dataset.note);
+      card.querySelector(".note-trash").addEventListener("click", ()=> deleteNote(card.dataset.note));
+      card.querySelector(".note-body-ta").addEventListener("input", e => { note.text = e.target.value; });
+    });
+  }
+
+  el("notesChev").addEventListener("click", ()=>{
+    state.notesCollapsed = !state.notesCollapsed;
+    renderNotesRail();
   });
 
   /* ================= DIVIDER DRAG ================= */
