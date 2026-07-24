@@ -139,17 +139,22 @@
       <button class="hl-dot y" data-color="yellow" title="Yellow highlight"></button>
       <button class="hl-dot b" data-color="blue" title="Blue highlight"></button>
       <button class="hl-dot p" data-color="pink" title="Pink highlight"></button>
-      <span class="hl-sep"></span>
-      <button class="hl-tool hl-u" id="hlUBtn" title="Underline">U
+      <!-- u-menu sits beside the button, not inside it: nested <button>s are
+           invalid HTML and the parser hoists them out, breaking the menu -->
+      <span class="hl-u-wrap">
+        <button class="hl-tool hl-u" id="hlUBtn" title="Underline">
+          <span class="u-glyph">U</span><span class="u-caret"></span>
+        </button>
         <span class="u-menu hidden" id="uMenu">
           <button class="u-solid" data-u="solid">U</button>
           <button class="u-dashed" data-u="dashed">U</button>
           <button class="u-dotted" data-u="dotted">U</button>
           <button data-u="none">None</button>
         </span>
+      </span>
+      <button class="hl-tool hl-trash" id="hlTrash" title="Remove highlight">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6"/><path d="M19 6l-1 13.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5L5 6"/><path d="M10 10.5v6M14 10.5v6"/></svg>
       </button>
-      <span class="hl-sep"></span>
-      <button class="hl-tool" id="hlTrash" title="Remove highlight">🗑</button>
     </div>
 
     <!-- Desmos calculator panel -->

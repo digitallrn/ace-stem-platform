@@ -221,7 +221,7 @@
   .choice{
     flex:1; display:flex; align-items:center; gap:14px; border:1.5px solid var(--ink);
     border-radius:8px; padding:12px 16px; font-family:var(--serif); font-size:16.5px; line-height:1.45;
-    background:#fff; cursor:pointer;
+    background:#fff; cursor:pointer; position:relative;
   }
   .choice:hover{ background:#FAFAFA; }
   .choice .clabel{
@@ -232,16 +232,24 @@
   .choice.selected{ border-color:var(--cb-blue); border-width:2px; }
   .choice.selected .clabel{ background:var(--cb-blue); border-color:var(--cb-blue); color:#fff; }
   .choice.eliminated{ color:#999; }
-  .choice.eliminated .ctext{ text-decoration:line-through; }
+  /* BLUEBOOK-PARITY A1: the strikethrough runs edge to edge across the whole
+     choice container — through the letter badge — and overhangs the box border
+     ~4px each side (measured from reference/bluebook-screenshots/10). */
+  .choice.eliminated::after{
+    content:""; position:absolute; left:-5px; right:-5px; top:50%; height:2px;
+    margin-top:-1px; background:var(--ink); pointer-events:none;
+  }
   .choice.eliminated .clabel{ border-color:#999; color:#999; }
   .elim-btn{
     width:30px; height:30px; border-radius:50%; border:1.5px solid var(--ink); background:#fff;
     font-size:12px; font-weight:700; position:relative; flex-shrink:0; display:none;
     align-items:center; justify-content:center;
   }
+  /* horizontal line through the letter, overhanging the circle ~4px each side
+     (screenshot 10 — the real icon's strike is level, not slanted) */
   .elim-btn::after{
-    content:""; position:absolute; left:-3px; right:-3px; top:50%; height:1.5px; background:var(--ink);
-    transform:rotate(-18deg);
+    content:""; position:absolute; left:-4px; right:-4px; top:50%; height:1.5px;
+    margin-top:-1px; background:var(--ink);
   }
   .elim-mode .elim-btn{ display:flex; }
   .elim-undo{
@@ -317,23 +325,40 @@
   .dir-panel p{ font-family:var(--serif); font-size:16.5px; line-height:1.65; margin:0 0 16px; }
   .dir-panel .close-row{ display:flex; justify-content:flex-end; }
 
-  /* Highlight popup */
+  /* Highlight popup — geometry measured from reference/bluebook-screenshots/06–08:
+     ~40px swatches, U dropdown with caret, trash in an outlined circle. The
+     separator + note button to the right of the trash arrive with Phase B. */
   .hl-popup{
-    position:absolute; z-index:60; background:#fff; border-radius:26px; padding:8px 14px;
-    box-shadow:0 4px 18px rgba(0,0,0,.3); display:flex; align-items:center; gap:10px;
+    position:absolute; z-index:60; background:#fff; border-radius:32px; padding:8px 14px;
+    box-shadow:0 4px 18px rgba(0,0,0,.3); display:flex; align-items:center; gap:13px;
   }
-  .hl-dot{ width:26px; height:26px; border-radius:50%; border:1.5px solid #bbb; cursor:pointer; }
+  .hl-dot{ width:40px; height:40px; border-radius:50%; border:1.5px solid #C9C9C9; cursor:pointer; }
   .hl-dot.y{ background:var(--hl-yellow); }
   .hl-dot.b{ background:var(--hl-blue); }
   .hl-dot.p{ background:var(--hl-pink); }
-  .hl-sep{ width:1px; height:26px; background:#ddd; }
-  .hl-tool{ background:none; border:none; font-size:16px; padding:2px 4px; position:relative; }
-  .hl-u{ font-weight:700; text-decoration:underline; font-size:15px; }
+  .hl-sep{ width:1px; height:38px; background:#ddd; }
+  .hl-tool{ background:none; border:none; padding:0; color:var(--ink); }
+  .hl-u-wrap{ position:relative; display:flex; align-items:center; }
+  .hl-u{ display:flex; align-items:center; gap:5px; padding:2px 3px; }
+  .u-glyph{
+    font-weight:700; font-size:16px; font-family:var(--sans);
+    border-bottom:2px dashed var(--ink); padding:0 1px 2px;
+  }
+  .u-caret{
+    width:7px; height:7px; border-right:1.8px solid var(--ink); border-bottom:1.8px solid var(--ink);
+    transform:rotate(45deg); margin-top:-4px; transition:transform .12s;
+  }
+  .hl-u.open .u-caret{ transform:rotate(225deg); margin-top:4px; }
+  .hl-trash{
+    width:40px; height:40px; border-radius:50%; border:1.5px solid var(--ink);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .hl-trash:hover{ background:#F5F5F5; }
   .u-menu{
-    position:absolute; top:34px; left:50%; transform:translateX(-50%); background:#fff; border-radius:10px;
+    position:absolute; top:44px; left:50%; transform:translateX(-50%); background:#fff; border-radius:10px;
     box-shadow:0 4px 16px rgba(0,0,0,.28); padding:6px 0; display:flex; flex-direction:column; min-width:74px; z-index:70;
   }
-  .u-menu button{ background:none; border:none; padding:9px 12px; font-size:15px; font-weight:700; }
+  .u-menu button{ background:none; border:none; padding:10px 12px; font-size:15px; font-weight:700; }
   .u-menu button:hover{ background:#F1F3FA; }
   .u-menu .u-solid{ text-decoration:underline; }
   .u-menu .u-dashed{ text-decoration:underline; text-decoration-style:dashed; }

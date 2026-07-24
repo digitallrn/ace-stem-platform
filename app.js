@@ -771,11 +771,16 @@
     e.stopPropagation();
   });
 
+  function setUMenu(open){
+    uMenu.classList.toggle("hidden", !open);
+    el("hlUBtn").classList.toggle("open", open);
+  }
+
   function positionHlPopup(rect){
     const bodyRect = el("tBody").getBoundingClientRect();
     hlPopup.classList.remove("hidden");
-    uMenu.classList.add("hidden");
-    const top = Math.max(6, rect.top - bodyRect.top - 46);
+    setUMenu(false);
+    const top = Math.max(6, rect.top - bodyRect.top - 64);
     let left = rect.left - bodyRect.left;
     left = Math.max(8, Math.min(left, bodyRect.width - hlPopup.offsetWidth - 8));
     hlPopup.style.top = top + "px";
@@ -784,7 +789,7 @@
 
   function hideHlPopup(){
     hlPopup.classList.add("hidden");
-    uMenu.classList.add("hidden");
+    setUMenu(false);
     state.hlTarget = null;
     state.savedRange = null;
   }
@@ -830,7 +835,7 @@
 
   el("hlUBtn").addEventListener("click", e=>{
     if(e.target.closest(".u-menu")) return;
-    uMenu.classList.toggle("hidden");
+    setUMenu(uMenu.classList.contains("hidden"));
   });
   uMenu.querySelectorAll("button").forEach(btn=>{
     btn.addEventListener("click", e=>{
@@ -840,7 +845,7 @@
       span.classList.remove("u-solid","u-dashed","u-dotted");
       if(btn.dataset.u !== "none") span.classList.add("u-" + btn.dataset.u);
       state.hlTarget = span; state.savedRange = null;
-      uMenu.classList.add("hidden");
+      setUMenu(false);
       savePassage();
     });
   });
