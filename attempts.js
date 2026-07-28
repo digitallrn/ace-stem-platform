@@ -264,16 +264,20 @@ window.Attempts = (function(){
       try{
         closeClock();
         curModule = { moduleId: mod.moduleId, startedAt: Date.now() };
-        rec && rec.modules.push({
-          moduleId: mod.moduleId,
-          section: mod.section,
-          moduleLabel: mod.moduleLabel,
-          timeLimitMinutes: mod.timeLimitMinutes,
-          startedAt: iso(Date.now()),
-          endedAt: null,
-          timeSpentSeconds: 0,
-          endedBy: "abandoned"
-        });
+        // a resumed sitting re-enters a module whose entry is still open
+        // (endedAt:null from the exited sitting) — reuse it, don't duplicate
+        if(rec && !rec.modules.find(x => x.moduleId === mod.moduleId && !x.endedAt)){
+          rec.modules.push({
+            moduleId: mod.moduleId,
+            section: mod.section,
+            moduleLabel: mod.moduleLabel,
+            timeLimitMinutes: mod.timeLimitMinutes,
+            startedAt: iso(Date.now()),
+            endedAt: null,
+            timeSpentSeconds: 0,
+            endedBy: "abandoned"
+          });
+        }
         dirty = true;
       }catch(e){}
     },
@@ -285,7 +289,10 @@ window.Attempts = (function(){
           const m = rec.modules.find(x => x.moduleId === mod.moduleId && !x.endedAt);
           if(m){
             m.endedAt = iso(Date.now());
-            m.timeSpentSeconds = curModule ? Math.round((Date.now() - curModule.startedAt)/1000) : null;
+            // accumulate: an exited-then-resumed module already carries the
+            // seconds from its earlier sitting(s) (folded in by suspend)
+            m.timeSpentSeconds = (m.timeSpentSeconds || 0) +
+              (curModule ? Math.round((Date.now() - curModule.startedAt)/1000) : 0);
             m.endedBy = endedBy || "submitted";
           }
         }
@@ -301,8 +308,72 @@ window.Attempts = (function(){
         stopTicker();
         rec.submittedAt = iso(Date.now());
         rec.status = (lastEndedBy === "timer-expired") ? "timed-out" : "completed";
+        delete rec.resume;                        // a completed attempt is not resumable
         save();
       }catch(e){}
+    },
+
+    /* ---- Save and Exit + Resume (BLUEBOOK-PARITY Phase C) ---- */
+    async suspend(resumeBlob){
+      try{
+        if(!rec) return false;
+        closeClock();
+        stopTicker();
+        if(curModule){
+          // fold this sitting's elapsed time into the still-open module entry
+          const m = rec.modules.find(x => x.moduleId === curModule.moduleId && !x.endedAt);
+          if(m) m.timeSpentSeconds = (m.timeSpentSeconds || 0) +
+            Math.round((Date.now() - curModule.startedAt)/1000);
+          curModule = null;
+        }
+        rec.resume = resumeBlob;                  // status stays "in-progress" (spec)
+        await save();                             // flush immediately, then leave
+        const ok = lastSaveOk === true;
+        rec = null; appState = null;              // stop recording entirely once exited
+        qMeta = {}; liveSpr = {}; clock = null;
+        return ok;
+      }catch(e){ return false; }
+    },
+
+    resume(record, stateRef){
+      try{
+        appState = stateRef;
+        rec = record;
+        qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
+        // rebuild per-question meta so time/visits/changes keep accumulating
+        Object.keys(record.answers || {}).forEach(qid => {
+          const a = record.answers[qid];
+          qMeta[qid] = {
+            firstGiven: a.firstGiven, lastCommitted: a.given,
+            changeCount: a.changeCount || 0, visitCount: a.visitCount || 0,
+            timeMs: (a.timeSpentSeconds || 0) * 1000,
+            everAnswered: a.firstGiven !== null || a.blankReason === "cleared",
+            visited: (a.visitCount || 0) > 0
+          };
+        });
+        delete rec.resume;                        // consumed; next save persists without it
+        dirty = true;
+        startTicker();
+      }catch(e){}
+    },
+
+    /* most recent in-progress, resumable attempt for this code + test build */
+    async findInProgress(code, testId, testVersion){
+      try{
+        const key = String(code || "").trim().toUpperCase();
+        const keys = await AttemptStore.list("attempt:" + testId + ":");
+        if(!keys) return null;
+        let best = null;
+        for(const k of keys){
+          const r = await AttemptStore.get(k);
+          if(!r || r.status !== "in-progress" || !r.resume) continue;
+          if(!r.student || String(r.student.key || "") !== key) continue;
+          // ids/annotations only line up within the same test build (spec §9)
+          if(r.testVersion !== (testVersion || "unversioned")) continue;
+          if(!best || r.startedAt > best.startedAt) best = r;
+        }
+        return best;
+      }catch(e){ return null; }
     },
 
     /* ---- instrumentation (spec §8) ---- */

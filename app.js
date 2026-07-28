@@ -20,7 +20,8 @@
     noteSeq: 0,                  // session-unique note id counter (Phase B)
     notesCollapsed: false,       // notes rail collapse preference, survives navigation
     activeHlColor: "yellow",     // last-used swatch — what mode-drag + underline pairing apply
-    hlMode: false                // Highlights & Notes toggle: drag-select highlights instantly
+    hlMode: false,               // Highlights & Notes toggle: drag-select highlights instantly
+    resumeRecords: {}            // testId -> in-progress attempt record (Phase C)
   };
 
   function el(id){ return document.getElementById(id); }
@@ -39,7 +40,7 @@
       state.conditions = btn.dataset.cond;
     });
   });
-  function doSignin(){
+  async function doSignin(){
     const v = el("nameInput").value.trim();
     if(!v){ el("nameInput").focus(); return; }
     if(v.toLowerCase() === "acestem-admin"){        // tutor dashboard — never records (spec §4)
@@ -52,6 +53,13 @@
     el("homeAvatar").textContent = state.userName.charAt(0).toUpperCase();
     el("welcomeMsg").textContent = "Welcome, " + firstName(state.userName) + ". Good luck on test day!";
     el("tfName").textContent = state.userName;
+    // Phase C: an in-progress attempt for this code + test resumes rather
+    // than starting fresh (starting over is a tutor-dashboard action)
+    state.resumeRecords = {};
+    for(const t of state.tests){
+      const r = await Attempts.findInProgress(v, t.testId, t.testVersion);
+      if(r) state.resumeRecords[t.testId] = r;
+    }
     renderHome();
     showOnly("screen-home");
   }
@@ -66,9 +74,17 @@
     state.tests.forEach(test => {
       const totalQ = test.modules.reduce((s,m)=>s+m.questions.length,0);
       const card = document.createElement("div");
+      const resume = state.resumeRecords[test.testId];
       card.className = "pcard";
-      card.innerHTML = `<div class="icn">🖥️</div><h3>Full-Length Practice<br>${escapeHtml(test.testName)}</h3><div class="sub">${test.modules.length} modules · ${totalQ} questions</div>`;
-      card.addEventListener("click", ()=>startTestFlow(test));
+      if(resume){
+        // in-progress card (screenshot 3) — Resume is the only action; no
+        // trash icon (deliberate deviation: students never delete attempts)
+        card.innerHTML = `<div class="icn">🖥️</div><h3>Full-Length Practice<br>${escapeHtml(test.testName)}</h3><div class="sub inprog">🕐 In Progress</div><button class="pill ghost pcard-resume">Resume</button>`;
+        card.addEventListener("click", ()=>resumeTestFlow(test, resume));
+      } else {
+        card.innerHTML = `<div class="icn">🖥️</div><h3>Full-Length Practice<br>${escapeHtml(test.testName)}</h3><div class="sub">${test.modules.length} modules · ${totalQ} questions</div>`;
+        card.addEventListener("click", ()=>startTestFlow(test));
+      }
       wrap.appendChild(card);
     });
   }
@@ -86,12 +102,47 @@
     setTimeout(()=>{ showReady(true); }, 2200);
   }
 
+  /* Phase C: rebuild the whole sitting from a saved-and-exited attempt —
+     answers/flags/eliminations from the record, highlights + notes from its
+     resume.annotations blob, then land on the saved module/question with the
+     saved time remaining. */
+  function resumeTestFlow(test, record){
+    state.currentTest = test;
+    state.moduleState = {};
+    test.modules.forEach(m=>{
+      state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} };
+    });
+    test.modules.forEach(m=>{
+      const ms = state.moduleState[m.moduleId];
+      m.questions.forEach(q=>{
+        const a = (record.answers || {})[q.id];
+        if(!a) return;
+        if(a.given !== null && a.given !== undefined) ms.answers[q.id] = a.given;
+        if(a.markedForReview) ms.flags.add(q.id);
+        if(a.eliminated && a.eliminated.length) ms.eliminated[q.id] = new Set(a.eliminated);
+      });
+    });
+    const resume = record.resume || {};
+    const ann = resume.annotations || {};
+    Object.keys(ann).forEach(mid=>{
+      const ms = state.moduleState[mid];
+      if(!ms) return;
+      if(ann[mid].passageHtml) ms.passageHtml = ann[mid].passageHtml;
+      if(ann[mid].notes) ms.notes = ann[mid].notes;
+    });
+    Attempts.resume(record, state);   // adopts the record; deletes its resume blob
+    const idx = Math.min(resume.moduleIndex || 0, test.modules.length - 1);
+    delete state.resumeRecords[test.testId];
+    showOnly("screen-loading");
+    setTimeout(()=>{ beginModule(idx, resume); }, 1200);
+  }
+
   function showReady(isFirst){
     const card = el("readyCard");
     if(isFirst){
       el("readyTitle").textContent = "Practice Test";
       card.innerHTML = `
-        <div class="ready-item"><div class="ricon">🕐</div><div><h3>Timing</h3><p>Practice tests are timed, but this is a simulator — leaving the test loses your progress, so finish each module in one sitting. The timer auto-advances you when it runs out.</p></div></div>
+        <div class="ready-item"><div class="ricon">🕐</div><div><h3>Timing</h3><p>Practice tests are timed, and the timer auto-advances you when it runs out. Need to stop early? Use <b>Save and Exit</b> in the More (⋮) menu — your place is saved and you can resume from the home screen.</p></div></div>
         <div class="ready-item"><div class="ricon">📝</div><div><h3>Scores</h3><p>When you finish the practice test, you'll see your scores and a question-by-question review right away.</p></div></div>
         <div class="ready-item"><div class="ricon">🧰</div><div><h3>Tools</h3><p>Mark questions for review, cross out answer choices, and highlight passage text — just like on test day.</p></div></div>
         <div class="ready-item"><div class="ricon">🔓</div><div><h3>No Device Lock</h3><p>We don't lock your device during practice. On test day, you'll be blocked from using other programs or apps.</p></div></div>
@@ -118,13 +169,15 @@
   function moduleNumber(mod){ const m = String(mod.moduleLabel).match(/\d+/); return m ? m[0] : "1"; }
   function sectionTitle(mod){ return `Section ${sectionNumber(mod)}, Module ${moduleNumber(mod)}: ${mod.section}`; }
 
-  function beginModule(idx){
+  function beginModule(idx, resume){
     state.moduleIndex = idx;
-    state.questionIndex = 0;
     state.view = "question";
     state.elimMode = false;
     const mod = currentModule();
-    state.timeRemainingSec = mod.timeLimitMinutes * 60;
+    state.questionIndex = resume ?
+      Math.min(resume.questionIndex || 0, mod.questions.length - 1) : 0;
+    state.timeRemainingSec = (resume && resume.timeRemainingSeconds > 0) ?
+      Math.floor(resume.timeRemainingSeconds) : mod.timeLimitMinutes * 60;
     state.timerHidden = false;
     el("timerBtn").textContent = "Hide";
     showOnly("screen-test");
@@ -510,6 +563,7 @@
       }
     } else {
       Attempts.finalize(endedBy || "submitted");
+      delete state.resumeRecords[state.currentTest.testId];   // completed ≠ resumable
       showModuleOver(true);
     }
   }
@@ -554,23 +608,83 @@
   });
 
   /* ================= SECTION TOOLS (Calculator / Reference / Highlights) ================= */
+  /* More (⋮) menu — Phase C ships Save and Exit; Phase E completes the menu.
+     Unimplemented items stay hidden rather than shipping dead entries. */
+  const MORE_MENU_HTML = `
+    <span class="more-wrap">
+      <button class="th-tool" id="moreBtn"><span class="ticon">⋮</span><span class="tlabel">More</span></button>
+      <div class="more-menu hidden" id="moreMenu">
+        <button class="more-item" id="miSaveExit">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#1E1E1E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
+          <span>Save and Exit</span>
+        </button>
+      </div>
+    </span>`;
+
+  function wireMoreMenu(){
+    el("moreBtn").addEventListener("click", ()=>{
+      const open = el("moreMenu").classList.contains("hidden");
+      el("moreMenu").classList.toggle("hidden", !open);
+      el("moreBtn").classList.toggle("on", open);
+    });
+    el("miSaveExit").addEventListener("click", saveAndExit);
+  }
+  function closeMoreMenu(){
+    const menu = document.getElementById("moreMenu");
+    if(menu) menu.classList.add("hidden");
+    const btn = document.getElementById("moreBtn");
+    if(btn) btn.classList.remove("on");
+  }
+  document.addEventListener("mousedown", e=>{
+    const menu = document.getElementById("moreMenu");
+    if(menu && !menu.classList.contains("hidden") && !e.target.closest(".more-wrap")) closeMoreMenu();
+  });
+
+  async function saveAndExit(){
+    clearInterval(state.timerInterval);           // timer pauses while exited
+    closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
+    closeMoreMenu();
+    const test = state.currentTest;
+    const annotations = {};
+    Object.keys(state.moduleState).forEach(mid=>{
+      const ms = state.moduleState[mid];
+      if(Object.keys(ms.passageHtml).length || Object.keys(ms.notes).length){
+        annotations[mid] = { passageHtml: ms.passageHtml, notes: ms.notes };
+      }
+    });
+    await Attempts.suspend({
+      moduleIndex: state.moduleIndex,
+      questionIndex: state.questionIndex,
+      timeRemainingSeconds: state.timeRemainingSec,
+      annotations
+    });
+    // re-read from storage so the home card reflects what actually persisted
+    const r = await Attempts.findInProgress(state.userName, test.testId, test.testVersion);
+    if(r) state.resumeRecords[test.testId] = r;
+    state.currentTest = null;
+    renderHome();
+    showOnly("screen-home");
+  }
+
   function updateHeaderTools(mod){
     const tools = el("thTools");
     if(mod.section === "Math"){
       tools.innerHTML = `
         <button class="th-tool" id="toolCalc"><span class="ticon">🧮</span>Calculator</button>
-        <button class="th-tool" id="toolRef"><span class="ticon" style="font-family:var(--serif);font-style:italic;">x²</span>Reference</button>
-        <button class="th-tool"><span class="ticon">⋮</span>More</button>`;
+        <button class="th-tool" id="toolRef"><span class="ticon" style="font-family:var(--serif);font-style:italic;">x²</span>Reference</button>` +
+        MORE_MENU_HTML;
       el("toolCalc").addEventListener("click", toggleCalc);
       el("toolRef").addEventListener("click", toggleRef);
+      wireMoreMenu();
     } else {
       tools.innerHTML = `
         <span class="hl-mode-wrap">
           <button class="th-tool" id="hlModeBtn" title="Toggle highlight mode"><span class="ticon">✎</span><span class="tlabel">Highlights &amp; Notes</span></button>
           <div class="hl-tip hidden" id="hlTip"><b>Highlight mode on:</b> Select text to create a highlight automatically.</div>
-        </span>
-        <button class="th-tool"><span class="ticon">⋮</span>More</button>`;
+        </span>` +
+        MORE_MENU_HTML;
       wireHlModeBtn();
+      wireMoreMenu();
     }
     el("tBody").classList.toggle("hl-mode", state.hlMode && mod.section !== "Math");
   }
