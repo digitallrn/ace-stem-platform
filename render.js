@@ -4,7 +4,7 @@ function escapeHtml(str){
     return d.innerHTML;
   }
 
-  /* ============ v1.1 rich-text renderer (SCHEMA-v1.1.md §2) ============
+  /* ============ v1.1 rich-text renderer (SCHEMA-v1.2.md §2) ============
      Tokens: {{br}} {{u}}…{{/u}} {{i}}…{{/i}} {{m}}…{{/m}} {{mm}}…{{/mm}}
              {{table}} cells | cells {{row}} … {{/table}}
      Escape-first design: prose is escapeHtml'd, math goes raw to KaTeX

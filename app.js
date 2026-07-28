@@ -1053,7 +1053,7 @@
       if(!sectionTally[mod.section]) sectionTally[mod.section] = {correct:0,total:0};
       mod.questions.forEach(q=>{
         totalQ++;
-        const noKey = !hasKey(q);                       // excluded from denominators (v1.1 §4)
+        const noKey = !hasKey(q);                       // excluded from denominators (v1.2 §4)
         if(noKey) totalNoKey++; else { totalGraded++; sectionTally[mod.section].total++; }
         const given = ms.answers.hasOwnProperty(q.id) ? ms.answers[q.id] : null;
         const isCorrect = !noKey && given !== null && answerMatches(q, given);

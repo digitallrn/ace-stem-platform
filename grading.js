@@ -23,7 +23,7 @@ function toFraction(str){
   function answerMatches(q, given){
     if(!hasKey(q)) return false;                       // "No key yet" — never graded
     if(q.type === "spr"){
-      const keys = [q.correctAnswer].concat(q.altAnswers || []);   // schema v1.1 §4
+      const keys = [q.correctAnswer].concat(q.altAnswers || []);   // schema v1.2 §4
       return keys.some(k => sprValueMatches(given, k));
     }
     return given === q.correctAnswer;

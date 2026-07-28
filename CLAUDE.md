@@ -2,7 +2,7 @@
 *Read automatically at the start of every Claude Code session in this folder.*
 
 ## Read first
-`SCHEMA-v1.1.md` — the data contract. It's authoritative over instinct,
+`SCHEMA-v1.2.md` — the data contract. It's authoritative over instinct,
 including for anything below.
 
 ## What this repo is
