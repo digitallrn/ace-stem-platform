@@ -1,4 +1,4 @@
-# Mission brief: Ace STEM Bluebook Emulator — the PLATFORM repo
+# Mission brief: Ace STEM Bluebook Simulator — the PLATFORM repo
 *Read automatically at the start of every Claude Code session in this folder.*
 
 ## Read first
@@ -6,8 +6,9 @@
 including for anything below.
 
 ## What this repo is
-The reusable Bluebook-style SAT emulator (the "platform" track — see
-`EMULATOR-HANDOFF.md` if present for the fuller history). Split into files
+The reusable Bluebook-style SAT simulator (the "platform" track — see
+`EMULATOR-HANDOFF.md` if present for the fuller history; the file keeps
+its historical name). Split into files
 for real editing/version control:
 
 ```

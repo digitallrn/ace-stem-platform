@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bluebook Emulator — Ace STEM</title>
+<title>Bluebook Simulator — Ace STEM</title>
 <!-- KaTeX (schema v1.1 math rendering). Loaded from cdnjs like Desmos; if
      offline, fmt() falls back to showing raw LaTeX instead of crashing. -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
@@ -27,9 +27,9 @@
       </div>
     </div>
     <button class="pill yellow" id="signinBtn">✦&nbsp; Sign in to practice</button>
-    <div class="signin-note">Ace STEM practice emulator — no College Board account needed. Don't have a code? Ask your tutor.</div>
+    <div class="signin-note">Ace STEM practice simulator — no College Board account needed. Don't have a code? Ask your tutor.</div>
   </div>
-  <div class="signin-footer">Ace STEM · Bluebook Emulator</div>
+  <div class="signin-footer">Ace STEM · Bluebook Simulator</div>
 </div>
 
 <!-- ============ HOME ============ -->
@@ -46,7 +46,7 @@
     </div>
     <div class="no-tests-card">
       <h3>You Have No Upcoming Tests</h3>
-      <p>Tests appear here a few weeks before test day. This emulator is for practice — scroll down to Practice and Prepare.</p>
+      <p>Tests appear here a few weeks before test day. This simulator is for practice — scroll down to Practice and Prepare.</p>
     </div>
 
     <div class="home-sectionrow">
@@ -143,14 +143,17 @@
 
     <!-- highlight popup -->
     <div class="hl-popup hidden" id="hlPopup">
-      <button class="hl-dot y" data-color="yellow" title="Yellow highlight"></button>
-      <button class="hl-dot b" data-color="blue" title="Blue highlight"></button>
-      <button class="hl-dot p" data-color="pink" title="Pink highlight"></button>
+      <!-- the droplet + dark ring mark the active swatch (screenshots 18-20):
+           the color auto-highlight mode and underline pairing will use -->
+      <button class="hl-dot y active" data-color="yellow" title="Yellow highlight"><svg class="drop" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 3.2c2.9 3.5 5.6 6.8 5.6 9.9a5.6 5.6 0 0 1-11.2 0c0-3.1 2.7-6.4 5.6-9.9z"/></svg></button>
+      <button class="hl-dot b" data-color="blue" title="Blue highlight"><svg class="drop" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 3.2c2.9 3.5 5.6 6.8 5.6 9.9a5.6 5.6 0 0 1-11.2 0c0-3.1 2.7-6.4 5.6-9.9z"/></svg></button>
+      <button class="hl-dot p" data-color="pink" title="Pink highlight"><svg class="drop" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 3.2c2.9 3.5 5.6 6.8 5.6 9.9a5.6 5.6 0 0 1-11.2 0c0-3.1 2.7-6.4 5.6-9.9z"/></svg></button>
       <!-- u-menu sits beside the button, not inside it: nested <button>s are
            invalid HTML and the parser hoists them out, breaking the menu -->
       <span class="hl-u-wrap">
         <button class="hl-tool hl-u" id="hlUBtn" title="Underline">
-          <span class="u-glyph">U</span><span class="u-caret"></span>
+          <!-- closed-state icon shows all three styles stacked (screenshot 18) -->
+          <span class="u-glyph"><svg viewBox="0 0 26 27" width="23" height="24" aria-hidden="true"><text x="13" y="12.5" text-anchor="middle" font-size="14" font-weight="700" font-family="Roboto, Arial, sans-serif" fill="#1E1E1E">U</text><line x1="4" y1="16.5" x2="22" y2="16.5" stroke="#1E1E1E" stroke-width="1.6"/><line x1="4" y1="20.5" x2="22" y2="20.5" stroke="#1E1E1E" stroke-width="1.6" stroke-dasharray="4 2.5"/><line x1="4" y1="24.5" x2="22" y2="24.5" stroke="#1E1E1E" stroke-width="1.6" stroke-dasharray="1.4 2.2"/></svg></span><span class="u-caret"></span>
         </button>
         <span class="u-menu hidden" id="uMenu">
           <button class="u-solid" data-u="solid">U</button>
@@ -222,9 +225,9 @@
   <button class="qnav-close" id="qnavClose">✕</button>
   <div class="qnav-title" id="qnavTitle">Questions</div>
   <div class="qnav-legend">
-    <span><span class="lg-pin">📍</span> Current</span>
+    <span><span class="lg-pin"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#1E1E1E" stroke-width="2" aria-hidden="true"><path d="M12 21.5S5 14.9 5 10.3a7 7 0 0 1 14 0c0 4.6-7 11.2-7 11.2z"/><circle cx="12" cy="10" r="2.6"/></svg></span> Current</span>
     <span><span class="lg-dash"></span> Unanswered</span>
-    <span><span class="lg-flag">⚑</span> For Review</span>
+    <span><span class="lg-flag"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 2.5h14V21l-7-5.1L5 21z" fill="#C23349"/></svg></span> For Review</span>
   </div>
   <div class="qnav-grid" id="qnavGrid"></div>
   <div class="qnav-gotoreview"><button class="pill ghost" id="gotoReviewBtn" style="padding:10px 24px;">Go to Review Page</button></div>

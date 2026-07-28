@@ -18,7 +18,9 @@
     hlTarget: null,              // existing .hl span being edited, or null (new selection)
     savedRange: null,
     noteSeq: 0,                  // session-unique note id counter (Phase B)
-    notesCollapsed: false        // notes rail collapse preference, survives navigation
+    notesCollapsed: false,       // notes rail collapse preference, survives navigation
+    activeHlColor: "yellow",     // last-used swatch — what mode-drag + underline pairing apply
+    hlMode: false                // Highlights & Notes toggle: drag-select highlights instantly
   };
 
   function el(id){ return document.getElementById(id); }
@@ -89,7 +91,7 @@
     if(isFirst){
       el("readyTitle").textContent = "Practice Test";
       card.innerHTML = `
-        <div class="ready-item"><div class="ricon">🕐</div><div><h3>Timing</h3><p>Practice tests are timed, but this is an emulator — leaving the test loses your progress, so finish each module in one sitting. The timer auto-advances you when it runs out.</p></div></div>
+        <div class="ready-item"><div class="ricon">🕐</div><div><h3>Timing</h3><p>Practice tests are timed, but this is a simulator — leaving the test loses your progress, so finish each module in one sitting. The timer auto-advances you when it runs out.</p></div></div>
         <div class="ready-item"><div class="ricon">📝</div><div><h3>Scores</h3><p>When you finish the practice test, you'll see your scores and a question-by-question review right away.</p></div></div>
         <div class="ready-item"><div class="ricon">🧰</div><div><h3>Tools</h3><p>Mark questions for review, cross out answer choices, and highlight passage text — just like on test day.</p></div></div>
         <div class="ready-item"><div class="ricon">🔓</div><div><h3>No Device Lock</h3><p>We don't lock your device during practice. On test day, you'll be blocked from using other programs or apps.</p></div></div>
@@ -303,7 +305,7 @@
     return `
       <div class="q-head">
         <div class="q-num">${state.questionIndex+1}</div>
-        <button class="q-flag ${flagged?"on":""}" id="flagBtn"><span class="bkm">${flagged?"🔖":"⚐"}</span> Mark for Review</button>
+        <button class="q-flag ${flagged?"on":""}" id="flagBtn"><span class="bkm"><svg viewBox="0 0 24 24" width="15" height="17" aria-hidden="true"><path d="M5.5 3h13v18l-6.5-4.8L5.5 21z" stroke-width="2" stroke-linejoin="round"/></svg></span> Mark for Review</button>
         ${isSpr ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
       </div>
       ${figHtml}
@@ -421,6 +423,9 @@
     renderTest();
   });
 
+  const QNAV_PIN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#1E1E1E" stroke-width="2" aria-hidden="true"><path d="M12 21.5S5 14.9 5 10.3a7 7 0 0 1 14 0c0 4.6-7 11.2-7 11.2z"/><circle cx="12" cy="10" r="2.6"/></svg>';
+  const QNAV_FLAG = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M5 2.5h14V21l-7-5.1L5 21z" fill="#C23349"/></svg>';
+
   function buildQnavGrid(container, jumpFn){
     const mod = currentModule();
     const ms = currentModState();
@@ -431,10 +436,11 @@
       cell.className = "qcell" + (answered ? " answered" : "");
       cell.textContent = idx+1;
       if(state.view === "question" && idx === state.questionIndex){
-        cell.insertAdjacentHTML("beforeend", '<span class="cellpin">📍</span>');
+        cell.classList.add("current");
+        cell.insertAdjacentHTML("beforeend", '<span class="cellpin">' + QNAV_PIN + '</span>');
       }
       if(ms.flags.has(q.id)){
-        cell.insertAdjacentHTML("beforeend", '<span class="cellflag">⚑</span>');
+        cell.insertAdjacentHTML("beforeend", '<span class="cellflag">' + QNAV_FLAG + '</span>');
       }
       cell.addEventListener("click", ()=>jumpFn(idx));
       container.appendChild(cell);
@@ -450,8 +456,12 @@
       renderTest();
     });
     show("qnavOverlay"); show("qnavPopup");
+    el("qnavBtn").classList.add("open");     // footer chevron flips while open (15 vs 16)
   }
-  function closeQnav(){ hide("qnavOverlay"); hide("qnavPopup"); }
+  function closeQnav(){
+    hide("qnavOverlay"); hide("qnavPopup");
+    el("qnavBtn").classList.remove("open");
+  }
 
   /* ================= CHECK YOUR WORK (review view) ================= */
   function renderReviewView(){
@@ -469,7 +479,7 @@
           <div class="qnav-title">${escapeHtml(sectionTitle(mod))} Questions</div>
           <div class="qnav-legend">
             <span><span class="lg-dash"></span> Unanswered</span>
-            <span><span class="lg-flag">⚑</span> For Review</span>
+            <span><span class="lg-flag">${QNAV_FLAG}</span> For Review</span>
           </div>
           <div class="qnav-grid" id="reviewGrid"></div>
         </div>
@@ -555,9 +565,39 @@
       el("toolRef").addEventListener("click", toggleRef);
     } else {
       tools.innerHTML = `
-        <button class="th-tool" title="Select passage text to highlight"><span class="ticon">✎</span>Highlights &amp; Notes</button>
+        <span class="hl-mode-wrap">
+          <button class="th-tool" id="hlModeBtn" title="Toggle highlight mode"><span class="ticon">✎</span><span class="tlabel">Highlights &amp; Notes</span></button>
+          <div class="hl-tip hidden" id="hlTip"><b>Highlight mode on:</b> Select text to create a highlight automatically.</div>
+        </span>
         <button class="th-tool"><span class="ticon">⋮</span>More</button>`;
+      wireHlModeBtn();
     }
+    el("tBody").classList.toggle("hl-mode", state.hlMode && mod.section !== "Math");
+  }
+
+  /* Highlights & Notes as a real mode toggle (screenshots 16-18): when on,
+     drag-selecting passage text highlights it instantly in the active color */
+  let hlTipTimer = null;
+  function wireHlModeBtn(){
+    const btn = el("hlModeBtn"), tip = el("hlTip");
+    btn.classList.toggle("on", state.hlMode);
+    const showTip = (autoHide)=>{
+      tip.classList.remove("hidden");
+      if(hlTipTimer) clearTimeout(hlTipTimer);
+      if(autoHide) hlTipTimer = setTimeout(()=> tip.classList.add("hidden"), 5000);
+    };
+    btn.addEventListener("click", ()=>{
+      state.hlMode = !state.hlMode;
+      btn.classList.toggle("on", state.hlMode);
+      el("tBody").classList.toggle("hl-mode", state.hlMode);
+      if(state.hlMode) showTip(true);
+      else tip.classList.add("hidden");
+    });
+    btn.addEventListener("mouseenter", ()=>{ if(state.hlMode) showTip(false); });
+    btn.addEventListener("mouseleave", ()=>{
+      if(hlTipTimer) clearTimeout(hlTipTimer);
+      tip.classList.add("hidden");
+    });
   }
 
   function makeDraggable(panel, handle){
@@ -752,12 +792,26 @@
 
   function handleSelection(){
     if(el("screen-test").classList.contains("hidden")) return;
+    if(currentModule().section === "Math") return;   // annotation is R&W-only: no toolbar in Math
     const sel = window.getSelection();
     const pt = document.getElementById("passageText");
     if(!pt) { hideHlPopup(); return; }
     if(sel.isCollapsed || sel.rangeCount === 0){ return; }
     const range = sel.getRangeAt(0);
     if(!pt.contains(range.commonAncestorContainer)){ hideHlPopup(); return; }
+    if(state.hlMode){
+      // highlight mode: releasing the drag highlights instantly, no popup (19-20)
+      hideHlPopup();
+      const span = document.createElement("span");
+      span.className = "hl c-" + state.activeHlColor;
+      try{
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+      }catch(err){ return; }
+      sel.removeAllRanges();
+      savePassage();
+      return;
+    }
     state.savedRange = range.cloneRange();
     state.hlTarget = null;
     positionHlPopup(range.getBoundingClientRect());
@@ -787,6 +841,7 @@
     const isRW = currentModule().section === "Reading and Writing";
     el("hlNote").classList.toggle("hidden", !isRW);
     el("hlNoteSep").classList.toggle("hidden", !isRW);
+    updateActiveDot();
     const top = Math.max(6, rect.top - bodyRect.top - 64);
     let left = rect.left - bodyRect.left;
     left = Math.max(8, Math.min(left, bodyRect.width - hlPopup.offsetWidth - 8));
@@ -829,12 +884,19 @@
     currentModState().passageHtml[q.id] = pt.innerHTML;
   }
 
+  function updateActiveDot(){
+    hlPopup.querySelectorAll(".hl-dot").forEach(d =>
+      d.classList.toggle("active", d.dataset.color === state.activeHlColor));
+  }
+
   hlPopup.querySelectorAll(".hl-dot").forEach(dot=>{
     dot.addEventListener("click", ()=>{
       const span = getOrCreateTargetSpan();
       if(!span) return hideHlPopup();
       span.classList.remove("c-yellow","c-blue","c-pink","c-none");
       span.classList.add("c-" + dot.dataset.color);
+      state.activeHlColor = dot.dataset.color;   // becomes the last-used swatch
+      updateActiveDot();
       state.hlTarget = span; state.savedRange = null;
       savePassage();
     });
@@ -850,7 +912,15 @@
       const span = getOrCreateTargetSpan();
       if(!span) return hideHlPopup();
       span.classList.remove("u-solid","u-dashed","u-dotted");
-      if(btn.dataset.u !== "none") span.classList.add("u-" + btn.dataset.u);
+      if(btn.dataset.u !== "none"){
+        span.classList.add("u-" + btn.dataset.u);
+        // an underline is never bare — pair it with the active swatch color
+        // (RW questions use underlining as content; screenshot 16)
+        if(!/\bc-(yellow|blue|pink)\b/.test(span.className)){
+          span.classList.remove("c-none");
+          span.classList.add("c-" + state.activeHlColor);
+        }
+      }
       state.hlTarget = span; state.savedRange = null;
       setUMenu(false);
       savePassage();

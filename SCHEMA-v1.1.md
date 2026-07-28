@@ -1,4 +1,4 @@
-# Ace STEM Bluebook Emulator — Data Schema v1.1
+# Ace STEM Bluebook Simulator — Data Schema v1.1
 *The single source of truth for what the extraction pipeline emits, what the
 converter validates, and what the app renders. Both `sat_bluebook_extract.py`
 and `index.html` must conform to this document. Supersedes the schema section
@@ -6,7 +6,7 @@ of EMULATOR-HANDOFF.md where they differ.*
 
 **Headline decision (v1.1):** math is stored as **LaTeX** and rendered with
 **KaTeX** in the app. Chosen for Bluebook fidelity (stacked fractions, proper
-radicals, segment overbars) — the emulator's whole purpose is authenticity.
+radicals, segment overbars) — the simulator's whole purpose is authenticity.
 
 ---
 

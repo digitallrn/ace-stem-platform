@@ -182,7 +182,7 @@ deleted.
 
 **(c) Real backend — the actual fix, when it's worth the effort.**
 `davidsatprep.com` already exists on Netlify with GitHub deploy. Hosting the
-emulator there instead of as a claude.ai artifact, with something like
+simulator there instead of as a claude.ai artifact, with something like
 Supabase behind it, gets real auth on the tutor dashboard and row-level
 security on the data — students write anonymously, only an authenticated
 tutor reads. This is the version that's actually private rather than
