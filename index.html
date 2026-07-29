@@ -40,18 +40,14 @@
   </div>
   <div class="welcome-band"><h1 id="welcomeMsg">Welcome. Good luck on test day!</h1></div>
   <div class="home-main">
-    <div class="home-sectionrow">
-      <h2>Your Tests</h2>
-      <div class="seg"><span class="on">✓ Active</span><span>Past</span></div>
-    </div>
-    <div class="no-tests-card">
-      <h3>You Have No Upcoming Tests</h3>
-      <p>Tests appear here a few weeks before test day. This simulator is for practice — scroll down to Practice and Prepare.</p>
-    </div>
-
+    <!-- BLUEBOOK-PARITY Phase D: no "Your Tests" section — that's real
+         administrations (screenshot 1), not applicable here -->
     <div class="home-sectionrow">
       <h2>Practice and Prepare</h2>
-      <div class="seg"><span class="on">✓ Active</span><span>Past</span></div>
+      <div class="seg" id="practiceSeg">
+        <button class="seg-btn on" data-seg="active">Active</button>
+        <button class="seg-btn" data-seg="past">Past</button>
+      </div>
     </div>
     <div class="practice-cards" id="practiceCards"></div>
 
@@ -234,6 +230,23 @@
 </div>
 
 <!-- ============ RESULTS ============ -->
+<!-- submitted confirmation (Phase D, score-visibility (b)): students see a
+     confirmation only; results appear in Past after the tutor releases them -->
+<div id="screen-submitted" class="hidden">
+  <div class="submitted-card">
+    <div class="sub-check">✓</div>
+    <h1>Your answers have been submitted!</h1>
+    <p>Nice work. Your tutor will review this attempt and release your scores —
+       once released, they'll appear under <b>Past</b> on your home screen as
+       <b>View My Responses</b>.</p>
+    <p class="res-save-note" id="subSaveNote"></p>
+    <div class="submitted-actions">
+      <button class="pill ghost hidden" id="subDownloadBtn">Download Results JSON</button>
+      <button class="pill" id="subHomeBtn">Return to Home</button>
+    </div>
+  </div>
+</div>
+
 <div id="screen-results" class="hidden">
   <h1 id="resTitle">Results</h1>
   <p class="sub" id="resSub"></p>

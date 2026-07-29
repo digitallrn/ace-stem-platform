@@ -246,6 +246,7 @@ window.Attempts = (function(){
           lastSavedAt: iso(now),
           submittedAt: null,
           status: "in-progress",
+          released: false,        // Phase D score-visibility (b): tutor flips this from the dashboard
           modules: [],
           answers: {},
           score: null,
@@ -355,6 +356,34 @@ window.Attempts = (function(){
         dirty = true;
         startTicker();
       }catch(e){}
+    },
+
+    /* ---- Phase D: home-screen data ---- */
+    /* assign:<code> -> [testIds]; null (absent/unreadable) = all published */
+    async assignedTests(code){
+      try{
+        const key = String(code || "").trim().toUpperCase();
+        const v = await AttemptStore.get("assign:" + key);
+        return Array.isArray(v) ? v : null;
+      }catch(e){ return null; }
+    },
+
+    /* completed/timed-out attempts for this code, newest first */
+    async pastAttempts(code){
+      try{
+        const key = String(code || "").trim().toUpperCase();
+        const keys = await AttemptStore.list("attempt:");
+        if(!keys) return [];
+        const out = [];
+        for(const k of keys){
+          const r = await AttemptStore.get(k);
+          if(!r || !r.student || String(r.student.key || "") !== key) continue;
+          if(r.status !== "completed" && r.status !== "timed-out") continue;
+          out.push(r);
+        }
+        out.sort((a,b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+        return out;
+      }catch(e){ return []; }
     },
 
     /* most recent in-progress, resumable attempt for this code + test build */

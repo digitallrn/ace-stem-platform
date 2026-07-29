@@ -181,10 +181,34 @@ window.Dashboard = (function(){
     attachBodyHandlers();
   }
 
+  /* Phase D score-visibility (b): per-attempt release toggle. Students see
+     scores in their Past view only after this flips released:true. */
+  function releaseCell(r){
+    if(r.status === "in-progress") return "—";
+    return `<button class="dash-rel ${r.released ? "rel-on" : ""}" data-rel="${esc(r.attemptId)}"
+      title="${r.released ? "Hide scores from the student again" : "Let the student see this attempt in their Past view"}">${
+      r.released ? "Released ✓" : "Release"}</button>`;
+  }
+  async function toggleRelease(attemptId){
+    const r = recs.find(x => x.attemptId === attemptId);
+    if(!r) return;
+    if(source !== "storage"){
+      $("dashStatus").textContent = "Release only works on storage-loaded attempts — archive files are read-only.";
+      return;
+    }
+    r.released = !r.released;
+    const ok = await AttemptStore.set(r.attemptId, r);
+    if(!ok){
+      r.released = !r.released;                 // roll back — nothing persisted
+      $("dashStatus").textContent = "Release toggle didn't save — storage unavailable.";
+    }
+    render();
+  }
+
   function viewAttempts(rows){
     const cols = [
       ["student", "Student"], ["testName", "Test"], ["startedAt", "Date"],
-      ["score", "Score"], ["status", "Status"], ["conditions", "Conditions"]
+      ["score", "Score"], ["status", "Status"], ["released", "Scores"], ["conditions", "Conditions"]
     ];
     const sorted = rows.slice().sort((a,b) => {
       const va = sortVal(a, sortKey), vb = sortVal(b, sortKey);
@@ -201,6 +225,7 @@ window.Dashboard = (function(){
           <td>${fmtDate(r.startedAt)}</td>
           <td><b>${scoreStr(r)}</b></td>
           <td>${statusBadge(r)}</td>
+          <td>${releaseCell(r)}</td>
           <td>${esc(r.conditions || "unknown")}</td>
         </tr>`).join("") +
       `</tbody></table><p class="dash-hint">Click a row for the full question-by-question review.</p>`;
@@ -209,6 +234,7 @@ window.Dashboard = (function(){
     if(k === "student") return (r.student && r.student.key) || "";
     if(k === "score") return scorePct(r);
     if(k === "status") return r.status || "";
+    if(k === "released") return r.released ? 1 : 0;
     if(k === "conditions") return r.conditions || "";
     if(k === "testName") return r.testName || "";
     return r.startedAt || "";
@@ -415,6 +441,11 @@ window.Dashboard = (function(){
   function attachBodyHandlers(){
     document.querySelectorAll("#dashBody [data-att]").forEach(tr =>
       tr.addEventListener("click", () => openDetail(tr.dataset.att)));
+    document.querySelectorAll("#dashBody .dash-rel").forEach(btn =>
+      btn.addEventListener("click", e => {
+        e.stopPropagation();                    // don't open the row's detail view
+        toggleRelease(btn.dataset.rel);
+      }));
     document.querySelectorAll("#dashBody th[data-sort]").forEach(th =>
       th.addEventListener("click", () => {
         const k = th.dataset.sort;

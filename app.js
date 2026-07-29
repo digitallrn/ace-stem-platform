@@ -21,13 +21,16 @@
     notesCollapsed: false,       // notes rail collapse preference, survives navigation
     activeHlColor: "yellow",     // last-used swatch — what mode-drag + underline pairing apply
     hlMode: false,               // Highlights & Notes toggle: drag-select highlights instantly
-    resumeRecords: {}            // testId -> in-progress attempt record (Phase C)
+    resumeRecords: {},           // testId -> in-progress attempt record (Phase C)
+    assignedIds: null,           // assign:<code> -> [testIds]; null = all published (Phase D)
+    pastAttempts: [],            // completed/timed-out records for this code (Phase D)
+    practiceTab: "active"        // home Practice toggle: "active" | "past"
   };
 
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-results","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-dashboard"];
   function showOnly(id){ SCREENS.forEach(s => s===id ? show(s) : hide(s)); }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
 
@@ -60,34 +63,99 @@
       const r = await Attempts.findInProgress(v, t.testId, t.testVersion);
       if(r) state.resumeRecords[t.testId] = r;
     }
+    // Phase D: assignment map (absent -> all published tests) + Past attempts
+    state.assignedIds = await Attempts.assignedTests(v);
+    state.pastAttempts = await Attempts.pastAttempts(v);
+    state.practiceTab = "active";
     renderHome();
     showOnly("screen-home");
   }
 
+  function visibleTests(){
+    if(!state.assignedIds) return state.tests;          // default when absent: all
+    return state.tests.filter(t => state.assignedIds.indexOf(t.testId) !== -1);
+  }
+
+  /* Phase D home: Practice section with an Active | Past toggle
+     (screenshots 2-3). Active = assigned tests (Start / Resume);
+     Past = one card per completed attempt, View My Responses gated on the
+     tutor's release flag (score-visibility decision (b)). */
   function renderHome(){
+    document.querySelectorAll("#practiceSeg .seg-btn").forEach(b =>
+      b.classList.toggle("on", b.dataset.seg === state.practiceTab));
     const wrap = el("practiceCards");
     wrap.innerHTML = "";
-    if(!state.tests.length){
-      wrap.innerHTML = '<div class="no-tests-card"><h3>No practice tests loaded</h3><p>Add tests to test-data.js following the schema documented at the top of that file.</p></div>';
+    if(state.practiceTab === "past") renderPastCards(wrap);
+    else renderActiveCards(wrap);
+  }
+
+  function renderActiveCards(wrap){
+    const tests = visibleTests();
+    if(!tests.length){
+      wrap.innerHTML = '<div class="no-tests-card"><h3>No Practice Tests</h3><p>' +
+        (state.tests.length ? 'No tests are assigned to this code yet — ask your tutor.'
+          : 'Add tests to test-data.js following the schema documented at the top of that file.') + '</p></div>';
       return;
     }
-    state.tests.forEach(test => {
+    tests.forEach(test => {
       const totalQ = test.modules.reduce((s,m)=>s+m.questions.length,0);
-      const card = document.createElement("div");
       const resume = state.resumeRecords[test.testId];
-      card.className = "pcard";
-      if(resume){
-        // in-progress card (screenshot 3) — Resume is the only action; no
-        // trash icon (deliberate deviation: students never delete attempts)
-        card.innerHTML = `<div class="icn">🖥️</div><h3>Full-Length Practice<br>${escapeHtml(test.testName)}</h3><div class="sub inprog">🕐 In Progress</div><button class="pill ghost pcard-resume">Resume</button>`;
-        card.addEventListener("click", ()=>resumeTestFlow(test, resume));
-      } else {
-        card.innerHTML = `<div class="icn">🖥️</div><h3>Full-Length Practice<br>${escapeHtml(test.testName)}</h3><div class="sub">${test.modules.length} modules · ${totalQ} questions</div>`;
-        card.addEventListener("click", ()=>startTestFlow(test));
-      }
+      const card = document.createElement("div");
+      card.className = "pcard clickable";
+      card.innerHTML = `
+        <div class="pcard-head">Full-Length Practice — ${escapeHtml(test.testName)}</div>
+        <div class="pcard-body">
+          <div class="pcard-status">${resume
+            ? '<span class="pc-ico">🕐</span> In Progress'
+            : `${test.modules.length} modules · ${totalQ} questions`}</div>
+          <div class="pcard-action"><button class="pill ghost">${resume ? "Resume" : "Start"}</button></div>
+        </div>`;
+      card.addEventListener("click", ()=> resume ? resumeTestFlow(test, resume) : startTestFlow(test));
       wrap.appendChild(card);
     });
   }
+
+  function fmtCardDate(isoStr){
+    if(!isoStr) return "";
+    const d = new Date(isoStr);
+    return d.toLocaleDateString(undefined, {month:"short", day:"numeric", year:"numeric"});
+  }
+
+  function renderPastCards(wrap){
+    if(!state.pastAttempts.length){
+      wrap.innerHTML = '<div class="no-tests-card"><h3>No Past Practice</h3><p>Completed practice tests will appear here.</p></div>';
+      return;
+    }
+    state.pastAttempts.forEach(record => {
+      const released = record.released === true;
+      const test = state.tests.find(t => t.testId === record.testId);
+      // reviewing against a different test build would mislabel questions
+      // (ATTEMPTS-SPEC §9) — the tutor dashboard remains the archive view
+      const canView = released && test &&
+        (test.testVersion || "unversioned") === record.testVersion;
+      const card = document.createElement("div");
+      card.className = "pcard";
+      card.innerHTML = `
+        <div class="pcard-head">${escapeHtml(record.testName || record.testId)}</div>
+        <div class="pcard-body">
+          <div class="pcard-status"><span class="pc-ico">✓</span> Completed
+            <span class="pc-date">${fmtCardDate(record.startedAt)}</span></div>
+          <div class="pcard-action">${canView
+            ? '<button class="pcard-link">View My Responses</button>'
+            : released
+              ? '<span class="pc-pending">Test content was updated — ask your tutor for the review</span>'
+              : '<span class="pc-pending">Scores not released yet</span>'}</div>
+        </div>`;
+      if(canView) card.querySelector(".pcard-link").addEventListener("click", ()=> viewResponses(test, record));
+      wrap.appendChild(card);
+    });
+  }
+
+  document.querySelectorAll("#practiceSeg .seg-btn").forEach(b =>
+    b.addEventListener("click", ()=>{
+      state.practiceTab = b.dataset.seg;
+      renderHome();
+    }));
 
   /* ================= FLOW: LOADING → READY → TEST ================= */
   function startTestFlow(test){
@@ -102,18 +170,15 @@
     setTimeout(()=>{ showReady(true); }, 2200);
   }
 
-  /* Phase C: rebuild the whole sitting from a saved-and-exited attempt —
-     answers/flags/eliminations from the record, highlights + notes from its
-     resume.annotations blob, then land on the saved module/question with the
-     saved time remaining. */
-  function resumeTestFlow(test, record){
-    state.currentTest = test;
-    state.moduleState = {};
+  /* rebuild a moduleState shape from a stored attempt record — used by both
+     resume (Phase C) and View My Responses (Phase D) */
+  function buildModuleStateFromRecord(test, record){
+    const mstate = {};
     test.modules.forEach(m=>{
-      state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} };
+      mstate[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} };
     });
     test.modules.forEach(m=>{
-      const ms = state.moduleState[m.moduleId];
+      const ms = mstate[m.moduleId];
       m.questions.forEach(q=>{
         const a = (record.answers || {})[q.id];
         if(!a) return;
@@ -122,6 +187,16 @@
         if(a.eliminated && a.eliminated.length) ms.eliminated[q.id] = new Set(a.eliminated);
       });
     });
+    return mstate;
+  }
+
+  /* Phase C: rebuild the whole sitting from a saved-and-exited attempt —
+     answers/flags/eliminations from the record, highlights + notes from its
+     resume.annotations blob, then land on the saved module/question with the
+     saved time remaining. */
+  function resumeTestFlow(test, record){
+    state.currentTest = test;
+    state.moduleState = buildModuleStateFromRecord(test, record);
     const resume = record.resume || {};
     const ann = resume.annotations || {};
     Object.keys(ann).forEach(mid=>{
@@ -143,7 +218,7 @@
       el("readyTitle").textContent = "Practice Test";
       card.innerHTML = `
         <div class="ready-item"><div class="ricon">🕐</div><div><h3>Timing</h3><p>Practice tests are timed, and the timer auto-advances you when it runs out. Need to stop early? Use <b>Save and Exit</b> in the More (⋮) menu — your place is saved and you can resume from the home screen.</p></div></div>
-        <div class="ready-item"><div class="ricon">📝</div><div><h3>Scores</h3><p>When you finish the practice test, you'll see your scores and a question-by-question review right away.</p></div></div>
+        <div class="ready-item"><div class="ricon">📝</div><div><h3>Scores</h3><p>When you finish, your answers go to your tutor. Once they release your scores, the full question-by-question review appears under <b>Past</b> on your home screen.</p></div></div>
         <div class="ready-item"><div class="ricon">🧰</div><div><h3>Tools</h3><p>Mark questions for review, cross out answer choices, and highlight passage text — just like on test day.</p></div></div>
         <div class="ready-item"><div class="ricon">🔓</div><div><h3>No Device Lock</h3><p>We don't lock your device during practice. On test day, you'll be blocked from using other programs or apps.</p></div></div>
       `;
@@ -571,10 +646,30 @@
   function showModuleOver(isFinal){
     showOnly("screen-moduleover");
     setTimeout(()=>{
-      if(isFinal) renderResults();
+      if(isFinal) showSubmitted();     // score-visibility (b): confirmation only
       else beginModule(state.moduleIndex);
     }, 2600);
   }
+
+  /* Phase D, score-visibility (b): submit -> confirmation only. Results
+     surface in Past -> View My Responses once the tutor flips the released
+     flag from the dashboard. */
+  function showSubmitted(){
+    const working = Attempts.storageWorking();
+    el("subSaveNote").textContent = working
+      ? "Your attempt was recorded automatically."
+      : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
+    el("subDownloadBtn").classList.toggle("hidden", working);   // spec §6 fallback
+    showOnly("screen-submitted");
+  }
+  el("subDownloadBtn").addEventListener("click", ()=> Attempts.downloadJson());
+  el("subHomeBtn").addEventListener("click", async ()=>{
+    state.pastAttempts = await Attempts.pastAttempts(state.userName);
+    state.practiceTab = "past";      // land them where the new attempt now shows
+    state.currentTest = null;
+    renderHome();
+    showOnly("screen-home");
+  });
 
   function showBreak(){
     el("brkName").textContent = state.userName;
@@ -1156,14 +1251,26 @@
   })();
 
   /* ================= GRADING / RESULTS ================= */
-  function renderResults(){
-    const test = state.currentTest;
+  /* Phase D: the student-facing entry point — read-only review of a stored,
+     released attempt (reuses the results renderer below). */
+  function viewResponses(test, record){
+    renderResults({ test, moduleState: buildModuleStateFromRecord(test, record), review: true });
+  }
+
+  /* No opts (live mode, post-submit results) is currently unreachable —
+     score-visibility (b) routes submits to the confirmation screen — but the
+     branch is kept intact so flipping back to instant results stays a
+     one-line change in showModuleOver. */
+  function renderResults(opts){
+    const review = !!(opts && opts.review);
+    const test = review ? opts.test : state.currentTest;
+    const modStates = review ? opts.moduleState : state.moduleState;
     let totalQ = 0, totalGraded = 0, totalCorrect = 0, totalNoKey = 0;
     const sectionTally = {};
     const allReviewItems = [];
 
     test.modules.forEach(mod=>{
-      const ms = state.moduleState[mod.moduleId];
+      const ms = modStates[mod.moduleId];
       if(!sectionTally[mod.section]) sectionTally[mod.section] = {correct:0,total:0};
       mod.questions.forEach(q=>{
         totalQ++;
@@ -1176,7 +1283,7 @@
       });
     });
 
-    el("resTitle").textContent = "Results — " + test.testName;
+    el("resTitle").textContent = (review ? "Your Responses — " : "Results — ") + test.testName;
     el("resSub").textContent = `${state.userName}, you answered ${totalCorrect} of ${totalGraded} questions correctly.` +
       (totalNoKey ? ` (${totalNoKey} question${totalNoKey===1?"":"s"} not yet graded — no answer key.)` : "");
 
@@ -1187,7 +1294,7 @@
       `).join("")}`;
 
     el("breakdownList").innerHTML = test.modules.map(mod=>{
-      const ms = state.moduleState[mod.moduleId];
+      const ms = modStates[mod.moduleId];
       let correct = 0, graded = 0;
       mod.questions.forEach(q=>{
         if(!hasKey(q)) return;
@@ -1239,11 +1346,15 @@
 
     el("resRestartBtn").onclick = ()=>{ renderHome(); showOnly("screen-home"); };
     el("resDownloadBtn").onclick = ()=> Attempts.downloadJson();
-    /* spec §6: the JSON download is the fallback archive when shared storage
-       is absent (local copy) or the final write failed. */
-    el("resSaveNote").textContent = Attempts.storageWorking()
-      ? "Your attempt was recorded automatically."
-      : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
+    el("resDownloadBtn").classList.toggle("hidden", review);
+    el("resSaveNote").classList.toggle("hidden", review);
+    if(!review){
+      /* spec §6: the JSON download is the fallback archive when shared storage
+         is absent (local copy) or the final write failed. */
+      el("resSaveNote").textContent = Attempts.storageWorking()
+        ? "Your attempt was recorded automatically."
+        : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
+    }
     showOnly("screen-results");
   }
 

@@ -76,26 +76,48 @@
   .home-main{ max-width:1100px; margin:0 auto; padding:36px 42px 80px; }
   .home-sectionrow{ display:flex; align-items:center; gap:20px; margin:34px 0 20px; flex-wrap:wrap; }
   .home-sectionrow h2{ margin:0; font-size:28px; }
+  /* Active | Past pill toggle (Phase D, screenshot 2): selected segment gets
+     a check + dark ring inside a light bordered pill */
   .seg{
-    display:flex; border:1.5px solid #9AA0AE; border-radius:22px; overflow:hidden; font-size:14px; font-weight:700;
+    display:flex; border:1.5px solid #B9BDC7; border-radius:22px; font-size:14.5px; font-weight:700;
+    background:#fff; padding:0;
   }
-  .seg span{ padding:8px 18px; }
-  .seg .on{ background:var(--cb-navy); color:#fff; }
+  .seg-btn{
+    background:none; border:2px solid transparent; border-radius:20px; padding:8px 20px;
+    font-size:14.5px; font-weight:700; color:var(--ink); margin:-1px;
+  }
+  .seg-btn.on{ border-color:var(--ink); background:#fff; }
+  .seg-btn.on::before{ content:"✓ "; }
   .no-tests-card{
     border:1px solid var(--line); border-radius:12px; max-width:560px; padding:28px 34px; text-align:center;
     box-shadow:0 2px 8px rgba(0,0,0,.06);
   }
   .no-tests-card h3{ margin:0 0 10px; font-size:20px; }
   .no-tests-card p{ margin:0; font-size:15px; line-height:1.6; }
-  .practice-cards{ display:flex; gap:22px; flex-wrap:wrap; }
+  .practice-cards{ display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start; }
+  /* practice cards (Phase D, screenshots 2-3): grey header band with the test
+     name, white body with status row + primary action; no trash (deliberate
+     deviation — students never delete attempts) */
   .pcard{
-    border:1px solid var(--line); border-radius:12px; width:250px; padding:30px 20px 26px; text-align:center;
-    box-shadow:0 2px 8px rgba(0,0,0,.06); transition:box-shadow .15s, transform .15s;
+    border:1px solid var(--line); border-radius:14px; width:290px; padding:0; text-align:left;
+    box-shadow:0 2px 8px rgba(0,0,0,.06); transition:box-shadow .15s, transform .15s; overflow:hidden;
   }
-  .pcard:hover{ box-shadow:0 6px 18px rgba(50,77,199,.18); transform:translateY(-2px); cursor:pointer; }
-  .pcard .icn{ font-size:40px; margin-bottom:16px; }
-  .pcard h3{ margin:0; font-size:19px; line-height:1.35; }
-  .pcard .sub{ font-size:12.5px; color:var(--ink-soft); margin-top:8px; }
+  .pcard.clickable:hover{ box-shadow:0 6px 18px rgba(50,77,199,.18); transform:translateY(-2px); cursor:pointer; }
+  .pcard-head{
+    background:#EFF1F4; padding:18px 20px; font-size:19px; font-weight:700; line-height:1.3;
+    min-height:62px; display:flex; align-items:center;
+  }
+  .pcard-body{ padding:16px 20px 18px; }
+  .pcard-status{ display:flex; align-items:center; gap:8px; font-size:15px; font-weight:600; }
+  .pcard-status .pc-ico{ color:#5F5E5A; }
+  .pcard-status .pc-date{ font-weight:400; color:var(--ink-soft); margin-left:auto; font-size:13px; }
+  .pcard-action{ display:flex; justify-content:flex-end; margin-top:16px; }
+  .pcard-action .pill{ padding:9px 26px; }
+  .pcard-link{
+    background:none; border:none; font-size:14.5px; font-weight:700; color:var(--ink);
+    text-decoration:underline; text-underline-offset:2px; padding:4px 2px;
+  }
+  .pc-pending{ font-size:13.5px; color:var(--ink-soft); font-style:italic; }
   .bigfuture{
     display:flex; border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-top:16px;
     box-shadow:0 2px 8px rgba(0,0,0,.06); max-width:900px;
@@ -194,9 +216,20 @@
   }
   .more-item:hover{ background:#F1F3FA; }
 
-  /* In-progress practice card (Phase C, screenshot 3) */
-  .pcard .sub.inprog{ font-weight:700; }
-  .pcard .pcard-resume{ margin-top:14px; padding:9px 28px; }
+  /* Submitted confirmation (Phase D, score-visibility (b); language from
+     screenshot 1's "Your answers have been submitted!") */
+  #screen-submitted{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px 20px; }
+  .submitted-card{
+    max-width:560px; text-align:center; border:1px solid var(--line); border-radius:16px;
+    padding:48px 44px 40px; box-shadow:0 4px 20px rgba(0,0,0,.08);
+  }
+  .sub-check{
+    width:64px; height:64px; border-radius:50%; background:#0B7A3E; color:#fff; font-size:34px;
+    display:flex; align-items:center; justify-content:center; margin:0 auto 22px;
+  }
+  .submitted-card h1{ font-size:26px; margin:0 0 14px; color:#0B7A3E; }
+  .submitted-card p{ font-size:15.5px; line-height:1.65; margin:0 0 12px; }
+  .submitted-actions{ display:flex; gap:14px; justify-content:center; margin-top:26px; flex-wrap:wrap; }
 
   /* Highlight-mode cursor (screenshot 18): I-beam + marker, hotspot at the
      marker tip */
@@ -697,6 +730,12 @@
   .dstatus.ok{ background:#E3F3E8; color:#1E7A43; }
   .dstatus.warn{ background:#FFF3D6; color:#8A6D00; }
   .dstatus.to{ background:#FBE9EB; color:var(--cb-red); }
+  /* score release toggle (Phase D, score-visibility (b)) */
+  .dash-rel{
+    font-size:12px; font-weight:700; padding:4px 12px; border-radius:16px;
+    border:1.5px solid var(--cb-blue); background:#fff; color:var(--cb-blue);
+  }
+  .dash-rel.rel-on{ background:#E3F3E8; border-color:#1E7A43; color:#1E7A43; }
 
   .dcard{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px 22px; margin-bottom:16px; }
   .dcard.lead{ border-color:var(--cb-red); border-width:2px; }
