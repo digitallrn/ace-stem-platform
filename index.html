@@ -137,6 +137,16 @@
       <div class="dir-panel" id="dirPanel"></div>
     </div>
 
+    <!-- Line Reader (Phase E): draggable focus band — everything but a
+         horizontal strip is dimmed; Esc or re-click in the menu dismisses -->
+    <div class="line-reader hidden" id="lineReader">
+      <div class="lr-dim" id="lrTop"></div>
+      <div class="lr-band" id="lrBand" title="Drag to move the reading band">
+        <span class="lr-grip">⠿</span>
+      </div>
+      <div class="lr-dim"></div>
+    </div>
+
     <!-- highlight popup -->
     <div class="hl-popup hidden" id="hlPopup">
       <!-- the droplet + dark ring mark the active swatch (screenshots 18-20):

@@ -625,6 +625,7 @@
   function submitModule(endedBy){
     clearInterval(state.timerInterval);
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
+    setLineReader(false);
     const cur = currentModule();
     Attempts.moduleEnd(cur, endedBy || "submitted");
     const nextIdx = state.moduleIndex + 1;
@@ -709,6 +710,10 @@
     <span class="more-wrap">
       <button class="th-tool" id="moreBtn"><span class="ticon">⋮</span><span class="tlabel">More</span></button>
       <div class="more-menu hidden" id="moreMenu">
+        <button class="more-item" id="miLineReader">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#1E1E1E" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 19h16"/><rect x="4" y="9.5" width="16" height="5" rx="1.5"/></svg>
+          <span>Line Reader</span>
+        </button>
         <button class="more-item" id="miSaveExit">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#1E1E1E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
           <span>Save and Exit</span>
@@ -722,8 +727,37 @@
       el("moreMenu").classList.toggle("hidden", !open);
       el("moreBtn").classList.toggle("on", open);
     });
+    el("miLineReader").addEventListener("click", ()=>{   // re-click toggles off
+      setLineReader(el("lineReader").classList.contains("hidden"));
+      closeMoreMenu();
+    });
     el("miSaveExit").addEventListener("click", saveAndExit);
   }
+
+  /* ---- Line Reader (Phase E) ---- */
+  function setLineReader(on){
+    el("lineReader").classList.toggle("hidden", !on);
+    if(on) setLrTop(Math.round(el("tBody").getBoundingClientRect().height * 0.25));
+  }
+  function setLrTop(px){
+    const bodyH = el("tBody").getBoundingClientRect().height;
+    const bandH = el("lrBand").offsetHeight;
+    el("lrTop").style.height = Math.max(0, Math.min(px, bodyH - bandH)) + "px";
+  }
+  let lrDrag = null;
+  el("lrBand").addEventListener("pointerdown", e=>{
+    lrDrag = { startY: e.clientY, startTop: el("lrTop").offsetHeight };
+    el("lrBand").setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  el("lrBand").addEventListener("pointermove", e=>{
+    if(!lrDrag) return;
+    setLrTop(lrDrag.startTop + (e.clientY - lrDrag.startY));
+  });
+  el("lrBand").addEventListener("pointerup", ()=>{ lrDrag = null; });
+  document.addEventListener("keydown", e=>{
+    if(e.key === "Escape" && !el("lineReader").classList.contains("hidden")) setLineReader(false);
+  });
   function closeMoreMenu(){
     const menu = document.getElementById("moreMenu");
     if(menu) menu.classList.add("hidden");
@@ -738,6 +772,7 @@
   async function saveAndExit(){
     clearInterval(state.timerInterval);           // timer pauses while exited
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
+    setLineReader(false);
     closeMoreMenu();
     const test = state.currentTest;
     const annotations = {};
