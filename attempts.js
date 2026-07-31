@@ -247,7 +247,7 @@ window.Attempts = (function(){
 
   return {
     /* ---- lifecycle (called from app.js) ---- */
-    begin(test, studentCode, conditions, stateRef, assignmentId){
+    begin(test, studentCode, conditions, stateRef, assignmentId, timing){
       try{
         appState = stateRef;
         qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
@@ -264,6 +264,7 @@ window.Attempts = (function(){
           testName: test.testName,
           testVersion: test.testVersion || "unversioned",
           assignmentId: assignmentId || null,   // Phase F: ties the attempt to its assignment across resume
+          timing: timing || 1,                  // Phase G §1: 1 | 1.5 | 2 | "untimed"
           conditions: conditions || "unknown",
           startedAt: iso(now),
           lastSavedAt: iso(now),

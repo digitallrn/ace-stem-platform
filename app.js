@@ -24,6 +24,9 @@
     assignments: null,           // Phase F: assignment objects; null = default all-practice
     activeAssignment: null,      // the assignment the running attempt started through
     pendingStart: null,          // {test, assignment} while the Start Code screen is up
+    timing: 1,                   // Phase G §1: 1 | 1.5 | 2 | "untimed"
+    untimed: false,              // current module runs count-up with no auto-submit
+    elapsedSec: 0,               // count-up seconds for untimed modules
     fiveMinAlerted: false,       // Phase F §6: five-minute popup shown for this module
     pastAttempts: [],            // completed/timed-out records for this code (Phase D)
     practiceTab: "active"        // home Practice toggle: "active" | "past"
@@ -32,11 +35,11 @@
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-scoredetails","screen-dashboard"];
   // body-level overlays that live outside the SCREENS set — a screen change
   // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
   // them floating as a full-screen click blocker over the next screen
-  const FLOATING_OVERLAYS = ["saveFailModal","bugModal","deviceModal"];
+  const FLOATING_OVERLAYS = ["saveFailModal","bugModal","deviceModal","qrModal"];
   function showOnly(id){
     SCREENS.forEach(s => s===id ? show(s) : hide(s));
     FLOATING_OVERLAYS.forEach(o => hide(o));
@@ -305,6 +308,18 @@
       // (ATTEMPTS-SPEC §9) — the tutor dashboard remains the archive view
       const canView = released && test &&
         (test.testVersion || "unversioned") === record.testVersion;
+      // §6: released cards show the scaled TOTAL, or raw fallback
+      let scoreLine = "";
+      if(canView){
+        const built = buildScoreRows(test, record);
+        const rawRw = built.tally["Reading and Writing"].correct;
+        const rawMath = built.tally["Math"].correct;
+        const scaled = scaledScores(test, rawRw, rawMath);
+        scoreLine = scaled
+          ? `<div class="pcard-total">${scaled.total}${scaled.estimated ? EST : ""}<span class="pcard-total-range">400–1600</span></div>`
+          : `<div class="pcard-total">${rawRw + rawMath}<span class="pcard-total-of">/ ${built.tally["Reading and Writing"].graded + built.tally["Math"].graded} correct</span></div>`;
+      }
+      const badge = timingBadge(record.timing);
       const card = document.createElement("div");
       card.className = "pcard";
       card.innerHTML = `
@@ -312,13 +327,15 @@
         <div class="pcard-body">
           <div class="pcard-status"><span class="pc-ico">✓</span> Completed
             <span class="pc-date">${fmtCardDate(record.startedAt)}</span></div>
+          ${badge ? `<div class="pcard-badge">${escapeHtml(badge)}</div>` : ""}
+          ${scoreLine}
           <div class="pcard-action">${canView
-            ? '<button class="pcard-link">View My Responses</button>'
+            ? '<button class="pcard-link">View Score Details</button>'
             : released
               ? '<span class="pc-pending">Test content was updated — ask your tutor for the review</span>'
               : '<span class="pc-pending">Scores not released yet</span>'}</div>
         </div>`;
-      if(canView) card.querySelector(".pcard-link").addEventListener("click", ()=> viewResponses(test, record));
+      if(canView) card.querySelector(".pcard-link").addEventListener("click", ()=> openScoreDetails(test, record));
       wrap.appendChild(card);
     });
   }
@@ -335,6 +352,7 @@
   function startTestFlow(test, assignment){
     state.currentTest = test;
     state.activeAssignment = assignment || null;
+    state.timing = (assignment && assignment.timing) || 1;    // Phase G §1: default standard
     state.moduleIndex = 0;
     state.moduleState = {};
     test.modules.forEach(m=>{
@@ -343,7 +361,7 @@
     const conditions = (assignment && assignment.category === "test")
       ? "proctored" : "self-administered";
     Attempts.begin(test, state.userName, conditions, state,    // spec §3: record on test start
-      assignment ? assignment.assignmentId : null);
+      assignment ? assignment.assignmentId : null, state.timing);
     showOnly("screen-loading");
     setTimeout(()=>{ showReady(true); }, 2200);
   }
@@ -434,6 +452,7 @@
       if(ann[mid].passageHtml) ms.passageHtml = ann[mid].passageHtml;
       if(ann[mid].notes) ms.notes = ann[mid].notes;
     });
+    state.timing = record.timing || 1;   // Phase G §1: accommodation persists across resume
     Attempts.resume(record, state);   // adopts the record; deletes its resume blob
     // re-associate the assignment this attempt was started through, so
     // finalizing a resumed sitting still marks it Completed (Phase F §2)
@@ -478,6 +497,19 @@
   function moduleNumber(mod){ const m = String(mod.moduleLabel).match(/\d+/); return m ? m[0] : "1"; }
   function sectionTitle(mod){ return `Section ${sectionNumber(mod)}, Module ${moduleNumber(mod)}: ${mod.section}`; }
 
+  /* Phase G §1: accommodated time. Multipliers apply exactly to the module
+     limit; break stays 10:00 (handled separately). Untimed has no limit. */
+  function timingMultiplier(t){ return (t === 1.5 || t === 2) ? t : 1; }
+  function accommodatedLimitSec(mod, timing){
+    return Math.round(mod.timeLimitMinutes * 60 * timingMultiplier(timing));
+  }
+  function timingBadge(timing){
+    if(timing === "untimed") return "Untimed";
+    if(timing === 1.5) return "Extended time 1.5×";
+    if(timing === 2) return "Extended time 2×";
+    return "";
+  }
+
   function beginModule(idx, resume){
     state.moduleIndex = idx;
     state.view = "question";
@@ -485,15 +517,25 @@
     const mod = currentModule();
     state.questionIndex = resume ?
       Math.min(resume.questionIndex || 0, mod.questions.length - 1) : 0;
-    state.timeRemainingSec = (resume && resume.timeRemainingSeconds > 0) ?
-      Math.floor(resume.timeRemainingSeconds) : mod.timeLimitMinutes * 60;
+    state.untimed = state.timing === "untimed";
+    if(state.untimed){
+      // Phase G §1: count-up, no countdown/auto-submit/5-min; resume restores
+      // elapsed (the blob flags untimed and stores elapsedSeconds)
+      state.elapsedSec = (resume && resume.untimed && resume.elapsedSeconds > 0)
+        ? Math.floor(resume.elapsedSeconds) : 0;
+      state.timeRemainingSec = 0;
+      state.fiveMinAlerted = true;             // never fires when untimed
+    } else {
+      state.timeRemainingSec = (resume && resume.timeRemainingSeconds > 0) ?
+        Math.floor(resume.timeRemainingSeconds) : accommodatedLimitSec(mod, state.timing);
+      // Phase F §6: alert fires once per module; resuming inside the final five
+      // minutes keeps it consumed and the Hide control stays gone (screenshot 22)
+      state.fiveMinAlerted = state.timeRemainingSec <= 300;
+    }
     state.timerHidden = false;
     el("timerBtn").textContent = "Hide";
-    // Phase F §6: alert fires once per module; resuming inside the final five
-    // minutes keeps it consumed and the Hide control stays gone (screenshot 22)
-    state.fiveMinAlerted = state.timeRemainingSec <= 300;
     hide("fiveMinPopup");
-    el("timerBtn").classList.toggle("hidden", state.fiveMinAlerted);
+    el("timerBtn").classList.toggle("hidden", state.fiveMinAlerted && !state.untimed);
     showOnly("screen-test");
     renderTest();
     openDirections();
@@ -504,6 +546,14 @@
   function startTimer(){
     clearInterval(state.timerInterval);
     updateTimerDisplay();
+    if(state.untimed){
+      // Phase G §1: count up, never auto-submit, no five-minute alert
+      state.timerInterval = setInterval(()=>{
+        state.elapsedSec++;
+        updateTimerDisplay();
+      }, 1000);
+      return;
+    }
     state.timerInterval = setInterval(()=>{
       state.timeRemainingSec--;
       if(state.timeRemainingSec <= 0){
@@ -526,14 +576,17 @@
   el("fiveMinClose").addEventListener("click", ()=> hide("fiveMinPopup"));
 
   function updateTimerDisplay(){
-    const m = Math.floor(state.timeRemainingSec/60);
-    const s = state.timeRemainingSec % 60;
+    const secs = state.untimed ? state.elapsedSec : state.timeRemainingSec;
+    const m = Math.floor(secs/60);
+    const s = secs % 60;
     const disp = el("timerDisplay");
-    disp.classList.toggle("warn", state.timeRemainingSec <= 300);
+    disp.classList.toggle("warn", !state.untimed && state.timeRemainingSec <= 300);
     if(state.timerHidden){
       disp.innerHTML = '<span class="clock-ico">⏱</span>';
     } else {
-      disp.innerHTML = '<span id="timerVal">' + m + ":" + String(s).padStart(2,"0") + "</span>";
+      // untimed counts up with a small "Untimed" label above the clock (§1)
+      disp.innerHTML = (state.untimed ? '<span class="timer-untimed">Untimed</span>' : '') +
+        '<span id="timerVal">' + m + ":" + String(s).padStart(2,"0") + "</span>";
     }
   }
 
@@ -1042,6 +1095,8 @@
       moduleIndex: state.moduleIndex,
       questionIndex: state.questionIndex,
       timeRemainingSeconds: state.timeRemainingSec,
+      untimed: state.untimed,                 // Phase G §1: untimed resumes by elapsed
+      elapsedSeconds: state.elapsedSec,
       annotations
     });
     if(!ok){
@@ -1116,7 +1171,7 @@
     const tools = el("thTools");
     if(mod.section === "Math"){
       tools.innerHTML = `
-        <button class="th-tool" id="toolCalc"><span class="ticon">🧮</span>Calculator</button>
+        <button class="th-tool" id="toolCalc"><span class="ticon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="2.2"/><rect x="7.5" y="5" width="9" height="3.6" rx="0.8"/><path d="M8.5 12.5h0M12 12.5h0M15.5 12.5h0M8.5 15.5h0M12 15.5h0M15.5 15.5h0M8.5 18.5h0M12 18.5h0"/><path d="M15.5 17.5v2" stroke-width="1.7"/></svg></span>Calculator</button>
         <button class="th-tool" id="toolRef"><span class="ticon" style="font-family:var(--serif);font-style:italic;">x²</span>Reference</button>` +
         MORE_MENU_HTML;
       el("toolCalc").addEventListener("click", toggleCalc);
@@ -1601,6 +1656,311 @@
     divider.addEventListener("pointerup", ()=>{ dragging = false; });
   })();
 
+  /* ================= SCORE DETAILS (Phase G §3-§7) ================= */
+  const CB_DOMAINS = {
+    "Reading and Writing": ["Information and Ideas", "Craft and Structure", "Expression of Ideas", "Standard English Conventions"],
+    "Math": ["Algebra", "Advanced Math", "Problem-Solving and Data Analysis", "Geometry and Trigonometry"]
+  };
+  function mapDomain(section, skill){
+    const list = CB_DOMAINS[section] || [];
+    if(skill){
+      const s = String(skill).toLowerCase();
+      for(const d of list){ if(s.indexOf(d.toLowerCase()) !== -1) return d; }
+    }
+    return "Other";   // unmapped/keyless skills; shown only if non-empty (§4)
+  }
+
+  /* §3: scaled scores only when the test carries a scoring table; otherwise
+     null and the page falls back to raw counts — never invent numbers. */
+  function scaledScores(test, rawRw, rawMath){
+    const sc = test.scoring;
+    if(!sc || !Array.isArray(sc.rw) || !Array.isArray(sc.math)) return null;
+    const rw = sc.rw[Math.max(0, Math.min(rawRw, sc.rw.length - 1))];
+    const math = sc.math[Math.max(0, Math.min(rawMath, sc.math.length - 1))];
+    if(typeof rw !== "number" || typeof math !== "number") return null;
+    return { rw, math, total: rw + math, estimated: !!sc.estimated };
+  }
+  const EST = '<sup class="sd-est" title="Estimated — approximate conversion">Est.</sup>';
+
+  let sdCtx = null;   // { test, record, rows, filter, page, pageSize }
+
+  function buildScoreRows(test, record){
+    const ms = buildModuleStateFromRecord(test, record);
+    const rows = [];
+    const secCount = {};   // per-section running question number
+    const tally = { "Reading and Writing": {correct:0, graded:0}, "Math": {correct:0, graded:0} };
+    const domains = {};    // section -> domain -> {correct, graded}
+    test.modules.forEach(mod => {
+      const st = ms[mod.moduleId];
+      mod.questions.forEach(q => {
+        const noKey = !hasKey(q);
+        const given = st.answers.hasOwnProperty(q.id) ? st.answers[q.id] : null;
+        const correct = !noKey && given !== null && answerMatches(q, given);
+        const domain = mapDomain(mod.section, q.skill);
+        secCount[mod.section] = (secCount[mod.section] || 0) + 1;
+        if(!noKey && tally[mod.section]){
+          tally[mod.section].graded++;
+          if(correct) tally[mod.section].correct++;
+        }
+        if(!noKey){
+          const dd = (domains[mod.section] = domains[mod.section] || {});
+          const de = (dd[domain] = dd[domain] || {correct:0, graded:0});
+          de.graded++; if(correct) de.correct++;
+        }
+        rows.push({ q, mod, section: mod.section, num: secCount[mod.section],
+          given, noKey, correct, domain });
+      });
+    });
+    return { rows, tally, domains };
+  }
+
+  function answerLetter(q, val){
+    if(val === null || val === undefined) return null;
+    return q.type === "spr" ? String(val) : String.fromCharCode(65 + val);
+  }
+  function correctLabel(q){
+    if(!hasKey(q)) return "—";
+    return q.type === "spr" ? String(q.correctAnswer) : String.fromCharCode(65 + q.correctAnswer);
+  }
+
+  function openScoreDetails(test, record, origin){
+    const built = buildScoreRows(test, record);
+    sdCtx = { test, record, rows: built.rows, tally: built.tally, domains: built.domains,
+      filter: "all", page: 0, pageSize: 10, showCorrect: false, origin: origin || "home" };
+    qrShowAnswer = false;   // §5: the popup toggle is sticky per session, fresh per visit
+    renderScoreDetails();
+    showOnly("screen-scoredetails");
+    el("sdRoot").scrollTop = 0;
+  }
+
+  function domainBar(correct, graded){
+    // segmented performance bar: share of graded answered correctly (§4)
+    const segs = 8;
+    const filled = graded ? Math.round((correct / graded) * segs) : 0;
+    let out = '<div class="sd-bar">';
+    for(let i = 0; i < segs; i++) out += `<span class="${i < filled ? "on" : ""}"></span>`;
+    return out + "</div>";
+  }
+
+  function renderScoreDetails(){
+    const { test, record, tally, domains } = sdCtx;
+    const rawRw = tally["Reading and Writing"].correct;
+    const rawMath = tally["Math"].correct;
+    const scaled = scaledScores(test, rawRw, rawMath);
+    const badge = timingBadge(record.timing);
+    const dateStr = fmtCardDate(record.startedAt);
+
+    // hero
+    let hero;
+    if(scaled){
+      const est = scaled.estimated ? EST : "";
+      hero = `
+        <div class="sd-hero-total">
+          <div class="sd-hero-lbl">TOTAL SCORE</div>
+          <div class="sd-hero-num">${scaled.total}${est}</div>
+          <div class="sd-hero-range">400–1600</div>
+        </div>
+        <div class="sd-hero-sections">
+          <div><div class="sd-sec-lbl">Reading and Writing</div><div class="sd-sec-range">200–800</div><div class="sd-sec-num">${scaled.rw}${est}</div></div>
+          <div><div class="sd-sec-lbl">Math</div><div class="sd-sec-range">200–800</div><div class="sd-sec-num">${scaled.math}${est}</div></div>
+        </div>`;
+    } else {
+      hero = `
+        <div class="sd-hero-total">
+          <div class="sd-hero-lbl">CORRECT</div>
+          <div class="sd-hero-num">${rawRw + rawMath}<span class="sd-hero-of">/ ${tally["Reading and Writing"].graded + tally["Math"].graded}</span></div>
+          <div class="sd-hero-range">scaled scores not available for this test</div>
+        </div>
+        <div class="sd-hero-sections">
+          <div><div class="sd-sec-lbl">Reading and Writing</div><div class="sd-sec-num">${rawRw}<span class="sd-hero-of">/ ${tally["Reading and Writing"].graded}</span></div></div>
+          <div><div class="sd-sec-lbl">Math</div><div class="sd-sec-num">${rawMath}<span class="sd-hero-of">/ ${tally["Math"].graded}</span></div></div>
+        </div>`;
+    }
+
+    // knowledge & skills
+    let ks = "";
+    ["Reading and Writing", "Math"].forEach(section => {
+      const dd = domains[section];
+      if(!dd) return;
+      const order = CB_DOMAINS[section].concat(["Other"]).filter(d => dd[d]);
+      if(!order.length) return;
+      ks += `<div class="sd-ks-section"><h3>${escapeHtml(section)}</h3><div class="sd-ks-grid">` +
+        order.map(d => {
+          const e = dd[d];
+          return `<div class="sd-ks-item">
+            <div class="sd-ks-name">${escapeHtml(d)}</div>
+            <div class="sd-ks-count">${e.correct}/${e.graded} correct</div>
+            ${domainBar(e.correct, e.graded)}
+          </div>`;
+        }).join("") + "</div></div>";
+    });
+
+    el("sdRoot").innerHTML = `
+      <div class="sd-hero">
+        <div class="sd-hero-top">
+          <div>
+            <h1>Score Details</h1>
+            <div class="sd-hero-sub">${escapeHtml(test.testName)} · ${escapeHtml(dateStr)}${badge ? ' · <span class="sd-badge">' + escapeHtml(badge) + '</span>' : ""}</div>
+          </div>
+          <button class="sd-home" id="sdHomeBtn">Return to Home</button>
+        </div>
+        <div class="sd-hero-body">${hero}</div>
+        <div class="sd-hero-actions">
+          <button class="pill" id="sdReviewAllBtn">Review All Questions</button>
+          <button class="pill ghost" id="sdDownloadBtn">Download Score Report</button>
+        </div>
+      </div>
+      <div class="sd-body">
+        <section class="sd-ks">
+          <h2>Knowledge and Skills</h2>
+          <p class="sd-muted">Your performance across the content domains measured on the SAT.</p>
+          ${ks || '<p class="sd-muted">Domain breakdown is not available for this test yet.</p>'}
+        </section>
+        <section class="sd-questions" id="sdQuestions"></section>
+      </div>`;
+
+    el("sdHomeBtn").textContent = sdCtx.origin === "dashboard" ? "Back to Dashboard" : "Return to Home";
+    el("sdHomeBtn").addEventListener("click", ()=>{
+      if(sdCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }
+      renderHome(); showOnly("screen-home");
+    });
+    el("sdReviewAllBtn").addEventListener("click", ()=>{
+      el("sdQuestions").scrollIntoView({ behavior: "smooth" });
+    });
+    el("sdDownloadBtn").addEventListener("click", ()=> window.print());
+    renderQuestionsOverview();
+  }
+
+  function renderQuestionsOverview(){
+    const { rows, filter, page, pageSize, showCorrect } = sdCtx;
+    const filtered = rows.filter(r =>
+      filter === "all" ? true :
+      filter === "rw" ? r.section === "Reading and Writing" : r.section === "Math");
+    const total = filtered.length;
+    const size = pageSize === "all" ? total : pageSize;
+    const pages = size ? Math.ceil(total / size) : 1;
+    const pg = Math.min(page, Math.max(0, pages - 1));
+    const start = pg * size;
+    const shown = filtered.slice(start, size ? start + size : total);
+
+    const tab = (key, label) => `<button class="sd-tab ${filter===key?"on":""}" data-filter="${key}">${label}</button>`;
+    const body = shown.map(r => {
+      const yours = answerLetter(r.q, r.given);
+      const stateCls = r.noKey ? "nokey" : (r.given === null ? "omit" : (r.correct ? "ok" : "bad"));
+      return `<tr>
+        <td>${r.num}</td>
+        <td>${escapeHtml(r.section === "Reading and Writing" ? "RW" : "Math")}</td>
+        <td class="sd-correct-col">${showCorrect ? escapeHtml(correctLabel(r.q)) : '<span class="sd-hidden">•</span>'}</td>
+        <td class="sd-${stateCls}">${yours === null ? "Omitted" : escapeHtml(yours)}</td>
+        <td><button class="sd-review-link" data-rid="${rows.indexOf(r)}">Review</button></td>
+        <td>${escapeHtml(r.domain)}</td>
+      </tr>`;
+    }).join("");
+
+    el("sdQuestions").innerHTML = `
+      <h2>Questions Overview</h2>
+      <div class="sd-tabs">${tab("all","All")}${tab("rw","Reading and Writing")}${tab("math","Math")}</div>
+      <div class="sd-table-controls">
+        <label class="sd-toggle"><input type="checkbox" id="sdShowCorrect" ${showCorrect?"checked":""}> Show Correct Answers</label>
+        <div class="sd-view">View
+          ${[10,30,"all"].map(v => `<button class="sd-view-btn ${pageSize===v?"on":""}" data-size="${v}">${v==="all"?"All":v}</button>`).join("")}
+        </div>
+      </div>
+      <div class="sd-table-wrap">
+        <table class="sd-table">
+          <thead><tr><th>Question #</th><th>Section</th><th>Correct Answer</th><th>Your Answer</th><th>Review</th><th>Domain</th></tr></thead>
+          <tbody>${body || '<tr><td colspan="6" class="sd-muted">No questions.</td></tr>'}</tbody>
+        </table>
+      </div>
+      ${pages > 1 ? `<div class="sd-pager">
+        <button class="sd-page-btn" id="sdPrev" ${pg===0?"disabled":""}>Previous</button>
+        <span>Page ${pg+1} of ${pages}</span>
+        <button class="sd-page-btn" id="sdNext" ${pg>=pages-1?"disabled":""}>Next</button>
+      </div>` : ""}`;
+
+    document.querySelectorAll("#sdQuestions .sd-tab").forEach(b =>
+      b.addEventListener("click", ()=>{ sdCtx.filter = b.dataset.filter; sdCtx.page = 0; renderQuestionsOverview(); }));
+    el("sdShowCorrect").addEventListener("change", e=>{ sdCtx.showCorrect = e.target.checked; renderQuestionsOverview(); });
+    document.querySelectorAll("#sdQuestions .sd-view-btn").forEach(b =>
+      b.addEventListener("click", ()=>{ sdCtx.pageSize = b.dataset.size === "all" ? "all" : parseInt(b.dataset.size,10); sdCtx.page = 0; renderQuestionsOverview(); }));
+    if(el("sdPrev")) el("sdPrev").addEventListener("click", ()=>{ sdCtx.page = pg - 1; renderQuestionsOverview(); });
+    if(el("sdNext")) el("sdNext").addEventListener("click", ()=>{ sdCtx.page = pg + 1; renderQuestionsOverview(); });
+    document.querySelectorAll("#sdQuestions .sd-review-link").forEach(b =>
+      b.addEventListener("click", ()=> openQuestionReview(filtered, filtered.indexOf(rows[parseInt(b.dataset.rid,10)]))));
+  }
+
+  /* ---- Question Review popup (§5) ---- */
+  let qrCtx = null;   // { list, idx }  (showAnswer is sticky per popup session)
+  let qrShowAnswer = false;
+
+  function qrQuestionHtml(q){
+    let html = "";
+    if(q.figure){
+      html += `<div class="qr-fig"><img src="${escapeHtml(q.figure)}" alt="Question figure">` +
+        (q.figureCaption ? `<div class="qr-fig-cap">${fmt(q.figureCaption)}</div>` : "") + `</div>`;
+    }
+    if(q.passage) html += `<div class="qr-passage">${fmt(q.passage)}</div>`;
+    html += `<div class="qr-qtext">${fmt(q.questionText)}</div>`;
+    if(q.type !== "spr"){
+      html += `<ol class="qr-choices">` +
+        q.choices.map((c,i)=> `<li><span class="qr-cl">${String.fromCharCode(65+i)}.</span> ${fmt(c)}</li>`).join("") + `</ol>`;
+    }
+    return html;
+  }
+
+  function qrAnswerHtml(row){
+    const q = row.q;
+    let banner, cls;
+    if(row.noKey){
+      cls = "neutral"; banner = "No key yet for this question.";
+    } else {
+      const correct = correctLabel(q);
+      if(row.given === null){ cls = "bad"; banner = `You omitted this question. The correct answer is ${escapeHtml(correct)}.`; }
+      else if(row.correct){ cls = "ok"; banner = `You answered ${escapeHtml(answerLetter(q, row.given))}, which is correct.`; }
+      else { cls = "bad"; banner = `Your answer is ${escapeHtml(answerLetter(q, row.given))}. The correct answer is ${escapeHtml(correct)}.`; }
+    }
+    let html = `<h3 class="qr-ans-h">Answer</h3><div class="qr-banner ${cls}">${banner}</div>`;
+    if(q.rationale){   // §5: rendered only when present, no empty placeholder
+      html += `<h3 class="qr-rat-h">Rationale</h3><div class="qr-rationale">${fmt(q.rationale)}</div>`;
+    }
+    return html;
+  }
+
+  function renderQuestionReview(){
+    const row = qrCtx.list[qrCtx.idx];
+    const q = row.q;
+    el("qrCard").innerHTML = `
+      <div class="qr-head">
+        <button class="panel-x dark" id="qrClose">✕</button>
+        <div class="qr-domain">Knowledge and Skills: ${escapeHtml(row.domain)}</div>
+      </div>
+      <div class="qr-body">
+        <div class="qr-left">
+          <div class="qr-qnum">${escapeHtml(row.section)}: Question ${row.num}</div>
+          ${qrQuestionHtml(q)}
+        </div>
+        <div class="qr-right">${qrShowAnswer ? qrAnswerHtml(row) : ""}</div>
+      </div>
+      <div class="qr-foot">
+        <label class="qr-toggle"><input type="checkbox" id="qrShow" ${qrShowAnswer?"checked":""}> Show correct answer and explanation</label>
+        <div class="qr-nav">
+          <button class="pill ghost" id="qrPrev" ${qrCtx.idx===0?"disabled":""}>Previous</button>
+          <button class="pill" id="qrNext" ${qrCtx.idx>=qrCtx.list.length-1?"disabled":""}>Next</button>
+        </div>
+      </div>`;
+    el("qrClose").addEventListener("click", ()=> hide("qrModal"));
+    el("qrShow").addEventListener("change", e=>{ qrShowAnswer = e.target.checked; renderQuestionReview(); });
+    el("qrPrev").addEventListener("click", ()=>{ if(qrCtx.idx>0){ qrCtx.idx--; renderQuestionReview(); } });
+    el("qrNext").addEventListener("click", ()=>{ if(qrCtx.idx<qrCtx.list.length-1){ qrCtx.idx++; renderQuestionReview(); } });
+  }
+
+  function openQuestionReview(list, idx){
+    qrCtx = { list, idx: Math.max(0, idx) };
+    renderQuestionReview();
+    show("qrModal");
+  }
+  el("qrModal").addEventListener("click", e=>{ if(e.target.id === "qrModal") hide("qrModal"); });
+
   /* ================= GRADING / RESULTS ================= */
   /* Phase D: the student-facing entry point — read-only review of a stored,
      released attempt (reuses the results renderer below). */
@@ -1710,5 +2070,16 @@
   }
 
   /* ================= INIT ================= */
+  // §6: dashboard "Open student view" bridges into the Score Details page,
+  // regardless of release (admin-only path). Guards a missing/mismatched test.
+  window.AppScoreView = {
+    open(testId, record){
+      const test = state.tests.find(t => t.testId === testId);
+      if(!test) return false;
+      state.userName = (record.student && record.student.code) || state.userName;
+      openScoreDetails(test, record, "dashboard");
+      return true;
+    }
+  };
   showOnly("screen-signin");
 })();

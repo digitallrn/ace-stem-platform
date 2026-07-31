@@ -65,6 +65,17 @@ window.Dashboard = (function(){
     const cls = { "completed":"ok", "in-progress":"warn", "timed-out":"to" }[r.status] || "";
     return `<span class="dstatus ${cls}">${esc(r.status || "?")}</span>`;
   }
+  // Phase G §1: extended-time / untimed badge (blank for standard timing)
+  function timingLabel(t){
+    if(t === "untimed") return "Untimed";
+    if(t === 1.5) return "Extended time 1.5×";
+    if(t === 2) return "Extended time 2×";
+    return "";
+  }
+  function timingBadgeHtml(t){
+    const lbl = timingLabel(t);
+    return lbl ? ` <span class="dstatus tm">${esc(lbl)}</span>` : "";
+  }
   function givenLabel(entry, q){
     if(entry.given === null || entry.given === undefined) return "—";
     if(q && q.type === "mcq" && typeof entry.given === "number") return String.fromCharCode(65 + entry.given);
@@ -257,7 +268,7 @@ window.Dashboard = (function(){
           <td><b>${scoreStr(r)}</b></td>
           <td>${statusBadge(r)}</td>
           <td>${releaseCell(r)}</td>
-          <td>${esc(r.conditions || "unknown")}</td>
+          <td>${esc(r.conditions || "unknown")}${timingBadgeHtml(r.timing)}</td>
         </tr>`).join("") +
       `</tbody></table><p class="dash-hint">Click a row for the full question-by-question review.</p>`;
   }
@@ -469,7 +480,7 @@ window.Dashboard = (function(){
     }));
     const rowsHtml = rows.map(r => {
       if(r.legacy){
-        return `<tr><td>${esc(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
+        return `<tr><td>${esc(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>Standard</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
       }
       const a = r.a;
       const st = assignRowStatus(r.code, a);
@@ -478,6 +489,7 @@ window.Dashboard = (function(){
         <td>${esc(r.code)}</td>
         <td>${esc((testsById[a.testId] && testsById[a.testId].testName) || a.testId)}</td>
         <td>${esc(a.category || "?")}</td>
+        <td>${esc(timingLabel(a.timing) || "Standard")}</td>
         <td>${a.startCode ? "<b>" + esc(String(a.startCode)) + "</b>" : "—"}</td>
         <td>${fmtDay(a.windowOpens)}</td>
         <td>${fmtDay(a.expiresAt)}</td>
@@ -501,6 +513,13 @@ window.Dashboard = (function(){
                 <option value="test">Test — proctored, start code</option>
                 <option value="practice">Practice — self-administered</option>
               </select></label>
+            <label>Timing
+              <select id="afTiming">
+                <option value="1">Standard</option>
+                <option value="1.5">Time and a half (1.5×)</option>
+                <option value="2">Double time (2×)</option>
+                <option value="untimed">Untimed</option>
+              </select></label>
             <label>Window opens (optional)
               <input type="date" id="afOpens"></label>
             <label>Expires (end of day)
@@ -513,7 +532,7 @@ window.Dashboard = (function(){
           ${lastStartCode ? `<div class="af-code">Start code — read this aloud<div class="af-code-big">${esc(lastStartCode)}</div></div>` : ""}
         </div>
         ${rows.length ? `<table class="dtable"><thead><tr>
-            <th>Student</th><th>Test</th><th>Category</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
+            <th>Student</th><th>Test</th><th>Category</th><th>Timing</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
           </tr></thead><tbody>${rowsHtml}</tbody></table>
           <p class="dash-hint">Assignments with an attempt (in-progress or completed) can't be deleted.</p>`
           : '<p class="dash-empty">No assignments yet. Students with no assignments see every published test as practice.</p>'}
@@ -538,6 +557,8 @@ window.Dashboard = (function(){
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
     const testId = $("afTest").value;
     const category = $("afCat").value;
+    const timingRaw = $("afTiming").value;                       // Phase G §1
+    const timing = timingRaw === "untimed" ? "untimed" : parseFloat(timingRaw);
     const startCode = category === "test"
       ? String(Math.floor(100000 + Math.random() * 900000)) : null;
     const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
@@ -554,7 +575,7 @@ window.Dashboard = (function(){
       const list = Array.isArray(res.value) ? res.value : [];
       list.push({
         assignmentId: "a-" + Math.floor(Date.now()/1000) + "-" + Math.random().toString(16).slice(2, 6),
-        testId, category, startCode,
+        testId, category, startCode, timing,
         windowOpens: opens, expiresAt: expires,
         assignedAt: new Date().toISOString(),
         completedAttemptId: null
@@ -641,13 +662,26 @@ window.Dashboard = (function(){
         </div>
       </div>`;
     }).join("");
+    // §6: jump to the student-facing Score Details page (admin-only, works
+    // regardless of release). Only when this build carries the matching test.
+    // (reuses `test` declared above.)
+    const canOpen = source === "storage" && test &&
+      (test.testVersion || "unversioned") === r.testVersion;
     $("dashDetailBody").innerHTML = `
       <h2>${esc(r.student && r.student.code || "?")} — ${esc(r.testName || r.testId)}</h2>
-      <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
+      <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
         ${r.score && r.score.noKey ? " · " + r.score.noKey + " keyless" : ""} · version ${esc(r.testVersion||"?")}</p>
+      ${canOpen ? '<p><button class="dash-rel" id="dashStudentView">Open student view →</button></p>' : ""}
       ${versionNote}
       ${(r.modules||[]).map(m => `<span class="dmod">${esc(m.section)} ${esc(m.moduleLabel)}: ${mmss(m.timeSpentSeconds)} (${esc(m.endedBy||"?")})</span>`).join(" ")}
       <div class="dash-qlist">${qRows || '<p class="dash-empty">No answers recorded.</p>'}</div>`;
+    if(canOpen){
+      const btn = $("dashStudentView");
+      if(btn) btn.addEventListener("click", ()=>{
+        $("dashDetail").classList.add("hidden");
+        if(window.AppScoreView) AppScoreView.open(r.testId, r);
+      });
+    }
     $("dashDetail").classList.remove("hidden");
   }
 
