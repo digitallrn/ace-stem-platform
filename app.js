@@ -219,11 +219,23 @@
     if(st === "resume"){
       card.addEventListener("click", ()=> resumeTestFlow(test, state.resumeRecords[test.testId]));
     } else if(st === "ready"){
-      // the start-code ceremony gates proctored sittings (Phase F §4);
-      // practice starts directly
-      card.addEventListener("click", ()=> isTest ? openStartCode(test, a) : startTestFlow(test, a));
+      card.addEventListener("click", ()=> startAssignment(test, a));
     }
     return card;
+  }
+
+  /* re-evaluate the assignment at click time — the home screen isn't
+     re-rendered on a timer, so a card can still read "Start" after its window
+     lapsed. §2: expiry gates starting for BOTH categories (the start-code
+     screen re-checks separately for the proctored path). */
+  function startAssignment(test, a){
+    const st = assignmentState(a);
+    if(st !== "ready"){
+      renderHome();                               // repaint the now-expired/opened/completed state
+      return;
+    }
+    if(a.category === "test") openStartCode(test, a);   // ceremony gates proctored sittings (§4)
+    else startTestFlow(test, a);
   }
 
   function renderYourTests(){
