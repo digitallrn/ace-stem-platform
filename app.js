@@ -5,7 +5,6 @@
   const state = {
     tests: (window.TEST_DATA || []),
     userName: "Student",
-    conditions: "unknown",       // "proctored" | "self-administered" (ATTEMPTS-SPEC §10)
     currentTest: null,
     moduleIndex: 0,
     questionIndex: 0,
@@ -22,7 +21,10 @@
     activeHlColor: "yellow",     // last-used swatch — what mode-drag + underline pairing apply
     hlMode: false,               // Highlights & Notes toggle: drag-select highlights instantly
     resumeRecords: {},           // testId -> in-progress attempt record (Phase C)
-    assignedIds: null,           // assign:<code> -> [testIds]; null = all published (Phase D)
+    assignments: null,           // Phase F: assignment objects; null = default all-practice
+    activeAssignment: null,      // the assignment the running attempt started through
+    pendingStart: null,          // {test, assignment} while the Start Code screen is up
+    fiveMinAlerted: false,       // Phase F §6: five-minute popup shown for this module
     pastAttempts: [],            // completed/timed-out records for this code (Phase D)
     practiceTab: "active"        // home Practice toggle: "active" | "past"
   };
@@ -30,28 +32,32 @@
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-dashboard"];
   function showOnly(id){ SCREENS.forEach(s => s===id ? show(s) : hide(s)); }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
 
   /* ================= SIGN IN / HOME ================= */
   el("signinBtn").addEventListener("click", doSignin);
   el("nameInput").addEventListener("keydown", e => { if(e.key === "Enter") doSignin(); });
-  document.querySelectorAll("#condToggle button").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#condToggle button").forEach(b => b.classList.toggle("on", b === btn));
-      state.conditions = btn.dataset.cond;
-    });
-  });
   async function doSignin(){
     const v = el("nameInput").value.trim();
     if(!v){ el("nameInput").focus(); return; }
     if(v.toLowerCase() === "acestem-admin"){        // tutor dashboard — never records (spec §4)
       el("nameInput").value = "";
+      el("signinError").classList.add("hidden");
       if(window.Dashboard) Dashboard.open(showOnly);
       return;
     }
-    state.userName = v;
+    // Phase F §7: student codes are AS- plus four letters/digits
+    const code = v.toUpperCase();
+    if(!/^AS-[A-Z0-9]{4}$/.test(code)){
+      el("signinError").classList.remove("hidden");
+      el("nameInput").focus();
+      return;
+    }
+    el("signinError").classList.add("hidden");
+    el("nameInput").value = code;
+    state.userName = code;
     el("homeUserName").textContent = state.userName;
     el("homeAvatar").textContent = state.userName.charAt(0).toUpperCase();
     el("welcomeMsg").textContent = "Welcome, " + firstName(state.userName) + ". Good luck on test day!";
@@ -60,59 +66,190 @@
     // than starting fresh (starting over is a tutor-dashboard action)
     state.resumeRecords = {};
     for(const t of state.tests){
-      const r = await Attempts.findInProgress(v, t.testId, t.testVersion);
+      const r = await Attempts.findInProgress(code, t.testId, t.testVersion);
       if(r) state.resumeRecords[t.testId] = r;
     }
-    // Phase D: assignment map (absent -> all published tests) + Past attempts
-    state.assignedIds = await Attempts.assignedTests(v);
-    state.pastAttempts = await Attempts.pastAttempts(v);
+    // Phase F §2: assignment objects (absent -> all published tests as practice)
+    state.assignments = await Attempts.assignments(code);
+    state.pastAttempts = await Attempts.pastAttempts(code);
     state.practiceTab = "active";
     renderHome();
     showOnly("screen-home");
   }
 
-  function visibleTests(){
-    if(!state.assignedIds) return state.tests;          // default when absent: all
-    return state.tests.filter(t => state.assignedIds.indexOf(t.testId) !== -1);
+  /* ---- Test Your Device pre-flight (Phase F §5) ---- */
+  el("tydBtn").addEventListener("click", ()=>{ show("deviceModal"); runDeviceChecks(); });
+  el("deviceClose").addEventListener("click", ()=> hide("deviceModal"));
+  el("deviceRunBtn").addEventListener("click", runDeviceChecks);
+  el("deviceModal").addEventListener("click", e=>{ if(e.target.id === "deviceModal") hide("deviceModal"); });
+
+  function devMark(id, ok, note){
+    const row = el("dev-" + id);
+    if(!row) return;
+    row.classList.remove("pass", "fail");
+    row.classList.add(ok ? "pass" : "fail");
+    row.querySelector(".dev-mark").textContent = ok ? "✓" : "✕";
+    if(note !== undefined) el("devnote-" + id).innerHTML = note;
   }
 
-  /* Phase D home: Practice section with an Active | Past toggle
-     (screenshots 2-3). Active = assigned tests (Start / Resume);
-     Past = one card per completed attempt, View My Responses gated on the
-     tutor's release flag (score-visibility decision (b)). */
+  function loadProbeScript(src, timeoutMs){
+    return new Promise(resolve => {
+      const s = document.createElement("script");
+      const t = setTimeout(()=>{ s.remove(); resolve(false); }, timeoutMs);
+      s.onload = ()=>{ clearTimeout(t); s.remove(); resolve(true); };
+      s.onerror = ()=>{ clearTimeout(t); s.remove(); resolve(false); };
+      s.src = src;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function runDeviceChecks(){
+    el("deviceChecks").innerHTML = [
+      ["net", "Internet connection"],
+      ["katex", "Math rendering (KaTeX)"],
+      ["desmos", "Desmos calculator"],
+      ["storage", "Attempt recording (storage)"]
+    ].map(([id, label]) => `
+      <div class="devrow" id="dev-${id}">
+        <span class="dev-mark">…</span><span>${label}</span>
+        <span class="dev-note" id="devnote-${id}"></span>
+      </div>`).join("");
+
+    // internet: fetch a tiny script from the same CDN the app already uses
+    const net = await loadProbeScript(
+      "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/copy-tex.min.js?cb=" + Date.now(), 8000);
+    devMark("net", net, net ? "" : "No connection to the content CDN");
+
+    // KaTeX: actually render a test fraction into the row
+    let katexOk = false, katexNote = "KaTeX didn't load — math shows as raw LaTeX";
+    try{
+      if(window.katex){
+        katexNote = katex.renderToString("\\frac{1}{2}");
+        katexOk = true;
+      }
+    }catch(e){}
+    devMark("katex", katexOk, katexNote);
+
+    // Desmos: present already, or loadable from its CDN
+    let desmos = !!window.Desmos;
+    if(!desmos){
+      desmos = await loadProbeScript(
+        "https://www.desmos.com/api/v1.11/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fda6", 10000)
+        && !!window.Desmos;
+    }
+    devMark("desmos", desmos, desmos ? "" : "Calculator needs an internet connection");
+
+    // storage: identify the mode, then prove a write+delete round-trip
+    if(!AttemptStore.available()){
+      devMark("storage", false, "No storage in this copy — attempts won't be recorded");
+    } else {
+      const mode = AttemptStore.isDev() ? "practice (dev) storage" : "shared storage";
+      const wrote = await AttemptStore.set("devicecheck:probe", { t: Date.now() });
+      if(wrote) await AttemptStore.remove("devicecheck:probe");
+      devMark("storage", wrote, wrote ? mode : mode + " — write failed");
+    }
+  }
+
+  function testById(id){ return state.tests.find(t => t.testId === id) || null; }
+
+  /* Phase F §2 semantics: completed wins; a resumable attempt always resumes
+     (expiry gates starting, never resuming); then window/expiry gates Start. */
+  function assignmentState(a){
+    if(a.completedAttemptId) return "completed";
+    if(state.resumeRecords[a.testId]) return "resume";
+    if(a.windowOpens && Date.now() < Date.parse(a.windowOpens)) return "notyet";
+    if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
+    return "ready";
+  }
+
+  /* Phase D home (Active|Past) + Phase F §2 assignments v2: "Your Tests"
+     carries category-"test" (proctored, start-code-gated) assignments;
+     Practice and Prepare carries practice assignments, or every published
+     test when this code has no assign: key at all. */
   function renderHome(){
     document.querySelectorAll("#practiceSeg .seg-btn").forEach(b =>
       b.classList.toggle("on", b.dataset.seg === state.practiceTab));
+    renderYourTests();
     const wrap = el("practiceCards");
     wrap.innerHTML = "";
     if(state.practiceTab === "past") renderPastCards(wrap);
     else renderActiveCards(wrap);
   }
 
+  function assignmentCard(a){
+    const test = testById(a.testId);
+    if(!test) return null;                      // assignment for an unpublished test
+    const st = assignmentState(a);
+    const isTest = a.category === "test";
+    const totalQ = test.modules.reduce((s,m)=>s+m.questions.length,0);
+    const card = document.createElement("div");
+    card.className = "pcard" + ((st === "ready" || st === "resume") ? " clickable" : "");
+    const status =
+      st === "completed" ? '<span class="pc-ico">✓</span> Completed' :
+      st === "resume"    ? '<span class="pc-ico">🕐</span> In Progress' :
+      st === "notyet"    ? 'Opens ' + fmtCardDate(a.windowOpens) :
+      st === "expired"   ? 'Expired' :
+      `${test.modules.length} modules · ${totalQ} questions` + (isTest ? ' · proctored' : '');
+    const action =
+      st === "resume"  ? '<button class="pill ghost">Resume</button>' :
+      st === "ready"   ? '<button class="pill ghost">Start</button>' :
+      st === "expired" ? '<span class="pc-pending">This assignment has expired — ask your tutor</span>' : "";
+    card.innerHTML = `
+      <div class="pcard-head">${isTest ? escapeHtml(test.testName) : "Full-Length Practice — " + escapeHtml(test.testName)}</div>
+      <div class="pcard-body">
+        <div class="pcard-status">${status}</div>
+        ${action ? '<div class="pcard-action">' + action + '</div>' : ""}
+      </div>`;
+    if(st === "resume"){
+      card.addEventListener("click", ()=> resumeTestFlow(test, state.resumeRecords[test.testId]));
+    } else if(st === "ready"){
+      // the start-code ceremony gates proctored sittings (Phase F §4);
+      // practice starts directly
+      card.addEventListener("click", ()=> isTest ? openStartCode(test, a) : startTestFlow(test, a));
+    }
+    return card;
+  }
+
+  function renderYourTests(){
+    const row = el("yourTestsRow"), wrap = el("testCards");
+    wrap.innerHTML = "";
+    const testAssigns = (state.assignments || []).filter(a => a.category === "test");
+    row.classList.toggle("hidden", !testAssigns.length);
+    wrap.classList.toggle("hidden", !testAssigns.length);
+    testAssigns.forEach(a => { const c = assignmentCard(a); if(c) wrap.appendChild(c); });
+  }
+
   function renderActiveCards(wrap){
-    const tests = visibleTests();
-    if(!tests.length){
-      wrap.innerHTML = '<div class="no-tests-card"><h3>No Practice Tests</h3><p>' +
-        (state.tests.length ? 'No tests are assigned to this code yet — ask your tutor.'
-          : 'Add tests to test-data.js following the schema documented at the top of that file.') + '</p></div>';
+    if(state.assignments === null){
+      // no assign: key — default: every published test as plain practice
+      if(!state.tests.length){
+        wrap.innerHTML = '<div class="no-tests-card"><h3>No Practice Tests</h3><p>Add tests to test-data.js following the schema documented at the top of that file.</p></div>';
+        return;
+      }
+      state.tests.forEach(test => {
+        const totalQ = test.modules.reduce((s,m)=>s+m.questions.length,0);
+        const resume = state.resumeRecords[test.testId];
+        const card = document.createElement("div");
+        card.className = "pcard clickable";
+        card.innerHTML = `
+          <div class="pcard-head">Full-Length Practice — ${escapeHtml(test.testName)}</div>
+          <div class="pcard-body">
+            <div class="pcard-status">${resume
+              ? '<span class="pc-ico">🕐</span> In Progress'
+              : `${test.modules.length} modules · ${totalQ} questions`}</div>
+            <div class="pcard-action"><button class="pill ghost">${resume ? "Resume" : "Start"}</button></div>
+          </div>`;
+        card.addEventListener("click", ()=> resume ? resumeTestFlow(test, resume) : startTestFlow(test, null));
+        wrap.appendChild(card);
+      });
       return;
     }
-    tests.forEach(test => {
-      const totalQ = test.modules.reduce((s,m)=>s+m.questions.length,0);
-      const resume = state.resumeRecords[test.testId];
-      const card = document.createElement("div");
-      card.className = "pcard clickable";
-      card.innerHTML = `
-        <div class="pcard-head">Full-Length Practice — ${escapeHtml(test.testName)}</div>
-        <div class="pcard-body">
-          <div class="pcard-status">${resume
-            ? '<span class="pc-ico">🕐</span> In Progress'
-            : `${test.modules.length} modules · ${totalQ} questions`}</div>
-          <div class="pcard-action"><button class="pill ghost">${resume ? "Resume" : "Start"}</button></div>
-        </div>`;
-      card.addEventListener("click", ()=> resume ? resumeTestFlow(test, resume) : startTestFlow(test));
-      wrap.appendChild(card);
-    });
+    const practice = state.assignments.filter(a => a.category === "practice");
+    if(!practice.length){
+      wrap.innerHTML = '<div class="no-tests-card"><h3>No Practice Tests</h3><p>No practice is assigned to this code yet — ask your tutor.</p></div>';
+      return;
+    }
+    practice.forEach(a => { const c = assignmentCard(a); if(c) wrap.appendChild(c); });
   }
 
   function fmtCardDate(isoStr){
@@ -158,17 +295,74 @@
     }));
 
   /* ================= FLOW: LOADING → READY → TEST ================= */
-  function startTestFlow(test){
+  /* Phase F §2: conditions come from the ceremony, not a toggle — a start
+     code means proctored; everything else is self-administered practice. */
+  function startTestFlow(test, assignment){
     state.currentTest = test;
+    state.activeAssignment = assignment || null;
     state.moduleIndex = 0;
     state.moduleState = {};
     test.modules.forEach(m=>{
       state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} };
     });
-    Attempts.begin(test, state.userName, state.conditions, state);   // spec §3: record on test start
+    const conditions = (assignment && assignment.category === "test")
+      ? "proctored" : "self-administered";
+    Attempts.begin(test, state.userName, conditions, state,    // spec §3: record on test start
+      assignment ? assignment.assignmentId : null);
     showOnly("screen-loading");
     setTimeout(()=>{ showReady(true); }, 2200);
   }
+
+  /* ================= START CODE (Phase F §4, screenshot 24) ================= */
+  const scDigits = Array.from(document.querySelectorAll(".sc-digit"));
+  function openStartCode(test, assignment){
+    state.pendingStart = { test, assignment };
+    el("scError").classList.add("hidden");
+    scDigits.forEach(i => { i.value = ""; });
+    showOnly("screen-startcode");
+    scDigits[0].focus();
+  }
+  function scFail(msg){
+    el("scError").textContent = msg;
+    el("scError").classList.remove("hidden");
+  }
+  scDigits.forEach((box, idx) => {
+    box.addEventListener("input", ()=>{
+      box.value = box.value.replace(/\D/g, "").slice(0, 1);
+      if(box.value && idx < scDigits.length - 1) scDigits[idx + 1].focus();
+    });
+    box.addEventListener("keydown", e=>{
+      if(e.key === "Backspace" && !box.value && idx > 0){ scDigits[idx - 1].focus(); }
+      if(e.key === "Enter"){ el("scStartBtn").click(); }
+    });
+    box.addEventListener("paste", e=>{
+      const digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+      if(!digits) return;
+      e.preventDefault();
+      digits.split("").forEach((d, i) => { if(scDigits[i]) scDigits[i].value = d; });
+      scDigits[Math.min(digits.length, scDigits.length - 1)].focus();
+    });
+  });
+  el("scHomeBtn").addEventListener("click", ()=>{
+    state.pendingStart = null;
+    showOnly("screen-home");
+  });
+  el("scStartBtn").addEventListener("click", ()=>{
+    const pending = state.pendingStart;
+    if(!pending){ showOnly("screen-home"); return; }
+    const a = pending.assignment;
+    if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)){
+      scFail("This start code has expired — ask your tutor.");
+      return;
+    }
+    const entered = scDigits.map(i => i.value).join("");
+    if(entered.length !== 6 || entered !== String(a.startCode)){
+      scFail("That start code isn't right. Check the numbers and try again.");
+      return;
+    }
+    state.pendingStart = null;
+    startTestFlow(pending.test, a);
+  });
 
   /* rebuild a moduleState shape from a stored attempt record — used by both
      resume (Phase C) and View My Responses (Phase D) */
@@ -206,6 +400,11 @@
       if(ann[mid].notes) ms.notes = ann[mid].notes;
     });
     Attempts.resume(record, state);   // adopts the record; deletes its resume blob
+    // re-associate the assignment this attempt was started through, so
+    // finalizing a resumed sitting still marks it Completed (Phase F §2)
+    state.activeAssignment = (record.assignmentId && state.assignments)
+      ? (state.assignments.find(a => a.assignmentId === record.assignmentId) || null)
+      : null;
     const idx = Math.min(resume.moduleIndex || 0, test.modules.length - 1);
     delete state.resumeRecords[test.testId];
     showOnly("screen-loading");
@@ -255,6 +454,11 @@
       Math.floor(resume.timeRemainingSeconds) : mod.timeLimitMinutes * 60;
     state.timerHidden = false;
     el("timerBtn").textContent = "Hide";
+    // Phase F §6: alert fires once per module; resuming inside the final five
+    // minutes keeps it consumed and the Hide control stays gone (screenshot 22)
+    state.fiveMinAlerted = state.timeRemainingSec <= 300;
+    hide("fiveMinPopup");
+    el("timerBtn").classList.toggle("hidden", state.fiveMinAlerted);
     showOnly("screen-test");
     renderTest();
     openDirections();
@@ -274,13 +478,17 @@
         submitModule("timer-expired");   // real Bluebook auto-advances at 0:00
         return;
       }
-      if(state.timeRemainingSec === 300 && state.timerHidden){
-        state.timerHidden = false;    // auto-reveal at 5 minutes
+      if(state.timeRemainingSec === 300 && !state.fiveMinAlerted){
+        state.fiveMinAlerted = true;
+        state.timerHidden = false;               // force-show the timer (§6)
         el("timerBtn").textContent = "Hide";
+        el("timerBtn").classList.add("hidden");  // Hide control gone for the rest (22)
+        show("fiveMinPopup");                    // dark alert below the timer (23)
       }
       updateTimerDisplay();
     }, 1000);
   }
+  el("fiveMinClose").addEventListener("click", ()=> hide("fiveMinPopup"));
 
   function updateTimerDisplay(){
     const m = Math.floor(state.timeRemainingSec/60);
@@ -626,6 +834,7 @@
     clearInterval(state.timerInterval);
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
+    hide("fiveMinPopup");
     const cur = currentModule();
     Attempts.moduleEnd(cur, endedBy || "submitted");
     const nextIdx = state.moduleIndex + 1;
@@ -640,6 +849,12 @@
     } else {
       Attempts.finalize(endedBy || "submitted");
       delete state.resumeRecords[state.currentTest.testId];   // completed ≠ resumable
+      if(state.activeAssignment){
+        // Phase F §2: the assignment is consumed — its card becomes Completed
+        state.activeAssignment.completedAttemptId = Attempts.currentAttemptId() || "unknown";
+        Attempts.completeAssignment(state.userName, state.activeAssignment.assignmentId);
+        state.activeAssignment = null;
+      }
       showModuleOver(true);
     }
   }
@@ -718,6 +933,10 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#1E1E1E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
           <span>Save and Exit</span>
         </button>
+        <button class="more-item" id="miBugReport">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#1E1E1E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="6"/><path d="M12 7V4M7.5 9L5 6.5M16.5 9L19 6.5M6 13H3M21 13h-3M7.5 17L5 19.5M16.5 17L19 19.5"/></svg>
+          <span>Report a bug</span>
+        </button>
       </div>
     </span>`;
 
@@ -732,6 +951,7 @@
       closeMoreMenu();
     });
     el("miSaveExit").addEventListener("click", saveAndExit);
+    el("miBugReport").addEventListener("click", ()=>{ closeMoreMenu(); openBugModal(); });
   }
 
   /* ---- Line Reader (Phase E) ---- */
@@ -773,6 +993,7 @@
     clearInterval(state.timerInterval);           // timer pauses while exited
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
+    hide("fiveMinPopup");
     closeMoreMenu();
     const test = state.currentTest;
     const annotations = {};
@@ -782,12 +1003,20 @@
         annotations[mid] = { passageHtml: ms.passageHtml, notes: ms.notes };
       }
     });
-    await Attempts.suspend({
+    const ok = await Attempts.suspend({
       moduleIndex: state.moduleIndex,
       questionIndex: state.questionIndex,
       timeRemainingSeconds: state.timeRemainingSec,
       annotations
     });
+    if(!ok){
+      // Phase F §8: never return home over unrecoverable progress — stay in
+      // the test, restart the clock, explain, and offer the JSON fallback
+      startTimer();
+      renderTest();                               // reopens the per-question clock
+      show("saveFailModal");
+      return;
+    }
     // re-read from storage so the home card reflects what actually persisted
     const r = await Attempts.findInProgress(state.userName, test.testId, test.testVersion);
     if(r) state.resumeRecords[test.testId] = r;
@@ -795,6 +1024,54 @@
     renderHome();
     showOnly("screen-home");
   }
+  el("sfContinueBtn").addEventListener("click", ()=> hide("saveFailModal"));
+  el("sfDownloadBtn").addEventListener("click", ()=> Attempts.downloadJson());
+
+  /* ================= REPORT A BUG (Phase F §9) ================= */
+  function openBugModal(){
+    el("bugText").value = "";
+    el("bugNote").classList.add("hidden");
+    show("bugModal");
+    el("bugText").focus();
+  }
+  function closeBugModal(){ hide("bugModal"); }
+  el("bugClose").addEventListener("click", closeBugModal);
+  el("bugCancel").addEventListener("click", closeBugModal);
+  el("homeBugBtn").addEventListener("click", openBugModal);
+  el("bugSend").addEventListener("click", async ()=>{
+    const text = el("bugText").value.trim();
+    if(!text){ el("bugText").focus(); return; }
+    const inTest = !!state.currentTest;
+    const report = {
+      at: new Date().toISOString(),
+      studentCode: state.userName,
+      testId: inTest ? state.currentTest.testId : null,
+      testVersion: inTest ? (state.currentTest.testVersion || "unversioned") : null,
+      attemptId: Attempts.currentAttemptId(),
+      moduleId: inTest ? currentModule().moduleId : null,
+      questionId: (inTest && state.view === "question") ? currentQuestion().id : null,
+      timerRemainingSeconds: inTest ? state.timeRemainingSec : null,
+      userAgent: navigator.userAgent,
+      text
+    };
+    const note = el("bugNote");
+    const ok = await Attempts.reportBug(report);
+    if(ok){
+      note.textContent = "Thanks — your report was sent.";
+      note.classList.remove("err");
+      note.classList.remove("hidden");
+      setTimeout(closeBugModal, 1400);
+    } else {
+      // storage absent/failing → mailto draft with the same context (§9)
+      const body = "Bug report from the Bluebook Simulator\n\n" + JSON.stringify(report, null, 2);
+      window.location.href = "mailto:lee.david87@gmail.com?subject=" +
+        encodeURIComponent("Bluebook Simulator bug report") +
+        "&body=" + encodeURIComponent(body);
+      note.textContent = "Storage isn't reachable — an email draft was opened instead.";
+      note.classList.add("err");
+      note.classList.remove("hidden");
+    }
+  });
 
   function updateHeaderTools(mod){
     const tools = el("thTools");

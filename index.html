@@ -12,24 +12,81 @@
 </head>
 <body>
 
-<!-- ============ SIGN IN ============ -->
+<!-- ============ SIGN IN (Phase F §5, screenshot 21) ============ -->
 <div id="screen-signin">
-  <div class="bb-logo"><span class="star">✦</span>Bluebook<sup>™</sup></div>
+  <button class="tyd-pill" id="tydBtn">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>
+    Test Your Device
+  </button>
+  <div class="bb-logo"><span class="star">✦</span>Ace STEM<sup>™</sup></div>
   <div class="signin-card">
     <h1>Sign In</h1>
     <label for="nameInput">Student code</label>
-    <input type="text" id="nameInput" placeholder="Enter the code your tutor gave you" autocomplete="off">
-    <div class="cond-row">
-      <span class="cond-label">Test conditions</span>
-      <div class="cond-toggle" id="condToggle">
-        <button data-cond="proctored">Proctored</button>
-        <button data-cond="self-administered">At home</button>
-      </div>
-    </div>
+    <input type="text" id="nameInput" placeholder="AS-1234" autocomplete="off" spellcheck="false">
+    <div class="signin-error hidden" id="signinError">Enter the code your tutor gave you — it looks like AS-1234.</div>
     <button class="pill yellow" id="signinBtn">✦&nbsp; Sign in to practice</button>
     <div class="signin-note">Ace STEM practice simulator — no College Board account needed. Don't have a code? Ask your tutor.</div>
   </div>
   <div class="signin-footer">Ace STEM · Bluebook Simulator</div>
+
+  <!-- original line-art band in the spirit of the real page (NOT College
+       Board's artwork): desks, devices, books, timers, buildings -->
+  <svg class="signin-art" viewBox="0 0 1600 240" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+    <g fill="#5068CF">
+      <!-- desk + lamp + chair -->
+      <rect x="30" y="160" width="190" height="10" rx="3"/>
+      <rect x="45" y="170" width="12" height="60"/><rect x="193" y="170" width="12" height="60"/>
+      <path d="M120 160v-34c0-6 8-6 8 0v34z"/><circle cx="124" cy="118" r="12"/>
+      <rect x="240" y="180" width="64" height="8" rx="3"/><rect x="264" y="188" width="10" height="42"/>
+      <rect x="240" y="132" width="58" height="42" rx="6"/>
+      <!-- laptop with cards -->
+      <rect x="360" y="80" width="240" height="140" rx="10"/>
+      <rect x="376" y="96" width="94" height="46" rx="6" fill="#324DC7"/>
+      <rect x="376" y="152" width="94" height="46" rx="6" fill="#324DC7"/>
+      <rect x="486" y="96" width="94" height="46" rx="6" fill="#324DC7"/>
+      <rect x="486" y="152" width="94" height="46" rx="6" fill="#324DC7"/>
+      <rect x="340" y="220" width="280" height="12" rx="6"/>
+      <!-- x² -->
+      <text x="660" y="200" font-family="Georgia, serif" font-style="italic" font-weight="700" font-size="54" fill="#5068CF">x²</text>
+      <!-- calculator -->
+      <rect x="730" y="120" width="80" height="110" rx="10"/>
+      <rect x="742" y="132" width="56" height="24" rx="4" fill="#324DC7"/>
+      <g fill="#324DC7">
+        <rect x="742" y="166" width="14" height="12" rx="3"/><rect x="763" y="166" width="14" height="12" rx="3"/><rect x="784" y="166" width="14" height="12" rx="3"/>
+        <rect x="742" y="186" width="14" height="12" rx="3"/><rect x="763" y="186" width="14" height="12" rx="3"/><rect x="784" y="186" width="14" height="12" rx="3"/>
+        <rect x="742" y="206" width="14" height="12" rx="3"/><rect x="763" y="206" width="14" height="12" rx="3"/><rect x="784" y="206" width="14" height="12" rx="3"/>
+      </g>
+      <!-- open book -->
+      <path d="M850 230v-72c22-14 48-14 66-4 18-10 44-10 66 4v72c-22-12-48-12-66-2-18-10-44-10-66 2z"/>
+      <path d="M914 156v70" stroke="#324DC7" stroke-width="4"/>
+      <!-- stopwatch -->
+      <circle cx="1042" cy="188" r="42"/><rect x="1034" y="132" width="16" height="12" rx="3"/>
+      <path d="M1042 188v-26M1042 188l18 12" stroke="#324DC7" stroke-width="6" stroke-linecap="round"/>
+      <!-- pencil -->
+      <path d="M1120 226l14-44 12 4-14 44-14 6z"/><rect x="1128" y="160" width="14" height="26" rx="3" transform="rotate(18 1135 173)"/>
+      <!-- list panel -->
+      <rect x="1170" y="120" width="120" height="110" rx="10"/>
+      <g fill="#324DC7"><rect x="1184" y="136" width="92" height="14" rx="4"/><rect x="1184" y="160" width="92" height="14" rx="4"/><rect x="1184" y="184" width="60" height="14" rx="4"/></g>
+      <!-- school with columns + houses + trees -->
+      <path d="M1320 230v-70h130v70z"/><path d="M1310 160l75-34 75 34z"/>
+      <g fill="#324DC7"><rect x="1336" y="176" width="14" height="54"/><rect x="1364" y="176" width="14" height="54"/><rect x="1392" y="176" width="14" height="54"/><rect x="1420" y="176" width="14" height="54"/></g>
+      <path d="M1478 230v-44h56v44z"/><path d="M1470 190l36-22 36 22z"/>
+      <circle cx="1568" cy="180" r="24"/><rect x="1562" y="196" width="12" height="34"/>
+      <path d="M300 60l8 20 20 8-20 8-8 20-8-20-20-8 20-8z" opacity=".7"/>
+      <circle cx="1245" cy="70" r="6" opacity=".6"/><circle cx="700" cy="52" r="5" opacity=".5"/>
+    </g>
+  </svg>
+
+  <!-- Test Your Device pre-flight modal (Phase F §5) -->
+  <div class="modal-overlay hidden" id="deviceModal">
+    <div class="modal-card">
+      <button class="panel-x dark" id="deviceClose">✕</button>
+      <h2>Test Your Device</h2>
+      <p class="modal-sub">Quick check that test day will work on this computer.</p>
+      <div id="deviceChecks"></div>
+      <div class="modal-actions"><button class="pill ghost" id="deviceRunBtn">Run again</button></div>
+    </div>
+  </div>
 </div>
 
 <!-- ============ HOME ============ -->
@@ -40,8 +97,12 @@
   </div>
   <div class="welcome-band"><h1 id="welcomeMsg">Welcome. Good luck on test day!</h1></div>
   <div class="home-main">
-    <!-- BLUEBOOK-PARITY Phase D: no "Your Tests" section — that's real
-         administrations (screenshot 1), not applicable here -->
+    <!-- Phase F §2: "Your Tests" returns, but for tutor-assigned proctored
+         sittings (category "test") — not real administrations. Hidden unless
+         this student code has test-category assignments. -->
+    <div class="home-sectionrow hidden" id="yourTestsRow"><h2>Your Tests</h2></div>
+    <div class="practice-cards hidden" id="testCards"></div>
+
     <div class="home-sectionrow">
       <h2>Practice and Prepare</h2>
       <div class="seg" id="practiceSeg">
@@ -60,6 +121,33 @@
         <button class="pill ghost" style="padding:10px 22px;">Go to BigFuture</button>
       </div>
     </div>
+
+    <div class="home-footer"><button class="linklike" id="homeBugBtn">Report a bug</button></div>
+  </div>
+</div>
+
+<!-- ============ START CODE (Phase F §4, screenshot 24) ============ -->
+<div id="screen-startcode" class="hidden">
+  <div class="sc-topbar">
+    <span></span>
+    <button class="sc-home" id="scHomeBtn">Return to Home
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-6h4v6"/></svg>
+    </button>
+  </div>
+  <div class="sc-body">
+    <h1>Start Code</h1>
+    <p class="sc-sub">Enter your start code now to begin testing. Good luck!</p>
+    <p class="sc-sub">The start code contains <b>numbers only</b>.</p>
+    <div class="sc-boxes" id="scBoxes">
+      <input class="sc-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Start code digit 1">
+      <input class="sc-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Start code digit 2">
+      <input class="sc-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Start code digit 3">
+      <input class="sc-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Start code digit 4">
+      <input class="sc-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Start code digit 5">
+      <input class="sc-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Start code digit 6">
+    </div>
+    <div class="sc-error hidden" id="scError"></div>
+    <button class="pill yellow sc-start" id="scStartBtn">Start Test</button>
   </div>
 </div>
 
@@ -118,6 +206,12 @@
       <div class="battery">100% 🔋</div>
       <div class="th-tools" id="thTools"></div>
     </div>
+  </div>
+
+  <!-- five-minute alert (Phase F §6, screenshot 23) -->
+  <div class="five-min hidden" id="fiveMinPopup">
+    <span>5 minutes left in this part of the test.</span>
+    <button class="fm-x" id="fiveMinClose" title="Dismiss">✕</button>
   </div>
 
   <div class="t-body" id="tBody">
@@ -296,12 +390,43 @@
     <button data-tab="students">Students</button>
     <button data-tab="items">Item analysis</button>
     <button data-tab="insights">Insights</button>
+    <button data-tab="assign">Assignments</button>
+    <button data-tab="bugs">Bug reports</button>
   </div>
   <div class="dash-body" id="dashBody"></div>
   <div class="dash-detail hidden" id="dashDetail">
     <div class="dash-detail-card">
       <button class="panel-x" id="dashDetailClose">✕</button>
       <div id="dashDetailBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Report a bug (Phase F §9) — available from home footer and the More menu -->
+<div class="modal-overlay hidden" id="bugModal">
+  <div class="modal-card">
+    <button class="panel-x dark" id="bugClose">✕</button>
+    <h2>Report a bug</h2>
+    <p class="modal-sub">Tell us what went wrong. Where you are in the test is attached automatically.</p>
+    <textarea id="bugText" rows="5" placeholder="What happened?"></textarea>
+    <div class="modal-actions">
+      <button class="pill ghost" id="bugCancel">Cancel</button>
+      <button class="pill" id="bugSend">Send</button>
+    </div>
+    <div class="modal-note hidden" id="bugNote"></div>
+  </div>
+</div>
+
+<!-- Save-and-Exit failure guard (Phase F §8) -->
+<div class="modal-overlay hidden" id="saveFailModal">
+  <div class="modal-card">
+    <h2>We couldn't save your progress</h2>
+    <p class="modal-sub">Storage isn't reachable right now, so exiting would lose this attempt.
+      Keep testing — nothing is lost while you stay on this screen. You can also download
+      your results and send the file to your tutor.</p>
+    <div class="modal-actions">
+      <button class="pill ghost" id="sfDownloadBtn">Download Results JSON</button>
+      <button class="pill" id="sfContinueBtn">Continue Testing</button>
     </div>
   </div>
 </div>

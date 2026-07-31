@@ -34,17 +34,35 @@
   .pill.yellow{ background:var(--cb-yellow); color:var(--ink); }
   .pill.yellow:hover{ background:#F5C112; }
 
-  /* ================= SIGN IN ================= */
+  /* ================= SIGN IN (Phase F §5, screenshot 21) ================= */
   #screen-signin{
-    min-height:100vh; background:var(--cb-blue-bg);
-    display:flex; flex-direction:column; align-items:center; padding:60px 20px;
+    min-height:100vh; background:var(--cb-blue);
+    display:flex; flex-direction:column; align-items:center; padding:60px 20px 200px;
+    position:relative; overflow:hidden;
   }
+  .tyd-pill{
+    position:absolute; top:28px; right:34px; z-index:3;
+    display:flex; align-items:center; gap:9px;
+    background:#7E96DD; color:#001C7C; border:none; border-radius:24px;
+    padding:13px 24px; font-size:15px; font-weight:700;
+  }
+  .tyd-pill:hover{ background:#8CA2E2; }
+  .signin-art{
+    position:absolute; left:0; right:0; bottom:0; width:100%; height:220px;
+    z-index:0; pointer-events:none;
+  }
+  .signin-error{
+    text-align:left; color:#FFD9DD; background:rgba(183,44,61,.85);
+    font-size:13.5px; font-weight:600; border-radius:8px; padding:9px 12px; margin-top:10px;
+  }
+  .signin-card .signin-error{ color:#7A1420; background:#FBE9EB; }
   .bb-logo{ color:#fff; font-size:34px; font-weight:800; letter-spacing:-0.5px; display:flex; align-items:center; gap:8px; }
   .bb-logo .star{ font-size:30px; transform:rotate(-12deg); display:inline-block; }
   .bb-logo sup{ font-size:11px; font-weight:400; }
   .signin-card{
     background:#fff; border-radius:16px; padding:38px 44px; width:100%; max-width:520px;
     margin-top:48px; box-shadow:0 6px 24px rgba(0,0,0,.18); text-align:center;
+    position:relative; z-index:2;
   }
   .signin-card h1{ margin:0 0 26px; font-size:28px; }
   .signin-card label{ display:block; text-align:left; font-size:13px; font-weight:700; margin:0 0 6px; }
@@ -53,7 +71,7 @@
   }
   .signin-card .pill{ width:100%; margin-top:22px; }
   .signin-note{ margin-top:22px; font-size:13px; color:var(--ink-soft); }
-  .signin-footer{ margin-top:auto; color:#C9D2F2; font-size:12px; padding-top:40px; }
+  .signin-footer{ margin-top:auto; color:#C9D2F2; font-size:12px; padding-top:40px; position:relative; z-index:2; }
 
   /* ================= HOME ================= */
   #screen-home{ min-height:100vh; }
@@ -162,7 +180,7 @@
   }
 
   /* ================= TEST SCREEN ================= */
-  #screen-test{ display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+  #screen-test{ display:flex; flex-direction:column; height:100vh; overflow:hidden; position:relative; }
   .t-header{
     position:relative; padding:14px 24px 10px; flex-shrink:0;
     border-bottom:2px dashed var(--ink);
@@ -250,6 +268,82 @@
   .submitted-card h1{ font-size:26px; margin:0 0 14px; color:#0B7A3E; }
   .submitted-card p{ font-size:15.5px; line-height:1.65; margin:0 0 12px; }
   .submitted-actions{ display:flex; gap:14px; justify-content:center; margin-top:26px; flex-wrap:wrap; }
+
+  /* ================= PHASE F components ================= */
+  /* generic modal (device check, bug report, save-fail guard) */
+  .modal-overlay{
+    position:fixed; inset:0; z-index:120; background:rgba(40,40,40,.5);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    background:#fff; border-radius:14px; box-shadow:0 10px 36px rgba(0,0,0,.35);
+    width:min(520px, 94vw); padding:28px 30px 24px; position:relative; text-align:left;
+  }
+  .modal-card h2{ margin:0 0 8px; font-size:21px; }
+  .modal-sub{ margin:0 0 16px; font-size:14.5px; line-height:1.55; color:var(--ink-soft); }
+  .modal-actions{ display:flex; gap:12px; justify-content:flex-end; margin-top:18px; flex-wrap:wrap; }
+  .modal-note{ margin-top:12px; font-size:13.5px; font-weight:600; color:#1E7A43; }
+  .modal-note.err{ color:var(--cb-red); }
+  .panel-x.dark{ position:absolute; top:12px; right:14px; color:var(--ink); }
+  #bugText{
+    width:100%; font-family:var(--sans); font-size:14.5px; line-height:1.5; color:var(--ink);
+    border:1.5px solid #9AA0AE; border-radius:8px; padding:10px 12px; resize:vertical;
+  }
+  .linklike{
+    background:none; border:none; font-size:13.5px; color:var(--cb-blue);
+    text-decoration:underline; padding:4px;
+  }
+  .home-footer{ margin-top:48px; display:flex; justify-content:center; }
+
+  /* device-check rows */
+  .devrow{
+    display:flex; align-items:center; gap:12px; padding:11px 4px; font-size:15px;
+    border-bottom:1px solid var(--line);
+  }
+  .devrow:last-child{ border-bottom:none; }
+  .dev-mark{
+    width:26px; height:26px; border-radius:50%; flex-shrink:0; display:flex;
+    align-items:center; justify-content:center; font-size:14px; font-weight:800;
+    background:#EDEDED; color:var(--ink-soft);
+  }
+  .devrow.pass .dev-mark{ background:#E3F3E8; color:#1E7A43; }
+  .devrow.fail .dev-mark{ background:#FBE9EB; color:var(--cb-red); }
+  .dev-note{ margin-left:auto; font-size:12.5px; color:var(--ink-soft); text-align:right; }
+  .dev-note .katex{ font-size:15px; }
+
+  /* Start Code screen (screenshot 24: pale green #C9DFD3, white digit boxes) */
+  #screen-startcode{ min-height:100vh; display:flex; flex-direction:column; background:#C9DFD3; }
+  .sc-topbar{
+    background:#fff; display:flex; align-items:center; justify-content:space-between;
+    padding:14px 26px; border-bottom:1px solid var(--line);
+  }
+  .sc-home{
+    background:none; border:none; display:flex; align-items:center; gap:9px;
+    font-size:15.5px; font-weight:700; color:var(--ink);
+  }
+  .sc-body{ flex:1; display:flex; flex-direction:column; align-items:center; padding:64px 20px; text-align:center; }
+  .sc-body h1{ font-size:40px; font-weight:400; margin:0 0 34px; }
+  .sc-sub{ font-size:19px; margin:0 0 14px; }
+  .sc-boxes{ display:flex; gap:22px; margin:36px 0 10px; }
+  .sc-digit{
+    width:82px; height:86px; border:1.5px solid var(--ink); border-radius:12px; background:#fff;
+    font-size:34px; font-weight:700; text-align:center; font-family:var(--sans); color:var(--ink);
+  }
+  .sc-digit:focus{ border-color:var(--cb-blue); outline:2px solid var(--cb-blue); outline-offset:1px; }
+  .sc-error{
+    color:#7A1420; background:#FBE9EB; border-radius:8px; padding:10px 16px;
+    font-size:14.5px; font-weight:600; margin-bottom:8px;
+  }
+  .sc-start{ margin-top:26px; padding:14px 40px; font-size:16px; }
+
+  /* five-minute alert (screenshot 23): dark card below the header timer */
+  .five-min{
+    position:absolute; top:64px; left:50%; transform:translateX(-50%); z-index:95;
+    background:#1E1E1E; color:#fff; border-radius:8px; padding:16px 18px;
+    display:flex; align-items:flex-start; gap:26px; width:min(430px, 92vw);
+    font-size:16.5px; line-height:1.4; box-shadow:0 8px 24px rgba(0,0,0,.35);
+  }
+  .fm-x{ background:none; border:none; color:#fff; font-size:16px; line-height:1; padding:2px; margin-left:auto; }
 
   /* Highlight-mode cursor (screenshot 18): I-beam + marker, hotspot at the
      marker tip */
@@ -704,11 +798,8 @@
   .qri-badge.nokey{ background:#e8e8ee; color:#555; }
 
   /* ================= SIGN-IN: conditions toggle (ATTEMPTS-SPEC §10) ================= */
-  .cond-row{ display:flex; align-items:center; justify-content:space-between; margin-top:16px; }
-  .cond-label{ font-size:13px; font-weight:700; }
-  .cond-toggle{ display:flex; border:1.5px solid #9AA0AE; border-radius:20px; overflow:hidden; }
-  .cond-toggle button{ border:none; background:#fff; padding:7px 16px; font-size:13px; color:var(--ink-soft); }
-  .cond-toggle button.on{ background:var(--cb-navy); color:#fff; font-weight:700; }
+  /* (conditions toggle removed in Phase F §2 — the start-code ceremony sets
+     proctored/self-administered now) */
 
   /* ================= RESULTS: save note ================= */
   .res-save-note{ margin-top:14px; font-size:13px; color:var(--ink-soft); }
@@ -756,6 +847,27 @@
     border:1.5px solid var(--cb-blue); background:#fff; color:var(--cb-blue);
   }
   .dash-rel.rel-on{ background:#E3F3E8; border-color:#1E7A43; color:#1E7A43; }
+  /* Phase F §3: assignment panel */
+  .assign-form{ margin-bottom:22px; }
+  .af-grid{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:14px 18px;
+    margin:12px 0 16px;
+  }
+  .af-grid label{ display:flex; flex-direction:column; gap:6px; font-size:12.5px; font-weight:700; }
+  .af-grid select, .af-grid input{
+    font-size:13.5px; padding:8px 10px; border:1.5px solid #9AA0AE; border-radius:8px; font-family:var(--sans);
+  }
+  .af-actions{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .af-code{
+    margin-top:16px; padding:14px 18px; background:#F4F8F4; border:1.5px solid #1E7A43;
+    border-radius:10px; font-size:13px; font-weight:700; color:#1E7A43;
+  }
+  .af-code-big{ font-size:44px; letter-spacing:10px; color:var(--ink); margin-top:4px; }
+  /* Phase F §9: bug report cards */
+  .bug-card{ margin-bottom:14px; }
+  .bug-head{ display:flex; align-items:center; gap:10px; }
+  .bug-head .bug-dismiss{ margin-left:auto; }
+  .bug-text{ margin:8px 0 0; font-size:14px; line-height:1.5; white-space:pre-wrap; }
 
   .dcard{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px 22px; margin-bottom:16px; }
   .dcard.lead{ border-color:var(--cb-red); border-width:2px; }

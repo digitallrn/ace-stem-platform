@@ -13,6 +13,9 @@ window.Dashboard = (function(){
 
   let showOnlyFn = null;
   let recs = [];                 // loaded attempt records
+  let assigns = [];              // Phase F §3: [{code, list:[assignment...]}]
+  let bugs = [];                 // Phase F §9: bug reports, newest first
+  let lastStartCode = null;      // the code David reads aloud, shown big
   let source = "storage";        // "storage" | "file"
   let tab = "attempts";
   let sortKey = "startedAt", sortDir = -1;
@@ -86,10 +89,30 @@ window.Dashboard = (function(){
       if(r && r.attemptId) loaded.push(r); else failed++;
     }
     recs = loaded;
+    await loadAssignsAndBugs();
     $("dashStatus").textContent = recs.length + " attempt(s) in storage." +
       (failed ? " (" + failed + " unreadable — see console.)" : "") +
       (lastExport ? "" : " Download an archive before deleting anything.");
     renderAll();
+  }
+
+  async function loadAssignsAndBugs(){
+    assigns = []; bugs = [];
+    const aKeys = await AttemptStore.list("assign:");
+    if(aKeys){
+      for(const k of aKeys){
+        const list = await AttemptStore.get(k);
+        if(Array.isArray(list)) assigns.push({ code: k.slice("assign:".length), list });
+      }
+    }
+    const bKeys = await AttemptStore.list("bug:");
+    if(bKeys){
+      for(const k of bKeys){
+        const b = await AttemptStore.get(k);
+        if(b) bugs.push(Object.assign({ __key: k }, b));
+      }
+    }
+    bugs.sort((x, y) => (y.at || y.__key || "").localeCompare(x.at || x.__key || ""));
   }
 
   function loadFromFile(file){
@@ -177,6 +200,8 @@ window.Dashboard = (function(){
     if(tab === "attempts") body.innerHTML = viewAttempts(rows);
     else if(tab === "students") body.innerHTML = viewStudents(rows);
     else if(tab === "items") body.innerHTML = viewItems(rows);
+    else if(tab === "assign") body.innerHTML = viewAssign();
+    else if(tab === "bugs") body.innerHTML = viewBugs();
     else body.innerHTML = viewInsights(rows);
     attachBodyHandlers();
   }
@@ -397,6 +422,151 @@ window.Dashboard = (function(){
   }
 
   /* ---------- attempt detail ---------- */
+  /* ---------- Phase F §3: assignments ---------- */
+  function assignRowStatus(code, a){
+    if(a.completedAttemptId) return "completed";
+    if(recs.some(r => r.status === "in-progress" && r.testId === a.testId &&
+        r.student && r.student.key === code)) return "in-progress";
+    if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
+    return "pending";
+  }
+  function fmtDay(isoStr){
+    if(!isoStr) return "—";
+    return new Date(isoStr).toLocaleDateString(undefined, {month:"short", day:"numeric", year:"2-digit"});
+  }
+
+  function viewAssign(){
+    if(!AttemptStore.available()){
+      return '<p class="dash-empty">No storage in this copy — assignments can only be managed where records live (published app, or ?devstorage=1 locally).</p>';
+    }
+    if(source === "file"){
+      // statuses/delete-gating are computed from recs; against an archive file
+      // they'd be stale, and deleting could orphan a live in-progress attempt
+      return '<p class="dash-empty">You\'re viewing a loaded archive file. Assignment statuses are computed from live attempts, so managing assignments is disabled — reload from storage first.</p>';
+    }
+    const knownCodes = Array.from(new Set(
+      recs.map(r => r.student && r.student.key).filter(Boolean)
+        .concat(assigns.map(a => a.code))
+    )).sort();
+    const d = new Date();
+    const today = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+    const rows = [];
+    assigns.forEach(entry => entry.list.forEach(a => {
+      if(typeof a === "string"){
+        rows.push({ code: entry.code, legacy: true, a: { testId: a } });
+      } else {
+        rows.push({ code: entry.code, legacy: false, a });
+      }
+    }));
+    const rowsHtml = rows.map(r => {
+      if(r.legacy){
+        return `<tr><td>${esc(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
+      }
+      const a = r.a;
+      const st = assignRowStatus(r.code, a);
+      const deletable = st === "pending" || st === "expired";
+      return `<tr>
+        <td>${esc(r.code)}</td>
+        <td>${esc((testsById[a.testId] && testsById[a.testId].testName) || a.testId)}</td>
+        <td>${esc(a.category || "?")}</td>
+        <td>${a.startCode ? "<b>" + esc(String(a.startCode)) + "</b>" : "—"}</td>
+        <td>${fmtDay(a.windowOpens)}</td>
+        <td>${fmtDay(a.expiresAt)}</td>
+        <td><span class="dstatus ${ {completed:"ok", "in-progress":"warn", expired:"to"}[st] || "" }">${st}</span></td>
+        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${esc(r.code)}" data-aid="${esc(a.assignmentId)}">Delete</button>` : ""}</td>
+      </tr>`;
+    }).join("");
+    return `
+      <div class="dash-assign">
+        <div class="dcard assign-form">
+          <h3>New assignment</h3>
+          <div class="af-grid">
+            <label>Student codes (seen in storage)
+              <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></label>
+            <label>More codes (comma-separated)
+              <input id="afFree" placeholder="AS-1234, AS-9XYZ" autocomplete="off"></label>
+            <label>Test
+              <select id="afTest">${(window.TEST_DATA || []).map(t => `<option value="${esc(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
+            <label>Category
+              <select id="afCat">
+                <option value="test">Test — proctored, start code</option>
+                <option value="practice">Practice — self-administered</option>
+              </select></label>
+            <label>Window opens (optional)
+              <input type="date" id="afOpens"></label>
+            <label>Expires (end of day)
+              <input type="date" id="afExpires" value="${today}"></label>
+          </div>
+          <div class="af-actions">
+            <button class="pill" id="afCreateBtn" style="padding:10px 26px;">Create assignment</button>
+            <span class="dash-hint" id="afMsg"></span>
+          </div>
+          ${lastStartCode ? `<div class="af-code">Start code — read this aloud<div class="af-code-big">${esc(lastStartCode)}</div></div>` : ""}
+        </div>
+        ${rows.length ? `<table class="dtable"><thead><tr>
+            <th>Student</th><th>Test</th><th>Category</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
+          </tr></thead><tbody>${rowsHtml}</tbody></table>
+          <p class="dash-hint">Assignments with an attempt (in-progress or completed) can't be deleted.</p>`
+          : '<p class="dash-empty">No assignments yet. Students with no assignments see every published test as practice.</p>'}
+      </div>`;
+  }
+
+  async function createAssignment(){
+    const sel = Array.from($("afCodes").selectedOptions).map(o => o.value);
+    const free = $("afFree").value.split(/[\s,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+    const bad = free.filter(c => !/^AS-[A-Z0-9]{4}$/.test(c));
+    if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
+    const codes = Array.from(new Set(sel.concat(free)));
+    if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
+    const testId = $("afTest").value;
+    const category = $("afCat").value;
+    const startCode = category === "test"
+      ? String(Math.floor(100000 + Math.random() * 900000)) : null;
+    const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
+    const expires = $("afExpires").value ? new Date($("afExpires").value + "T23:59:00").toISOString() : null;
+    let okAll = true;
+    for(const code of codes){
+      const key = "assign:" + code;
+      const existing = await AttemptStore.get(key);
+      const list = Array.isArray(existing) ? existing : [];
+      list.push({
+        assignmentId: "a-" + Math.floor(Date.now()/1000) + "-" + Math.random().toString(16).slice(2, 6),
+        testId, category, startCode,
+        windowOpens: opens, expiresAt: expires,
+        assignedAt: new Date().toISOString(),
+        completedAttemptId: null
+      });
+      if(!(await AttemptStore.set(key, list))) okAll = false;
+    }
+    lastStartCode = startCode;
+    $("dashStatus").textContent = okAll
+      ? "Assigned " + testId + " to " + codes.join(", ") + "."
+      : "Some assignment writes failed — storage problem.";
+    await loadAssignsAndBugs();
+    render();
+  }
+
+  async function deleteAssignment(code, assignmentId){
+    const key = "assign:" + code;
+    const list = await AttemptStore.get(key);
+    if(!Array.isArray(list)) return;
+    await AttemptStore.set(key, list.filter(x => !(x && x.assignmentId === assignmentId)));
+    await loadAssignsAndBugs();
+    render();
+  }
+
+  /* ---------- Phase F §9: bug reports ---------- */
+  function viewBugs(){
+    if(!bugs.length) return '<p class="dash-empty">No bug reports.</p>';
+    return bugs.map(b => `
+      <div class="dcard bug-card">
+        <div class="bug-head"><b>${esc(b.studentCode || "?")}</b> · ${fmtDate(b.at)}
+          <button class="dash-rel bug-dismiss" data-bug="${esc(b.__key)}">Dismiss</button></div>
+        <div class="dash-hint">${esc(b.testId || "not in a test")}${b.testVersion ? " @ " + esc(b.testVersion) : ""}${b.moduleId ? " · " + esc(b.moduleId) : ""}${b.questionId ? " · " + esc(b.questionId) : ""}${b.timerRemainingSeconds != null ? " · " + mmss(b.timerRemainingSeconds) + " left" : ""}</div>
+        <p class="bug-text">${esc(b.text || "")}</p>
+      </div>`).join("");
+  }
+
   function openDetail(attemptId){
     const r = recs.find(x => x.attemptId === attemptId);
     if(!r) return;
@@ -441,10 +611,20 @@ window.Dashboard = (function(){
   function attachBodyHandlers(){
     document.querySelectorAll("#dashBody [data-att]").forEach(tr =>
       tr.addEventListener("click", () => openDetail(tr.dataset.att)));
-    document.querySelectorAll("#dashBody .dash-rel").forEach(btn =>
+    document.querySelectorAll("#dashBody .dash-rel[data-rel]").forEach(btn =>
       btn.addEventListener("click", e => {
         e.stopPropagation();                    // don't open the row's detail view
         toggleRelease(btn.dataset.rel);
+      }));
+    const cb = $("afCreateBtn");
+    if(cb) cb.addEventListener("click", createAssignment);
+    document.querySelectorAll("#dashBody .assign-del").forEach(btn =>
+      btn.addEventListener("click", () => deleteAssignment(btn.dataset.code, btn.dataset.aid)));
+    document.querySelectorAll("#dashBody .bug-dismiss").forEach(btn =>
+      btn.addEventListener("click", async () => {
+        await AttemptStore.remove(btn.dataset.bug);
+        await loadAssignsAndBugs();
+        render();
       }));
     document.querySelectorAll("#dashBody th[data-sort]").forEach(th =>
       th.addEventListener("click", () => {

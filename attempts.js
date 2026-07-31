@@ -225,7 +225,7 @@ window.Attempts = (function(){
 
   return {
     /* ---- lifecycle (called from app.js) ---- */
-    begin(test, studentCode, conditions, stateRef){
+    begin(test, studentCode, conditions, stateRef, assignmentId){
       try{
         appState = stateRef;
         qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
@@ -241,6 +241,7 @@ window.Attempts = (function(){
           testId: test.testId,
           testName: test.testName,
           testVersion: test.testVersion || "unversioned",
+          assignmentId: assignmentId || null,   // Phase F: ties the attempt to its assignment across resume
           conditions: conditions || "unknown",
           startedAt: iso(now),
           lastSavedAt: iso(now),
@@ -314,26 +315,31 @@ window.Attempts = (function(){
       }catch(e){}
     },
 
-    /* ---- Save and Exit + Resume (BLUEBOOK-PARITY Phase C) ---- */
+    /* ---- Save and Exit + Resume (BLUEBOOK-PARITY Phase C; failure semantics
+       Phase F §8: a refused exit keeps recording alive in place) ---- */
     async suspend(resumeBlob){
       try{
         if(!rec) return false;
         closeClock();
         stopTicker();
         if(curModule){
-          // fold this sitting's elapsed time into the still-open module entry
+          // fold this sitting's elapsed time into the still-open module entry,
+          // and restart the sitting clock so a refused exit can't double-count
           const m = rec.modules.find(x => x.moduleId === curModule.moduleId && !x.endedAt);
           if(m) m.timeSpentSeconds = (m.timeSpentSeconds || 0) +
             Math.round((Date.now() - curModule.startedAt)/1000);
-          curModule = null;
+          curModule = { moduleId: curModule.moduleId, startedAt: Date.now() };
         }
         rec.resume = resumeBlob;                  // status stays "in-progress" (spec)
         await save();                             // flush immediately, then leave
-        const ok = lastSaveOk === true;
+        if(lastSaveOk !== true){
+          startTicker();                          // exit refused — keep recording
+          return false;
+        }
         rec = null; appState = null;              // stop recording entirely once exited
-        qMeta = {}; liveSpr = {}; clock = null;
-        return ok;
-      }catch(e){ return false; }
+        qMeta = {}; liveSpr = {}; clock = null; curModule = null;
+        return true;
+      }catch(e){ try{ startTicker(); }catch(e2){} return false; }
     },
 
     resume(record, stateRef){
@@ -358,14 +364,48 @@ window.Attempts = (function(){
       }catch(e){}
     },
 
-    /* ---- Phase D: home-screen data ---- */
-    /* assign:<code> -> [testIds]; null (absent/unreadable) = all published */
-    async assignedTests(code){
+    /* ---- Phase D/F: home-screen data ---- */
+    /* Phase F assignments v2: assign:<CODE> -> array of assignment objects.
+       null (absent/unreadable) = default: all published tests as practice.
+       Legacy Phase D arrays of bare testIds normalize to practice
+       assignments so old keys keep working. */
+    async assignments(code){
       try{
         const key = String(code || "").trim().toUpperCase();
         const v = await AttemptStore.get("assign:" + key);
-        return Array.isArray(v) ? v : null;
+        if(!Array.isArray(v)) return null;
+        return v.filter(Boolean).map(item => (typeof item === "string")
+          ? { assignmentId: "legacy-" + item, testId: item, category: "practice",
+              startCode: null, windowOpens: null, expiresAt: null,
+              assignedAt: null, completedAttemptId: null }
+          : item);
       }catch(e){ return null; }
+    },
+
+    /* mark an assignment consumed by the attempt that just finalized */
+    async completeAssignment(code, assignmentId){
+      try{
+        if(!assignmentId || assignmentId.indexOf("legacy-") === 0) return;
+        const key = String(code || "").trim().toUpperCase();
+        const list = await AttemptStore.get("assign:" + key);
+        if(!Array.isArray(list)) return;
+        const a = list.find(x => x && x.assignmentId === assignmentId);
+        if(!a) return;
+        a.completedAttemptId = (rec && rec.attemptId) || a.completedAttemptId || "unknown";
+        await AttemptStore.set("assign:" + key, list);
+      }catch(e){}
+    },
+
+    currentAttemptId(){ return rec ? rec.attemptId : null; },
+
+    /* Phase F §9: bug reports — one storage key per report, same
+       last-write-wins-safe pattern as attempts */
+    async reportBug(report){
+      try{
+        const key = "bug:" + Math.floor(Date.now()/1000) + "-" +
+          Math.random().toString(16).slice(2, 6);
+        return await AttemptStore.set(key, report);
+      }catch(e){ return false; }
     },
 
     /* completed/timed-out attempts for this code, newest first */
