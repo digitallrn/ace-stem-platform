@@ -242,9 +242,13 @@
     const row = el("yourTestsRow"), wrap = el("testCards");
     wrap.innerHTML = "";
     const testAssigns = (state.assignments || []).filter(a => a.category === "test");
-    row.classList.toggle("hidden", !testAssigns.length);
-    wrap.classList.toggle("hidden", !testAssigns.length);
-    testAssigns.forEach(a => { const c = assignmentCard(a); if(c) wrap.appendChild(c); });
+    // gate visibility on cards that actually render, not the raw assignment
+    // count — an assignment for an unpublished testId yields no card, and a
+    // bare "Your Tests" heading over empty space would just confuse
+    const cards = testAssigns.map(assignmentCard).filter(Boolean);
+    row.classList.toggle("hidden", !cards.length);
+    wrap.classList.toggle("hidden", !cards.length);
+    cards.forEach(c => wrap.appendChild(c));
   }
 
   function renderActiveCards(wrap){
@@ -273,11 +277,14 @@
       return;
     }
     const practice = state.assignments.filter(a => a.category === "practice");
-    if(!practice.length){
+    // branch on renderable cards, not raw count — assignments for unpublished
+    // testIds would otherwise skip the empty-state and leave the section blank
+    const cards = practice.map(assignmentCard).filter(Boolean);
+    if(!cards.length){
       wrap.innerHTML = '<div class="no-tests-card"><h3>No Practice Tests</h3><p>No practice is assigned to this code yet — ask your tutor.</p></div>';
       return;
     }
-    practice.forEach(a => { const c = assignmentCard(a); if(c) wrap.appendChild(c); });
+    cards.forEach(c => wrap.appendChild(c));
   }
 
   function fmtCardDate(isoStr){
