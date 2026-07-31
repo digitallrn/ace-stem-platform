@@ -343,7 +343,12 @@ window.Attempts = (function(){
         rec.resume = resumeBlob;                  // status stays "in-progress" (spec)
         await save();                             // flush immediately, then leave
         if(lastSaveOk !== true){
-          startTicker();                          // exit refused — keep recording
+          // exit refused — keep recording, but drop the blob: the student is
+          // still testing, so a later successful checkpoint must not persist
+          // a resume point behind their real position (it would rewind them
+          // into an already-finished module after a crash)
+          delete rec.resume;
+          startTicker();
           return false;
         }
         rec = null; appState = null;              // stop recording entirely once exited
