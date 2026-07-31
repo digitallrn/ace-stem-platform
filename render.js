@@ -1,7 +1,14 @@
 function escapeHtml(str){
-    const d = document.createElement("div");
-    d.textContent = str == null ? "" : String(str);
-    return d.innerHTML;
+    /* Escapes quotes as well as &<> — callers interpolate into attribute
+       values (dashboard data-* hooks), where the DOM textContent trick's
+       unescaped quotes let storage-controlled strings break out of the
+       attribute and plant handlers. */
+    return String(str == null ? "" : str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   /* ============ v1.1 rich-text renderer (SCHEMA-v1.2.md §2) ============
