@@ -63,6 +63,18 @@ window.AttemptStore = (function(){
         return JSON.parse(r.value);
       }catch(e){ return null; }
     },
+    /* like get(), but distinguishes the three outcomes get() flattens to null,
+       so callers that gate access can tell "no such key" from "read failed":
+       {status:"nostorage"|"missing"|"ok"|"error", value} */
+    async getResult(key){
+      const b = backend();
+      if(!b) return { status:"nostorage", value:null };
+      try{
+        const r = await b.get(key, true);
+        if(!r || typeof r.value !== "string") return { status:"missing", value:null };
+        return { status:"ok", value: JSON.parse(r.value) };
+      }catch(e){ return { status:"error", value:null }; }
+    },
     async list(prefix){
       const b = backend();
       if(!b) return null;                       // null = storage unavailable (≠ empty)
@@ -385,16 +397,23 @@ window.Attempts = (function(){
        Legacy Phase D arrays of bare testIds normalize to practice
        assignments so old keys keep working. */
     async assignments(code){
-      try{
-        const key = String(code || "").trim().toUpperCase();
-        const v = await AttemptStore.get("assign:" + key);
-        if(!Array.isArray(v)) return null;
-        return v.filter(Boolean).map(item => (typeof item === "string")
-          ? { assignmentId: "legacy-" + item, testId: item, category: "practice",
-              startCode: null, windowOpens: null, expiresAt: null,
-              assignedAt: null, completedAttemptId: null }
-          : item);
-      }catch(e){ return null; }
+      const key = String(code || "").trim().toUpperCase();
+      // a genuine read failure must NOT collapse to "no key -> all published
+      // tests as practice": that would expose a proctored, start-code-gated
+      // test as an ungated practice card. Retry the transient blip; only a
+      // clean missing/no-storage result means "default".
+      let res = null;
+      for(let attempt = 0; attempt < 3; attempt++){
+        res = await AttemptStore.getResult("assign:" + key);
+        if(res.status !== "error") break;
+      }
+      if(res.status === "error") return "unavailable";     // caller shows a retry, not a downgrade
+      if(res.status !== "ok" || !Array.isArray(res.value)) return null;   // missing/nostorage -> default
+      return res.value.filter(Boolean).map(item => (typeof item === "string")
+        ? { assignmentId: "legacy-" + item, testId: item, category: "practice",
+            startCode: null, windowOpens: null, expiresAt: null,
+            assignedAt: null, completedAttemptId: null }
+        : item);
     },
 
     /* mark an assignment consumed by the attempt that just finalized */

@@ -51,6 +51,7 @@
     // Phase F §7: student codes are AS- plus four letters/digits
     const code = v.toUpperCase();
     if(!/^AS-[A-Z0-9]{4}$/.test(code)){
+      el("signinError").textContent = "Enter the code your tutor gave you — it looks like AS-1234.";
       el("signinError").classList.remove("hidden");
       el("nameInput").focus();
       return;
@@ -70,7 +71,15 @@
       if(r) state.resumeRecords[t.testId] = r;
     }
     // Phase F §2: assignment objects (absent -> all published tests as practice)
-    state.assignments = await Attempts.assignments(code);
+    const assigns = await Attempts.assignments(code);
+    if(assigns === "unavailable"){
+      // a read error must not silently downgrade access (an ungated proctored
+      // test) — keep the student at sign-in with a retry rather than guessing
+      el("signinError").textContent = "Couldn't reach your assignments. Check your connection and try again.";
+      el("signinError").classList.remove("hidden");
+      return;
+    }
+    state.assignments = assigns;
     state.pastAttempts = await Attempts.pastAttempts(code);
     state.practiceTab = "active";
     renderHome();
