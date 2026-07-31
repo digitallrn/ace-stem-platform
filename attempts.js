@@ -195,11 +195,20 @@ window.Attempts = (function(){
   }
 
   let pendingSave = false;
+  let drainWaiters = [];                         // resolved when the write loop goes idle
   async function save(){
     if(!rec) return;
-    if(saving){ pendingSave = true; return; }    // queue — a dropped save would lose
-    saving = true;                               // the final submit if it raced a
-    do {                                         // module-boundary write
+    if(saving){
+      // queue — a dropped save would lose the final submit if it raced a
+      // module-boundary write. Await the drain: suspend() relies on save()
+      // only resolving once THIS state (e.g. the resume blob) has been
+      // through a write, so lastSaveOk is never a stale read from an
+      // earlier in-flight save.
+      pendingSave = true;
+      return new Promise(res => drainWaiters.push(res));
+    }
+    saving = true;
+    do {
       pendingSave = false;
       const snapshot = build();
       if(!snapshot) break;
@@ -209,6 +218,7 @@ window.Attempts = (function(){
       if(!ok) dirty = true;                      // retry at the next checkpoint
     } while(pendingSave);
     saving = false;
+    drainWaiters.splice(0).forEach(res => res());
   }
 
   function startTicker(){
