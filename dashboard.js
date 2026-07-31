@@ -530,11 +530,16 @@ window.Dashboard = (function(){
       ? String(Math.floor(100000 + Math.random() * 900000)) : null;
     const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
     const expires = $("afExpires").value ? new Date($("afExpires").value + "T23:59:00").toISOString() : null;
-    let okAll = true;
+    let okAll = true, readFailed = false;
     for(const code of codes){
       const key = "assign:" + code;
-      const existing = await AttemptStore.get(key);
-      const list = Array.isArray(existing) ? existing : [];
+      // read-modify-write: a failed READ must not be treated as "no
+      // assignments" — appending to [] would clobber every existing
+      // assignment (including a live proctored one). Skip this code on a
+      // read error rather than destroy its list.
+      const res = await AttemptStore.getResult(key);
+      if(res.status === "error" || res.status === "nostorage"){ readFailed = true; continue; }
+      const list = Array.isArray(res.value) ? res.value : [];
       list.push({
         assignmentId: "a-" + Math.floor(Date.now()/1000) + "-" + Math.random().toString(16).slice(2, 6),
         testId, category, startCode,
@@ -545,9 +550,11 @@ window.Dashboard = (function(){
       if(!(await AttemptStore.set(key, list))) okAll = false;
     }
     lastStartCode = startCode;
-    $("dashStatus").textContent = okAll
-      ? "Assigned " + testId + " to " + codes.join(", ") + "."
-      : "Some assignment writes failed — storage problem.";
+    $("dashStatus").textContent = readFailed
+      ? "Couldn't read some students' existing assignments — those were skipped to avoid overwriting. Try again."
+      : okAll
+        ? "Assigned " + testId + " to " + codes.join(", ") + "."
+        : "Some assignment writes failed — storage problem.";
     await loadAssignsAndBugs();
     render();
   }
