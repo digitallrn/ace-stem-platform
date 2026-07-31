@@ -56,6 +56,23 @@ that fork.
    regex or an off-by-one in the tokenizer fails quietly (wrong rendering)
    rather than loudly (a thrown error).
 
+## Escaping contract (read before adding any render surface)
+Attempt records live in artifact shared storage, which ATTEMPTS-SPEC §7 says
+is writable by anyone who can run the artifact. **Every value read back out
+of a record is untrusted** — SPR answer strings, student codes, testName —
+even though `sanitizeSpr()` limits what a student can type through the UI.
+Three rules:
+1. Record- or test-data-derived text goes through `escapeHtml()`; prose that
+   may carry `{{tokens}}` goes through `fmt()` (escape-first: it escapes
+   prose, then substitutes known tokens, and KaTeX escapes its own output).
+2. `escapeHtml()` escapes quotes, so it is safe in a quoted attribute.
+   `dashboard.js` also has `escAttr()` as defense-in-depth; keep both.
+3. Never interpolate a raw record value into markup. Numbers computed from a
+   record (counts, indices) are fine.
+
+`tests/injection-proof.js` is a paste-into-the-console regression proof —
+run it against `dist/index-live.html` after touching any render surface.
+
 ## Known limitations (accepted for launch)
 - **Concurrent `assign:<CODE>` writes can clobber.** Each student's
   assignments live in ONE storage key holding an array, mutated by
