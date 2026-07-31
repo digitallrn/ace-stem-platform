@@ -866,6 +866,9 @@
     border-radius:10px; font-size:13px; font-weight:700; color:#1E7A43;
   }
   .af-code-big{ font-size:44px; letter-spacing:10px; color:var(--ink); margin-top:4px; }
+  .assign-reset{ margin-top:22px; padding-top:18px; border-top:1px solid var(--line); }
+  .assign-reset h3{ margin:0 0 4px; font-size:15px; }
+  .assign-reset select{ font-size:13.5px; padding:8px 10px; border:1.5px solid #9AA0AE; border-radius:8px; font-family:var(--sans); }
   /* Phase F §9: bug report cards */
   .bug-card{ margin-bottom:14px; }
   .bug-head{ display:flex; align-items:center; gap:10px; }

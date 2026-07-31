@@ -454,6 +454,9 @@ window.Dashboard = (function(){
       recs.map(r => r.student && r.student.key).filter(Boolean)
         .concat(assigns.map(a => a.code))
     )).sort();
+    // codes that currently HAVE an assign key (non-empty list) — reset targets
+    const assignedCodes = assigns.filter(e => Array.isArray(e.list) && e.list.length)
+      .map(e => e.code).sort();
     const d = new Date();
     const today = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
     const rows = [];
@@ -514,6 +517,15 @@ window.Dashboard = (function(){
           </tr></thead><tbody>${rowsHtml}</tbody></table>
           <p class="dash-hint">Assignments with an attempt (in-progress or completed) can't be deleted.</p>`
           : '<p class="dash-empty">No assignments yet. Students with no assignments see every published test as practice.</p>'}
+        ${assignedCodes.length ? `
+          <div class="assign-reset">
+            <h3>Reset a student to default</h3>
+            <p class="dash-hint">Removes the student's assignment list entirely, so they see every published test as practice again. (Deleting a student's last assignment instead leaves them with no tests.)</p>
+            <div class="af-actions">
+              <select id="afResetCode">${assignedCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select>
+              <button class="pill ghost" id="afResetBtn" style="padding:9px 22px;">Reset to default (all tests)</button>
+            </div>
+          </div>` : ""}
       </div>`;
   }
 
@@ -563,7 +575,26 @@ window.Dashboard = (function(){
     const key = "assign:" + code;
     const list = await AttemptStore.get(key);
     if(!Array.isArray(list)) return;
-    await AttemptStore.set(key, list.filter(x => !(x && x.assignmentId === assignmentId)));
+    const remaining = list.filter(x => !(x && x.assignmentId === assignmentId));
+    // decision (b): [] and absent stay distinct — deleting the last assignment
+    // leaves the student with NO tests (not the all-tests default). Confirm
+    // that outcome, and point at Reset to default for the other intent.
+    if(remaining.length === 0 &&
+       !confirm("This is " + code + "'s last assignment. Deleting it leaves them with NO tests on their home screen.\n\nTo instead give them every published test as practice, cancel and use “Reset to default (all tests)”.\n\nDelete anyway?")){
+      return;
+    }
+    await AttemptStore.set(key, remaining);
+    await loadAssignsAndBugs();
+    render();
+  }
+
+  async function resetToDefault(code){
+    if(!code) return;
+    if(!confirm("Reset " + code + " to default? Their assignment list will be removed, so they'll see every published test as practice again.")) return;
+    const ok = await AttemptStore.remove("assign:" + code);   // absent key -> default
+    $("dashStatus").textContent = ok
+      ? code + " reset to default — sees all published tests as practice."
+      : "Reset failed — storage problem.";
     await loadAssignsAndBugs();
     render();
   }
@@ -631,6 +662,8 @@ window.Dashboard = (function(){
       }));
     const cb = $("afCreateBtn");
     if(cb) cb.addEventListener("click", createAssignment);
+    const rb = $("afResetBtn");
+    if(rb) rb.addEventListener("click", () => resetToDefault($("afResetCode").value));
     document.querySelectorAll("#dashBody .assign-del").forEach(btn =>
       btn.addEventListener("click", () => deleteAssignment(btn.dataset.code, btn.dataset.aid)));
     document.querySelectorAll("#dashBody .bug-dismiss").forEach(btn =>
