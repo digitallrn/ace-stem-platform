@@ -1076,7 +1076,11 @@
   el("bugSend").addEventListener("click", async ()=>{
     const text = el("bugText").value.trim();
     if(!text){ el("bugText").focus(); return; }
-    const inTest = !!state.currentTest;
+    // gate on the test screen actually being visible, not just currentTest
+    // being set — backing out of the Ready screen leaves currentTest set, and
+    // a home-screen bug report must not carry fabricated module/question/timer
+    // context (§9: "moduleId + question id if in-test")
+    const inTest = !!state.currentTest && !el("screen-test").classList.contains("hidden");
     const report = {
       at: new Date().toISOString(),
       studentCode: state.userName,
