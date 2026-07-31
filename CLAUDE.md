@@ -56,6 +56,22 @@ that fork.
    regex or an off-by-one in the tokenizer fails quietly (wrong rendering)
    rather than loudly (a thrown error).
 
+## Known limitations (accepted for launch)
+- **Concurrent `assign:<CODE>` writes can clobber.** Each student's
+  assignments live in ONE storage key holding an array, mutated by
+  unguarded read-modify-write from two sides: the tutor dashboard
+  (create/delete) and the student app (`Attempts.completeAssignment` on
+  finalize). Storage is last-write-wins, so a tutor editing assignments
+  at the same moment a student finishes can silently drop one write.
+  Reads are already hardened against the more dangerous failure
+  (a *failed* read no longer overwrites with `[]` — see
+  `AttemptStore.getResult`); this remaining item is the concurrent-
+  *success* race, whose window is small at tutoring scale.
+  **Queued post-launch fix:** move to per-assignment keys
+  (`assign:<CODE>:<assignmentId>`), enumerated with `storage.list`, the
+  same one-key-per-record pattern ATTEMPTS-SPEC §1 chose for attempts to
+  avoid exactly this clobber. Accepted as-is for launch 2026-07-31.
+
 ## Known open items
 - ✅ 2026-07-23: Attempt recording + tutor dashboard implemented per
   ATTEMPTS-SPEC.md (students sign in with a CODE, records are
