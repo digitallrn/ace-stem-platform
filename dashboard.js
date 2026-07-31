@@ -10,6 +10,12 @@ window.Dashboard = (function(){
 
   const $ = id => document.getElementById(id);
   const esc = s => escapeHtml(s);
+  // escapeHtml (textContent->innerHTML) escapes & < > but NOT quotes, so it is
+  // unsafe inside a quoted attribute. All these values (bug keys, student
+  // codes, assignmentIds) are shared-storage writable by anyone running the
+  // artifact — a crafted key with a `"` would break out of a data-* attribute
+  // and run script in the tutor's dashboard. escAttr adds quote escaping.
+  const escAttr = s => escapeHtml(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
   let showOnlyFn = null;
   let recs = [];                 // loaded attempt records
@@ -187,9 +193,9 @@ window.Dashboard = (function(){
     const tests = [...new Set(recs.map(r => r.testId))];
     const students = [...new Set(recs.map(r => r.student && r.student.key).filter(Boolean))].sort();
     $("dashFilterTest").innerHTML = '<option value="">All tests</option>' +
-      tests.map(t => `<option value="${esc(t)}">${esc((recs.find(r=>r.testId===t)||{}).testName || t)}</option>`).join("");
+      tests.map(t => `<option value="${escAttr(t)}">${esc((recs.find(r=>r.testId===t)||{}).testName || t)}</option>`).join("");
     $("dashFilterStudent").innerHTML = '<option value="">All students</option>' +
-      students.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+      students.map(s => `<option value="${escAttr(s)}">${esc(s)}</option>`).join("");
     $("dashFilterTest").value = keepT; $("dashFilterStudent").value = keepS;
     render();
   }
@@ -210,7 +216,7 @@ window.Dashboard = (function(){
      scores in their Past view only after this flips released:true. */
   function releaseCell(r){
     if(r.status === "in-progress") return "—";
-    return `<button class="dash-rel ${r.released ? "rel-on" : ""}" data-rel="${esc(r.attemptId)}"
+    return `<button class="dash-rel ${r.released ? "rel-on" : ""}" data-rel="${escAttr(r.attemptId)}"
       title="${r.released ? "Hide scores from the student again" : "Let the student see this attempt in their Past view"}">${
       r.released ? "Released ✓" : "Release"}</button>`;
   }
@@ -244,7 +250,7 @@ window.Dashboard = (function(){
       cols.map(([k, lbl]) => `<th data-sort="${k}" class="${sortKey===k?'sorted':''}">${lbl}${sortKey===k ? (sortDir>0?" ▲":" ▼") : ""}</th>`).join("") +
       `</tr></thead><tbody>` +
       sorted.map((r, i) => `
-        <tr data-att="${esc(r.attemptId)}">
+        <tr data-att="${escAttr(r.attemptId)}">
           <td>${esc(r.student && r.student.code || "?")}</td>
           <td>${esc(r.testName || r.testId)}</td>
           <td>${fmtDate(r.startedAt)}</td>
@@ -281,7 +287,7 @@ window.Dashboard = (function(){
         list.map(r => {
           const bs = (r.score && r.score.bySection) || {};
           const rw = bs["Reading and Writing"], ma = bs["Math"];
-          return `<tr data-att="${esc(r.attemptId)}">
+          return `<tr data-att="${escAttr(r.attemptId)}">
             <td>${fmtDate(r.startedAt)}</td><td>${esc(r.testName || r.testId)}</td>
             <td><b>${scoreStr(r)}</b></td>
             <td>${rw ? rw.correct + "/" + rw.graded : "—"}</td>
@@ -473,7 +479,7 @@ window.Dashboard = (function(){
         <td>${fmtDay(a.windowOpens)}</td>
         <td>${fmtDay(a.expiresAt)}</td>
         <td><span class="dstatus ${ {completed:"ok", "in-progress":"warn", expired:"to"}[st] || "" }">${st}</span></td>
-        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${esc(r.code)}" data-aid="${esc(a.assignmentId)}">Delete</button>` : ""}</td>
+        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${escAttr(r.code)}" data-aid="${escAttr(a.assignmentId)}">Delete</button>` : ""}</td>
       </tr>`;
     }).join("");
     return `
@@ -482,11 +488,11 @@ window.Dashboard = (function(){
           <h3>New assignment</h3>
           <div class="af-grid">
             <label>Student codes (seen in storage)
-              <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></label>
+              <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></label>
             <label>More codes (comma-separated)
               <input id="afFree" placeholder="AS-1234, AS-9XYZ" autocomplete="off"></label>
             <label>Test
-              <select id="afTest">${(window.TEST_DATA || []).map(t => `<option value="${esc(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
+              <select id="afTest">${(window.TEST_DATA || []).map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
             <label>Category
               <select id="afCat">
                 <option value="test">Test — proctored, start code</option>
@@ -561,7 +567,7 @@ window.Dashboard = (function(){
     return bugs.map(b => `
       <div class="dcard bug-card">
         <div class="bug-head"><b>${esc(b.studentCode || "?")}</b> · ${fmtDate(b.at)}
-          <button class="dash-rel bug-dismiss" data-bug="${esc(b.__key)}">Dismiss</button></div>
+          <button class="dash-rel bug-dismiss" data-bug="${escAttr(b.__key)}">Dismiss</button></div>
         <div class="dash-hint">${esc(b.testId || "not in a test")}${b.testVersion ? " @ " + esc(b.testVersion) : ""}${b.moduleId ? " · " + esc(b.moduleId) : ""}${b.questionId ? " · " + esc(b.questionId) : ""}${b.timerRemainingSeconds != null ? " · " + mmss(b.timerRemainingSeconds) + " left" : ""}</div>
         <p class="bug-text">${esc(b.text || "")}</p>
       </div>`).join("");
