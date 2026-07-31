@@ -33,7 +33,14 @@
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
   const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-dashboard"];
-  function showOnly(id){ SCREENS.forEach(s => s===id ? show(s) : hide(s)); }
+  // body-level overlays that live outside the SCREENS set — a screen change
+  // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
+  // them floating as a full-screen click blocker over the next screen
+  const FLOATING_OVERLAYS = ["saveFailModal","bugModal","deviceModal"];
+  function showOnly(id){
+    SCREENS.forEach(s => s===id ? show(s) : hide(s));
+    FLOATING_OVERLAYS.forEach(o => hide(o));
+  }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
 
   /* ================= SIGN IN / HOME ================= */

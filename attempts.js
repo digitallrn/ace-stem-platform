@@ -342,6 +342,7 @@ window.Attempts = (function(){
     async suspend(resumeBlob){
       try{
         if(!rec) return false;
+        const openQid = clock ? clock.qid : null;   // to restore on a refused exit
         closeClock();
         stopTicker();
         if(curModule){
@@ -360,6 +361,9 @@ window.Attempts = (function(){
           // a resume point behind their real position (it would rewind them
           // into an already-finished module after a crash)
           delete rec.resume;
+          // reopen the same question's clock so the guard's renderTest() ->
+          // questionShown() no-ops instead of booking a phantom re-visit
+          if(openQid) clock = { qid: openQid, shownAt: Date.now() };
           startTicker();
           return false;
         }
