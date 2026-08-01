@@ -379,6 +379,7 @@ window.Attempts = (function(){
   "use strict";
 
   const CHECKPOINT_MS = 45000;                   // spec §3 debounced timer
+  let deliberateExit = false;                    // Save-and-Exit, not a crash
   const iso = t => new Date(t).toISOString();
 
   let rec = null;          // the live attempt record (spec §2 shape)
@@ -473,6 +474,28 @@ window.Attempts = (function(){
     return answers;
   }
 
+  /* Where the student is and what they have annotated. Shared by the
+     deliberate-exit blob (suspend) and the crash checkpoint below, so the two
+     restore through exactly the same path. */
+  function positionBlob(){
+    const annotations = {};
+    Object.keys(appState.moduleState || {}).forEach(mid => {
+      const ms = appState.moduleState[mid];
+      if(!ms) return;
+      if(Object.keys(ms.passageHtml || {}).length || Object.keys(ms.notes || {}).length){
+        annotations[mid] = { passageHtml: ms.passageHtml, notes: ms.notes };
+      }
+    });
+    return {
+      moduleIndex: appState.moduleIndex,
+      questionIndex: appState.questionIndex,
+      timeRemainingSeconds: appState.timeRemainingSec,
+      untimed: !!appState.untimed,
+      elapsedSeconds: appState.elapsedSec,
+      annotations
+    };
+  }
+
   function build(){
     if(!rec || !appState || !appState.currentTest) return null;
     /* module entries already carry their state: created with
@@ -481,6 +504,22 @@ window.Attempts = (function(){
     rec.lastSavedAt = iso(Date.now());
     rec.answers = buildAnswers(appState.currentTest);
     rec.score = buildScore(appState.currentTest);
+    /* Crash/refresh checkpoint. Written on EVERY save while the test is live —
+       including the visibilitychange/beforeunload flush — because a crash gives
+       no chance to write one on the way out. Deliberate exit deletes it and
+       writes `resume` instead: that difference is the whole signal for whether
+       boot should drop the student back into the test or onto the home card.
+       Worth up to one checkpoint interval of answers on a hard crash, which is
+       the accepted trade for not writing on every keystroke. */
+    /* Only while a module is genuinely LIVE. curModule is null before
+       moduleStart and again after moduleEnd, which is what keeps a checkpoint
+       off the ready/module-over/break screens: writing one there would record
+       a moduleIndex that has already finished, and a crash during a break
+       would then resume the student INTO the module they just completed.
+       It also stops a student who backed out of the ready screen from being
+       auto-launched into a test they never began. */
+    if(deliberateExit || !curModule) delete rec.checkpoint;
+    else rec.checkpoint = positionBlob();
     return rec;
   }
 
@@ -513,7 +552,11 @@ window.Attempts = (function(){
 
   function startTicker(){
     stopTicker();
-    ticker = setInterval(() => { if(dirty) save(); }, CHECKPOINT_MS);
+    /* While a module is live the checkpoint must keep up with the CLOCK, not
+       just with answers. Ticking time, highlights and notes never set `dirty`,
+       so a dirty-only save let a student who sat reading for ten minutes crash
+       back to a ten-minute-old checkpoint — and be handed that time again. */
+    ticker = setInterval(() => { if(dirty || curModule) save(); }, CHECKPOINT_MS);
   }
   function stopTicker(){ if(ticker){ clearInterval(ticker); ticker = null; } }
 
@@ -566,6 +609,7 @@ window.Attempts = (function(){
     begin(test, studentCode, conditions, stateRef, assignmentId, timing){
       try{
         appState = stateRef;
+        deliberateExit = false;                  // fresh sitting: interruptible
         qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
         const now = Date.now();
         const rand = Math.random().toString(16).slice(2, 6);
@@ -650,6 +694,8 @@ window.Attempts = (function(){
         rec.submittedAt = iso(Date.now());
         rec.status = (lastEndedBy === "timer-expired") ? "timed-out" : "completed";
         delete rec.resume;                        // a completed attempt is not resumable
+        deliberateExit = true;                    // and build() must not re-add a checkpoint
+        delete rec.checkpoint;
         save();
       }catch(e){}
     },
@@ -671,6 +717,10 @@ window.Attempts = (function(){
           curModule = { moduleId: curModule.moduleId, startedAt: Date.now() };
         }
         rec.resume = resumeBlob;                  // status stays "in-progress" (spec)
+        /* Deliberate exit is not an interruption. The flag has to be set before
+           save(), because save() calls build() and build() is what writes the
+           checkpoint — clearing it here directly would just be overwritten. */
+        deliberateExit = true;
         await save();                             // flush immediately, then leave
         if(lastSaveOk !== true){
           // exit refused — keep recording, but drop the blob: the student is
@@ -678,6 +728,10 @@ window.Attempts = (function(){
           // a resume point behind their real position (it would rewind them
           // into an already-finished module after a crash)
           delete rec.resume;
+          /* the student never left, so they are back to being interruptible:
+             checkpoints must resume, or a crash after a refused exit would
+             land them on the home card having lost their position */
+          deliberateExit = false;
           // reopen the same question's clock so the guard's renderTest() ->
           // questionShown() no-ops instead of booking a phantom re-visit
           if(openQid) clock = { qid: openQid, shownAt: Date.now() };
@@ -687,13 +741,21 @@ window.Attempts = (function(){
         rec = null; appState = null;              // stop recording entirely once exited
         qMeta = {}; liveSpr = {}; clock = null; curModule = null;
         return true;
-      }catch(e){ try{ startTicker(); }catch(e2){} return false; }
+      }catch(e){
+        // the exit failed, so the student is still testing and still
+        // interruptible — leaving this true would suppress every later
+        // checkpoint and silently disable crash resume for the rest of the sitting
+        deliberateExit = false;
+        try{ startTicker(); }catch(e2){}
+        return false;
+      }
     },
 
     resume(record, stateRef){
       try{
         appState = stateRef;
         rec = record;
+        deliberateExit = false;                  // testing again: interruptible again
         qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
         // rebuild per-question meta so time/visits/changes keep accumulating
         Object.keys(record.answers || {}).forEach(qid => {
@@ -707,6 +769,7 @@ window.Attempts = (function(){
           };
         });
         delete rec.resume;                        // consumed; next save persists without it
+        delete rec.checkpoint;                    // rewritten by the next build()
         dirty = true;
         startTicker();
       }catch(e){}
@@ -834,7 +897,11 @@ window.Attempts = (function(){
         let best = null;
         for(const k of keys){
           const r = await AttemptStore.get(k);
-          if(!r || r.status !== "in-progress" || !r.resume) continue;
+          /* Either blob makes an attempt resumable: `resume` from a deliberate
+             Save-and-Exit, `checkpoint` from an interruption. Requiring
+             `resume` used to hide a crashed sitting from the home card as well
+             as from auto-resume, so a crash lost the student's place entirely. */
+          if(!r || r.status !== "in-progress" || !(r.resume || r.checkpoint)) continue;
           if(!r.student || String(r.student.key || "") !== key) continue;
           // ids/annotations only line up within the same test build (spec §9)
           if(r.testVersion !== (testVersion || "unversioned")) continue;

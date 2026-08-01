@@ -401,8 +401,16 @@
     display:flex; align-items:center; justify-content:center; font-size:11px; color:#555; user-select:none;
   }
 
+  /* Leading measured off the references, not guessed: body text in 31, 33 and
+     35 sits on a consistent 28-29px line pitch. We were at 17.5 x 1.75 =
+     30.6px, the loosest thing on the page, so this is the one place our text
+     genuinely ran taller than the real app. 1.64 lands on 28.7px.
+     Font-size deliberately unchanged — measured, our glyphs are already
+     NARROWER than the reference's (an 86-character reference line renders
+     664px in Georgia 17.5 where the real app fills 766px), so shrinking would
+     move away from parity, not toward it. See the commit message. */
   .passage-text{
-    font-family:var(--serif); font-size:17.5px; line-height:1.75;
+    font-family:var(--serif); font-size:17.5px; line-height:1.64;
     max-width:var(--pane-content); white-space:pre-wrap;
   }
   .passage-text ::selection, .passage-text::selection{ background:#BBD3F5; }
@@ -814,7 +822,12 @@
   }
   .fmt-credit{ margin-top:16px; text-align:right; font-size:14.5px; }
 
-  .fig-frame{ border:1px solid #9a9a9a; border-radius:6px; max-width:520px; margin:0 auto 26px; background:#fff; }
+  /* A notch smaller than before (520 -> 470 frame, 340 -> 300 image cap): the
+     diagrams in this bank are roughly square and were taking more of the
+     column than they need. Fit-on-first-view is unchanged — the image still
+     caps on both axes so the whole thing is visible at 100% — and zoom is
+     unaffected, since zooming sets an explicit width and releases the cap. */
+  .fig-frame{ border:1px solid #9a9a9a; border-radius:6px; max-width:470px; margin:0 auto 26px; background:#fff; }
   .fig-toolbar{
     display:flex; align-items:center; justify-content:flex-end; gap:12px; padding:7px 12px;
     border-bottom:1px solid #e2e2e2; font-size:13.5px; font-weight:600;
@@ -827,7 +840,7 @@
      letterboxing. Zooming past 100% sets an explicit width and clears the
      height cap (attachFigureHandlers), so the frame scrolls only once the
      student has asked for a closer look. */
-  .fig-imgwrap img{ width:auto; max-width:100%; max-height:340px; }
+  .fig-imgwrap img{ width:auto; max-width:100%; max-height:300px; }
   .fig-caption{ font-family:var(--serif); text-align:center; padding:0 12px 14px; font-size:15.5px; }
   .fig-overlay{
     position:fixed; inset:0; background:rgba(40,40,40,.55); z-index:120;

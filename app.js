@@ -205,9 +205,47 @@
     state.practiceTab = "active";
     state.testsTab = "active";
     rememberSession(code);            // stay signed in on this device
+
+    /* Crash / refresh resume. A checkpoint with no `resume` blob means the
+       student was mid-test and did NOT deliberately leave, so put them back
+       where they were rather than making them find the card and click through
+       the ready screen again. Save-and-Exit writes `resume` and clears the
+       checkpoint, so it still lands on home: leaving on purpose and being
+       interrupted are different intents. Expiry gates STARTING, never
+       resuming, so there is no start-code re-prompt here either. */
+    const interrupted = crashResumeCandidate();
+    if(interrupted){
+      renderHome();                   // so Back-from-test has a home to return to
+      if(resumeTestFlow(interrupted.test, interrupted.record)) return true;
+      // a corrupt or unusable checkpoint falls through to the In Progress card
+      // rather than dropping the student into a blank test
+    }
     renderHome();
     showOnly("screen-home");
     return true;
+  }
+
+  /* The record to drop straight back into, or null. Deliberately strict: a
+     record whose checkpoint is missing, malformed, or points outside the test
+     is not resumable and must fall back to the home card. */
+  function crashResumeCandidate(){
+    for(const testId of Object.keys(state.resumeRecords || {})){
+      const rec = state.resumeRecords[testId];
+      if(!rec || rec.resume) continue;            // deliberate exit -> home card
+      const cp = rec.checkpoint;
+      if(!cp || typeof cp !== "object") continue;
+      if(typeof cp.moduleIndex !== "number" || cp.moduleIndex < 0) continue;
+      const test = testById(testId);
+      if(!test || cp.moduleIndex >= test.modules.length) continue;
+      const mod = test.modules[cp.moduleIndex];
+      if(!mod || !mod.questions || !mod.questions.length) continue;
+      // a questionIndex past the end is clamped by beginModule, but a
+      // non-numeric one means the blob is not trustworthy at all
+      if(cp.questionIndex !== undefined && typeof cp.questionIndex !== "number") continue;
+      // testVersion is already matched by findInProgress
+      return { test, record: rec };
+    }
+    return null;
   }
 
   /* Student sign-out: forgets the device session only. Their recorded work is
@@ -622,14 +660,18 @@
     return mstate;
   }
 
-  /* Phase C: rebuild the whole sitting from a saved-and-exited attempt —
-     answers/flags/eliminations from the record, highlights + notes from its
-     resume.annotations blob, then land on the saved module/question with the
-     saved time remaining. */
+  /* Phase C: rebuild the whole sitting — answers/flags/eliminations from the
+     record, highlights + notes from the annotations blob, then land on the
+     saved module/question with the saved time remaining.
+     Restores from the deliberate-exit blob when there is one, otherwise from
+     the crash checkpoint — identical restore path either way (answers,
+     annotations, flags, timer). Returns false if the record can't be restored,
+     so the caller can fall back to the home card instead of a blank test. */
   function resumeTestFlow(test, record){
+    const resume = record.resume || record.checkpoint || {};
+    if(!test || !test.modules || !test.modules.length) return false;
     state.currentTest = test;
     state.moduleState = buildModuleStateFromRecord(test, record);
-    const resume = record.resume || {};
     const ann = resume.annotations || {};
     Object.keys(ann).forEach(mid=>{
       const ms = state.moduleState[mid];
@@ -647,7 +689,19 @@
     const idx = Math.min(resume.moduleIndex || 0, test.modules.length - 1);
     delete state.resumeRecords[test.testId];
     showOnly("screen-loading");
-    setTimeout(()=>{ beginModule(idx, resume); }, 1200);
+    setTimeout(()=>{
+      /* beginModule runs after the loading beat, i.e. after this function has
+         already returned true. If a malformed blob makes it throw, the student
+         would sit on the loading screen forever, so land them home instead —
+         the record is still in-progress and its card is still there. */
+      try{ beginModule(idx, resume); }
+      catch(e){
+        state.currentTest = null;
+        renderHome();
+        showOnly("screen-home");
+      }
+    }, 1200);
+    return true;
   }
 
   function showReady(isFirst){

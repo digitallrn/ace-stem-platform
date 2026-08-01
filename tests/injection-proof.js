@@ -363,6 +363,39 @@
       probe.remove();
     }
 
+    /* The crash checkpoint is a resume surface on the same footing as the
+       Save-and-Exit blob: it is written into the attempt record, read back at
+       boot, and its annotations reach innerHTML. Same gate, same assertions —
+       a hostile checkpoint must not execute. */
+    if(window.AppSanitize){
+      const cpProbe = document.createElement("div");
+      document.body.appendChild(cpProbe);
+      const hostileCheckpoint = {
+        moduleIndex: 0, questionIndex: 0, timeRemainingSeconds: 100,
+        annotations: { "m1": {
+          passageHtml: { "q1": PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' },
+          notes: { "q1": [{ id: ATTR_PAY, snippet: PAYLOAD, text: PAYLOAD }] }
+        } }
+      };
+      const ann = hostileCheckpoint.annotations.m1;
+      cpProbe.innerHTML = window.AppSanitize.html(ann.passageHtml.q1);
+      const note = ann.notes.q1[0];
+      cpProbe.innerHTML += `<div class="note-card" data-note="${escapeHtml(note.id)}">` +
+        `<span>${escapeHtml(note.snippet)}</span><textarea>${escapeHtml(note.text)}</textarea></div>`;
+      await wait(140);
+      const els = [...cpProbe.querySelectorAll("*")];
+      const exec = els.filter(e => /^(SCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON)$/.test(e.tagName));
+      const handlers = els.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
+      const card = cpProbe.querySelector(".note-card");
+      results.push({ surface: "Crash checkpoint annotations are inert on restore",
+        pass: !exec.length && !handlers.length && !window.__XSS_FIRED &&
+              !!card && card.dataset.note === ATTR_PAY,
+        note: exec.length || handlers.length
+          ? `survived: ${exec.length} executable, ${handlers.length} handler(s)`
+          : "hostile passageHtml sanitized, hostile note id/snippet/text inert" });
+      cpProbe.remove();
+    }
+
     /* note ids come back from the same resume blob and land in an ATTRIBUTE */
     const nprobe = document.createElement("div");
     nprobe.innerHTML = `<div class="note-card" data-note="${escapeHtml(ATTR_PAY)}"></div>`;
