@@ -79,6 +79,18 @@
     display:flex; align-items:center; justify-content:space-between; padding:18px 42px;
   }
   .home-top .bb-logo-sm{ color:var(--cb-blue); font-size:22px; font-weight:800; display:flex; align-items:center; gap:6px; }
+  /* sync indicator (Phase H §1) — same quiet treatment as the local pill */
+  .sync-dot{
+    width:8px; height:8px; border-radius:50%; background:#1E7A43; flex-shrink:0;
+  }
+  .sync-tag.syncing .sync-dot{ background:#8A6D00; }
+  .sync-tag.offline .sync-dot{ background:var(--cb-red); }
+  .ta-label{ display:block; font-size:12.5px; font-weight:700; margin:12px 0 5px; }
+  #tutorEmail, #tutorPassword{
+    width:100%; padding:10px 12px; font-size:15px; border:1.5px solid #9AA0AE; border-radius:8px;
+    font-family:var(--sans);
+  }
+
   /* local mode: deliberately quiet — informative, not alarming */
   .local-tag{
     display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600;

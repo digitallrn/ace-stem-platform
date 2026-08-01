@@ -46,13 +46,21 @@ that fork.
 The app detects at runtime which storage it has and adapts. Nothing to
 configure, no build flag, no query parameter.
 
-| | **Shared mode** | **Local mode** |
-|---|---|---|
-| Where | published claude.ai artifact | static host (Netlify/GitHub Pages), or a `file://` copy |
-| Trigger | `window.storage` exists | `window.storage` absent (auto) |
-| Records | shared — tutor dashboard sees every student | localStorage, this browser only |
-| Release flow | works (tutor flips `released`) | not reachable — the student's JSON download is the handoff |
-| Student sees | normal home screen | a quiet "Local mode — results save on this device" tag on the home screen, and Download Results JSON always offered on the submit confirmation |
+| | **Shared mode** | **Remote mode** | **Local mode** |
+|---|---|---|---|
+| Where | published claude.ai artifact | static host **with** `config.js` (Supabase) | static host without config, or a `file://` copy |
+| Trigger | `window.storage` exists | Supabase config present, no `window.storage` | neither (auto fallback) |
+| Records | shared artifact storage | localStorage first, synced to Supabase in the background | localStorage, this browser only |
+| Release flow | works | works across devices — the point of Phase H | not reachable; the JSON download is the handoff |
+| Tutor access | `acestem-admin` magic name | **real Supabase Auth** (the magic name is gone) | `acestem-admin` magic name |
+| Student sees | normal home screen | a "Synced / Syncing… / Offline — will sync" pill | a "Local mode — results save on this device" pill |
+
+Precedence is `?devstorage=1` → artifact → remote → local, so the artifact
+build never accidentally talks to Supabase and the forced-local switch always
+wins. **Remote mode is local-first and never blocks a student:** every write
+goes to localStorage and is then queued; the queue lives in localStorage,
+survives reload, retries with backoff, and drains on `online`. Nothing on the
+write path is awaited by the test loop.
 
 Consequences worth remembering for local mode: each device is its own
 island (a student on two laptops has two separate histories), clearing
@@ -95,7 +103,25 @@ storage-adapter mode resolution; the preview pane strips query strings, so
 the `?devstorage=1` cases can only be checked there.
 
 ## Known limitations (accepted for launch)
-- **Concurrent `assign:<CODE>` writes can clobber.** Each student's
+- **Student codes are bearer secrets (remote mode).** There are no student
+  accounts by design. The `AS-` + 8-character code (unambiguous alphabet, no
+  O/0/I/1) is the only thing standing between someone and that student's
+  records — the "unguessable link" model. Honest limits: a leaked code exposes
+  **that one student's** records and nothing else; students type codes, so
+  they can be shared or shoulder-surfed; and there is **no rate limiting** in
+  this phase, so the codes' entropy (32^8 ≈ 1.1e12) is the whole defence.
+  Anon has zero table privileges — all student access goes through four
+  `SECURITY DEFINER` RPCs that scope every row to the code passed in, and
+  `fn_upsert_attempt` refuses cross-student writes *and* ignores a
+  client-supplied `released` flag so a student can't release their own scores.
+  Upgrade path if it ever matters: per-student magic-link auth.
+- ~~**Concurrent `assign:<CODE>` writes can clobber.**~~ **FIXED in Phase H**
+  by moving to one row per assignment (`assign:<CODE>:<assignmentId>`), listed
+  and filtered by prefix. There is no longer a read-modify-write of a shared
+  array, so concurrent writers touch different keys. An explicit
+  `assign:<CODE>:__none` sentinel preserves the "assigned nothing" vs "never
+  configured" distinction. Historical description kept below for context:
+- **(historical) Concurrent `assign:<CODE>` writes can clobber.** Each student's
   assignments live in ONE storage key holding an array, mutated by
   unguarded read-modify-write from two sides: the tutor dashboard
   (create/delete) and the student app (`Attempts.completeAssignment` on

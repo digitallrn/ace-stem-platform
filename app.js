@@ -52,16 +52,28 @@
   async function doSignin(){
     const v = el("nameInput").value.trim();
     if(!v){ el("nameInput").focus(); return; }
-    if(v.toLowerCase() === "acestem-admin"){        // tutor dashboard — never records (spec §4)
+    /* Tutor route. On remote deployments the magic name is gone entirely
+       (Phase H §4) — an email opens real Supabase Auth instead. Local and
+       artifact deployments keep acestem-admin, since there is no auth server
+       to check against there. */
+    if(AttemptStore.isRemote()){
+      if(v.indexOf("@") !== -1){
+        el("nameInput").value = "";
+        el("signinError").classList.add("hidden");
+        openTutorAuth(v);
+        return;
+      }
+    } else if(v.toLowerCase() === "acestem-admin"){   // tutor dashboard — never records (spec §4)
       el("nameInput").value = "";
       el("signinError").classList.add("hidden");
       if(window.Dashboard) Dashboard.open(showOnly);
       return;
     }
-    // Phase F §7: student codes are AS- plus four letters/digits
-    const code = v.toUpperCase();
-    if(!/^AS-[A-Z0-9]{4}$/.test(code)){
-      el("signinError").textContent = "Enter the code your tutor gave you — it looks like AS-1234.";
+    // Phase H §4: codes are AS- plus 8 unambiguous characters (they act as a
+    // bearer secret on remote deployments, so they need real entropy)
+    const code = StudentCode.normalize(v);
+    if(!StudentCode.valid(code)){
+      el("signinError").textContent = "Enter the code your tutor gave you — it looks like AS-7K4M9PXR.";
       el("signinError").classList.remove("hidden");
       el("nameInput").focus();
       return;
@@ -169,6 +181,57 @@
     }
   }
 
+  /* Sync indicator (Phase H §1). Replaces the local-mode pill when a remote
+     backend is configured. Purely informational — it never gates anything. */
+  function updateSyncTag(){
+    const tag = el("syncTag");
+    if(!tag) return;
+    if(!AttemptStore.isRemote()){ tag.classList.add("hidden"); return; }
+    tag.classList.remove("hidden");
+    const s = AttemptStore.syncState();
+    tag.classList.toggle("offline", !s.online);
+    tag.classList.toggle("syncing", s.online && s.pending > 0);
+    el("syncTagText").textContent =
+      !s.online ? "Offline — will sync" :
+      s.pending > 0 ? "Syncing…" : "Synced";
+  }
+  setInterval(updateSyncTag, 3000);
+  if(window.addEventListener){
+    window.addEventListener("online", updateSyncTag);
+    window.addEventListener("offline", updateSyncTag);
+  }
+
+  /* Tutor sign-in (Phase H §4). On a remote deployment the acestem-admin
+     magic name is gone: dashboard access needs a real Supabase session. */
+  function openTutorAuth(prefillEmail){
+    el("tutorEmail").value = prefillEmail || "";
+    el("tutorPassword").value = "";
+    el("tutorAuthError").classList.add("hidden");
+    show("tutorAuthModal");
+    el(prefillEmail ? "tutorPassword" : "tutorEmail").focus();
+  }
+  function closeTutorAuth(){ hide("tutorAuthModal"); }
+  el("tutorAuthClose").addEventListener("click", closeTutorAuth);
+  el("tutorAuthCancel").addEventListener("click", closeTutorAuth);
+  el("tutorPassword").addEventListener("keydown", e=>{ if(e.key === "Enter") el("tutorAuthGo").click(); });
+  el("tutorAuthGo").addEventListener("click", async ()=>{
+    const email = el("tutorEmail").value.trim();
+    const pw = el("tutorPassword").value;
+    if(!email || !pw){ el("tutorPassword").focus(); return; }
+    el("tutorAuthGo").disabled = true;
+    try{
+      await AttemptStore.signInTutor(email, pw);
+      el("tutorPassword").value = "";           // never keep the password around
+      closeTutorAuth();
+      if(window.Dashboard) Dashboard.open(showOnly);
+    }catch(e){
+      el("tutorAuthError").textContent = e.status === 400
+        ? "That email and password didn't match."
+        : "Couldn't reach the server. Check your connection and try again.";
+      el("tutorAuthError").classList.remove("hidden");
+    } finally { el("tutorAuthGo").disabled = false; }
+  });
+
   function testById(id){ return state.tests.find(t => t.testId === id) || null; }
 
   /* Phase F §2 semantics: completed wins; a resumable attempt always resumes
@@ -188,6 +251,7 @@
   function renderHome(){
     // local mode indicator — records stay on this device, nothing is synced
     el("localModeTag").classList.toggle("hidden", !AttemptStore.isLocal());
+    updateSyncTag();
     document.querySelectorAll("#practiceSeg .seg-btn").forEach(b =>
       b.classList.toggle("on", b.dataset.seg === state.practiceTab));
     renderYourTests();

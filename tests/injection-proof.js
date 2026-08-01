@@ -15,6 +15,8 @@
    1. Open dist/index-live.html.
    2. Paste this whole file into the console and press Enter.
    3. Read the printed report. Every surface must show PASS.
+   NOTE: run this with local mode active (no config.js beside the page), since
+   it uses the acestem-admin route, which a remote deployment removes.
    4. Reload the page afterwards (the script cleans its own storage keys).   */
 (function(){
   "use strict";
@@ -69,7 +71,7 @@
     }));
     return { sprCount, rec: Object.assign({
       recordVersion: 1, attemptId: "attempt:" + test.testId + ":1700000001:xss1",
-      student: { code: PAYLOAD, key: "AS-XSS1" },                 // hostile student code
+      student: { code: PAYLOAD, key: "AS-XSSTEST2" },                 // hostile student code
       testId: test.testId, testName: PAYLOAD,                     // hostile test name
       testVersion: test.testVersion, assignmentId: null, timing: 1.5,
       conditions: "proctored", startedAt: "2026-07-30T14:00:00.000Z",
@@ -99,7 +101,7 @@
     const { rec, sprCount } = poisonedRecord(test);
     localStorage.setItem("as:" + rec.attemptId, JSON.stringify(rec));
 
-    $("nameInput").value = "AS-XSS1";
+    $("nameInput").value = "AS-XSSTEST2";
     $("signinBtn").click();
     await wait(900);
 

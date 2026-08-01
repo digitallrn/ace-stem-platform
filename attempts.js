@@ -42,13 +42,128 @@ window.AttemptStore = (function(){
     async delete(key){ localStorage.removeItem("devstore:" + key); return true; }
   };
 
-  /* Resolved per call, never cached: a host may install window.storage after
-     these scripts run, and the test harness swaps it at runtime. */
-  function backend(){
-    if(forcedLocal) return localBackend;
-    return window.storage || localBackend;   // static host -> local mode
+  /* ---------------- remote (Supabase) — PHASE-H ----------------
+     Local-first, always. Nothing here is ever awaited by the test loop:
+     reads during a sitting come from localStorage, and writes go to
+     localStorage first and then onto a queue that drains in the background.
+     A dead network can therefore delay sync but never a student. */
+  const cfg = window.ACESTEM_CONFIG || null;
+  const remoteConfigured = !!(cfg && cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY &&
+    cfg.SUPABASE_URL.indexOf("YOUR-") === -1 && cfg.SUPABASE_ANON_KEY.indexOf("YOUR-") === -1);
+
+  /* precedence (spec §2): ?devstorage=1 -> artifact -> remote -> local */
+  function mode(){
+    if(forcedLocal) return "local";
+    if(window.storage) return "artifact";
+    if(remoteConfigured) return "remote";
+    return "local";
   }
-  function isLocal(){ return forcedLocal || !window.storage; }
+  function isLocal(){ return mode() === "local"; }
+  function isRemote(){ return mode() === "remote"; }
+
+  /* Resolved per call, never cached: a host may install window.storage after
+     these scripts run, and the test harness swaps it at runtime. Remote mode
+     still reads and writes locally — the queue carries it upstream. */
+  function backend(){
+    return mode() === "artifact" ? window.storage : localBackend;
+  }
+
+  const REST_TIMEOUT_MS = 8000;
+  let authToken = null;            // tutor session JWT, memory only
+
+  async function httpJson(path, opts){
+    if(!remoteConfigured) throw new Error("remote not configured");
+    const ctl = new AbortController();
+    const timer = setTimeout(()=> ctl.abort(), (opts && opts.timeoutMs) || REST_TIMEOUT_MS);
+    try{
+      const res = await fetch(cfg.SUPABASE_URL.replace(/\/+$/, "") + path, {
+        method: (opts && opts.method) || "GET",
+        headers: Object.assign({
+          "apikey": cfg.SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + (authToken || cfg.SUPABASE_ANON_KEY),
+          "Content-Type": "application/json"
+        }, (opts && opts.headers) || {}),
+        body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
+        signal: ctl.signal
+      });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
+      if(!res.ok){
+        const err = new Error((data && (data.message || data.error)) || ("HTTP " + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    } finally { clearTimeout(timer); }
+  }
+  const rpc = (fn, args, opts) =>
+    httpJson("/rest/v1/rpc/" + fn, Object.assign({ method:"POST", body: args }, opts || {}));
+
+  /* ---- sync queue: localStorage-backed so it survives reload ---- */
+  const QKEY = "devstore:__syncqueue";
+  const BACKOFF_MS = [0, 2000, 8000, 30000, 120000, 600000];
+  let draining = false, lastSyncError = null, syncTimer = null;
+
+  function qRead(){
+    try{ return JSON.parse(localStorage.getItem(QKEY) || "[]"); }catch(e){ return []; }
+  }
+  function qWrite(items){
+    try{ localStorage.setItem(QKEY, JSON.stringify(items)); }catch(e){}
+  }
+  function enqueue(item){
+    const q = qRead();
+    // one pending entry per key: a later write of the same record supersedes
+    const i = q.findIndex(x => x.key === item.key);
+    if(i >= 0) q[i] = Object.assign(q[i], item, { tries: q[i].tries || 0 });
+    else q.push(Object.assign({ tries: 0, nextAt: 0 }, item));
+    qWrite(q);
+    scheduleDrain(0);
+  }
+  function scheduleDrain(delayMs){
+    if(syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(()=>{ drain(); }, Math.max(0, delayMs || 0));
+  }
+
+  async function drain(){
+    if(draining || !isRemote()) return;
+    if(typeof navigator !== "undefined" && navigator.onLine === false){
+      scheduleDrain(15000);
+      return;
+    }
+    draining = true;
+    try{
+      let q = qRead();
+      const now = Date.now();
+      for(const item of q.slice()){
+        if((item.nextAt || 0) > now) continue;
+        try{
+          if(item.kind === "bug") await rpc("fn_insert_bug", { p_code: item.code, p_value: item.value });
+          else await rpc("fn_upsert_attempt", { p_code: item.code, p_key: item.key, p_value: item.value });
+          q = qRead().filter(x => x.key !== item.key);      // re-read: may have been superseded
+          qWrite(q);
+          lastSyncError = null;
+        }catch(e){
+          lastSyncError = e.message || String(e);
+          const fresh = qRead();
+          const j = fresh.findIndex(x => x.key === item.key);
+          if(j >= 0){
+            fresh[j].tries = (fresh[j].tries || 0) + 1;
+            fresh[j].nextAt = Date.now() + BACKOFF_MS[Math.min(fresh[j].tries, BACKOFF_MS.length - 1)];
+            qWrite(fresh);
+          }
+        }
+      }
+    } finally {
+      draining = false;
+      const left = qRead();
+      if(left.length) scheduleDrain(Math.max(2000, Math.min.apply(null,
+        left.map(x => Math.max(0, (x.nextAt || 0) - Date.now())).concat([30000]))));
+    }
+  }
+
+  if(typeof window !== "undefined" && window.addEventListener){
+    window.addEventListener("online", ()=> scheduleDrain(0));
+  }
 
   return {
     /* Storage is now always available in some form; available() stays for
@@ -56,15 +171,88 @@ window.AttemptStore = (function(){
     available(){ return !!backend(); },
     isLocal: isLocal,
     isDev: isLocal,          // deprecated alias, kept for older call sites
+    isRemote: isRemote,
+    mode: mode,
+
+    /* ---- remote plumbing (PHASE-H) ---- */
+    rpc: rpc,
+    httpJson: httpJson,
+    remoteConfigured(){ return remoteConfigured; },
+    syncState(){
+      const q = qRead();
+      return {
+        pending: q.length,
+        online: typeof navigator === "undefined" || navigator.onLine !== false,
+        lastError: lastSyncError,
+        syncing: draining
+      };
+    },
+    drainNow(){ scheduleDrain(0); },
+    setAuthToken(t){ authToken = t || null; },
+    hasAuthToken(){ return !!authToken; },
+
+    /* ---- tutor auth (spec §4). Real Supabase Auth; the token lives in
+       memory only, so closing the tab signs the tutor out. ---- */
+    async signInTutor(email, password){
+      const data = await httpJson("/auth/v1/token?grant_type=password", {
+        method: "POST", body: { email: email, password: password }
+      });
+      if(!data || !data.access_token) throw new Error("no session returned");
+      authToken = data.access_token;
+      return { email: (data.user && data.user.email) || email };
+    },
+    signOutTutor(){ authToken = null; },
+
+    /* ---- tutor-only table access. RLS grants the authenticated role full
+       read/write; anon has no table privileges at all, so these only work
+       once signInTutor() has produced a token. ---- */
+    async adminSelectAll(){
+      return await httpJson("/rest/v1/records?select=key,owner_code,value", { timeoutMs: 20000 });
+    },
+    async adminUpsert(key, ownerCode, value){
+      return await httpJson("/rest/v1/records", {
+        method: "POST",
+        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: [{ key: key, owner_code: ownerCode || null, value: value,
+                 updated_at: new Date().toISOString() }]
+      });
+    },
+    async adminDelete(key){
+      return await httpJson("/rest/v1/records?key=eq." + encodeURIComponent(key), {
+        method: "DELETE", headers: { "Prefer": "return=minimal" }
+      });
+    },
 
     /* All four return-or-null / return-false, never throw. */
     async set(key, obj){
       const b = backend();
       if(!b) return false;
+      let ok = true;
       try{
         await b.set(key, JSON.stringify(obj), true);
-        return true;
-      }catch(e){ return false; }
+      }catch(e){ ok = false; }
+      /* Local-first (spec §1): the local write above is what the student
+         depends on. Queueing is fire-and-forget — never awaited, and a
+         failure here must not turn a good local write into a failed one. */
+      if(ok && isRemote()){
+        try{
+          if(key.indexOf("attempt:") === 0 && obj && obj.student && obj.student.code){
+            enqueue({ key, kind:"attempt", code: obj.student.code, value: obj });
+          } else if(key.indexOf("bug:") === 0 && obj && obj.studentCode){
+            enqueue({ key, kind:"bug", code: obj.studentCode, value: obj });
+          }
+        }catch(e){}
+      }
+      return ok;
+    },
+    /* Write without enqueueing. Used when caching rows we just PULLED from
+       the server — routing those through set() would re-upload every record
+       on every pull, a sync loop. */
+    async setLocal(key, obj){
+      const b = backend();
+      if(!b) return false;
+      try{ await b.set(key, JSON.stringify(obj), true); return true; }
+      catch(e){ return false; }
     },
     async get(key){
       const b = backend();
@@ -104,6 +292,38 @@ window.AttemptStore = (function(){
         await fn.call(b, key, true);
         return true;
       }catch(e){ return false; }
+    }
+  };
+})();
+
+/* ================= student codes (PHASE-H §4) =================
+   The code is a bearer secret on remote deployments — the "unguessable link"
+   model — so it needs real entropy: AS- plus 8 characters from an alphabet
+   with no O/0/I/1 to keep it typable out loud. 32^8 ≈ 1.1e12.
+   Kept in sync with fn_valid_code() in supabase/schema.sql. */
+window.StudentCode = (function(){
+  "use strict";
+  const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const RE = /^AS-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/;
+  return {
+    ALPHABET: ALPHABET,
+    RE: RE,
+    valid(code){ return RE.test(String(code || "").trim().toUpperCase()); },
+    normalize(code){ return String(code || "").trim().toUpperCase().replace(/\s+/g, ""); },
+    generate(){
+      let out = "";
+      const buf = (window.crypto && window.crypto.getRandomValues)
+        ? window.crypto.getRandomValues(new Uint32Array(8)) : null;
+      for(let i = 0; i < 8; i++){
+        const n = buf ? buf[i] : Math.floor(Math.random() * 0xffffffff);
+        out += ALPHABET.charAt(n % ALPHABET.length);
+      }
+      return "AS-" + out;
+    },
+    /* AS-7K4M9PXR -> "AS-7K4M 9PXR" for reading aloud / typing */
+    pretty(code){
+      const c = String(code || "").toUpperCase();
+      return RE.test(c) ? c.slice(0,7) + " " + c.slice(7) : c;
     }
   };
 })();
@@ -256,6 +476,41 @@ window.Attempts = (function(){
     if(document.visibilityState === "hidden" && rec){ closeClock(); save(); }
   });
   window.addEventListener("beforeunload", () => { if(rec){ closeClock(); save(); } });
+
+  /* ---- per-assignment rows (spec §3) ----
+     One row per assignment (assign:<CODE>:<assignmentId>) instead of one array
+     per student, which is what removes the Phase F read-modify-write clobber.
+     assign:<CODE>:__none is an explicit "assigned nothing" sentinel, so the
+     [] vs absent distinction David decided on survives the move to rows. */
+  const ASSIGN_SYNC_PREFIX = "devstore:__assignsync:";
+  const NONE_SUFFIX = ":__none";
+
+  function assignPrefix(codeKey){ return "assign:" + codeKey + ":"; }
+
+  async function readLocalAssignments(codeKey){
+    const keys = await AttemptStore.list(assignPrefix(codeKey));
+    if(!keys || !keys.length) return null;              // nothing configured
+    if(keys.some(k => k.slice(-NONE_SUFFIX.length) === NONE_SUFFIX) && keys.length === 1){
+      return "none";                                    // explicitly assigned nothing
+    }
+    const out = [];
+    for(const k of keys){
+      if(k.slice(-NONE_SUFFIX.length) === NONE_SUFFIX) continue;
+      const v = await AttemptStore.get(k);
+      if(v && v.assignmentId) out.push(v);
+    }
+    return out.length ? out : null;
+  }
+
+  async function cacheRemoteAssignments(codeKey, rows){
+    // replace this student's cached rows with what the server just returned
+    const existing = (await AttemptStore.list(assignPrefix(codeKey))) || [];
+    const fresh = {};
+    for(const r of rows){ if(r && r.key) fresh[r.key] = r.value; }
+    for(const k of existing){ if(!(k in fresh)) await AttemptStore.remove(k); }
+    for(const k of Object.keys(fresh)) await AttemptStore.setLocal(k, fresh[k]);
+    try{ localStorage.setItem(ASSIGN_SYNC_PREFIX + codeKey, new Date().toISOString()); }catch(e){}
+  }
 
   return {
     /* ---- lifecycle (called from app.js) ---- */
@@ -415,22 +670,47 @@ window.Attempts = (function(){
        assignments so old keys keep working. */
     async assignments(code){
       const key = String(code || "").trim().toUpperCase();
+
+      /* Remote mode (spec §2): pull from the server, cache locally, and on an
+         unreachable server fall back to cache ONLY if this device has synced
+         this student before. With no cache we return "unavailable" rather than
+         null — null means "no assignments configured -> all tests as practice",
+         and answering that from a failed read would turn a proctored,
+         start-code-gated test into an ungated practice card. */
+      if(AttemptStore.isRemote()){
+        try{
+          const rows = await AttemptStore.rpc("fn_get_assignments", { p_code: key });
+          await cacheRemoteAssignments(key, Array.isArray(rows) ? rows : []);
+          const pulled = await readLocalAssignments(key);
+          return pulled === "none" ? [] : pulled;
+        }catch(e){
+          if(!localStorage.getItem(ASSIGN_SYNC_PREFIX + key)) return "unavailable";
+          // fall through to the cached copy below
+        }
+      }
+
       // a genuine read failure must NOT collapse to "no key -> all published
-      // tests as practice": that would expose a proctored, start-code-gated
-      // test as an ungated practice card. Retry the transient blip; only a
-      // clean missing/no-storage result means "default".
+      // tests as practice" (same reasoning as above). Retry the transient
+      // blip; only a clean missing/no-storage result means "default".
       let res = null;
       for(let attempt = 0; attempt < 3; attempt++){
         res = await AttemptStore.getResult("assign:" + key);
         if(res.status !== "error") break;
       }
       if(res.status === "error") return "unavailable";     // caller shows a retry, not a downgrade
-      if(res.status !== "ok" || !Array.isArray(res.value)) return null;   // missing/nostorage -> default
-      return res.value.filter(Boolean).map(item => (typeof item === "string")
-        ? { assignmentId: "legacy-" + item, testId: item, category: "practice",
-            startCode: null, windowOpens: null, expiresAt: null,
-            assignedAt: null, completedAttemptId: null }
-        : item);
+      const legacy = (res.status === "ok" && Array.isArray(res.value)) ? res.value : null;
+      const perRow = await readLocalAssignments(key);       // per-assignment rows (spec §3)
+      if(perRow === null && legacy === null) return null;   // nothing configured -> default
+      if(perRow === "none" ) return [];                     // explicitly assigned nothing
+      const merged = (perRow === null ? [] : perRow).concat(
+        (legacy || []).filter(Boolean).map(item => (typeof item === "string")
+          ? { assignmentId: "legacy-" + item, testId: item, category: "practice",
+              startCode: null, windowOpens: null, expiresAt: null,
+              assignedAt: null, completedAttemptId: null }
+          : item));
+      // per-assignment rows win over a legacy array entry for the same id
+      const seen = {};
+      return merged.filter(a => a && !seen[a.assignmentId] && (seen[a.assignmentId] = 1));
     },
 
     /* mark an assignment consumed by the attempt that just finalized */
@@ -459,10 +739,23 @@ window.Attempts = (function(){
       }catch(e){ return false; }
     },
 
-    /* completed/timed-out attempts for this code, newest first */
+    /* completed/timed-out attempts for this code, newest first.
+       In remote mode this is where a tutor's `released` flip reaches the
+       student: pull their own rows, merge into local, then read locally.
+       A failed pull is non-fatal — they just see the last known state. */
     async pastAttempts(code){
       try{
         const key = String(code || "").trim().toUpperCase();
+        if(AttemptStore.isRemote()){
+          try{
+            const rows = await AttemptStore.rpc("fn_get_own_attempts", { p_code: key });
+            if(Array.isArray(rows)){
+              for(const r of rows){
+                if(r && r.key && r.value) await AttemptStore.setLocal(r.key, r.value);
+              }
+            }
+          }catch(e){ /* offline: fall through to the local copy */ }
+        }
         const keys = await AttemptStore.list("attempt:");
         if(!keys) return [];
         const out = [];

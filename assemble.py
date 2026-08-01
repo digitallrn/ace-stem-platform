@@ -25,6 +25,30 @@ from pathlib import Path
 LOCAL_CSS_RE = re.compile(r'<link rel="stylesheet" href="(?!https?://)([^"]+)">')
 LOCAL_JS_RE = re.compile(r'<script src="(?!https?://)([^"]+)"></script>')
 
+# Never inline these, even if index.html references them plainly. config.js
+# holds the Supabase anon key for a static deployment; dist/index-live.html is
+# the single file David hands around and the artifact build (which uses shared
+# storage and needs no remote config at all), so keys must not end up in it.
+# The tag in index.html also carries data-no-inline, which LOCAL_JS_RE already
+# skips — this list is the explicit, self-documenting guard.
+SKIP_INLINE = {"config.js"}
+
+# Anything matching these in the output means a real secret VALUE leaked into
+# the build. Deliberately matches values, not identifiers: attempts.js legitimately
+# mentions SUPABASE_URL / SUPABASE_ANON_KEY when reading window.ACESTEM_CONFIG.
+#
+# Covers both Supabase key generations:
+#   legacy  — JWT-shaped anon / service_role keys (eyJ...)
+#   current — sb_publishable_... (public by design) and sb_secret_... (never
+#             belongs anywhere near this repo, the build, or a browser)
+SECRET_PATTERNS = (
+    (re.compile(r"eyJ[A-Za-z0-9_-]{20,}\."), "a JWT-shaped key (legacy anon/service_role)"),
+    (re.compile(r"sb_secret_[A-Za-z0-9_-]{4,}"), "a Supabase SECRET key — never ship this"),
+    (re.compile(r"sb_publishable_[A-Za-z0-9_-]{4,}"), "a Supabase publishable key"),
+    (re.compile(r"https://(?!YOUR-)[a-z0-9-]+\.supabase\.co"), "a real Supabase project URL"),
+    (re.compile(r"service_role"), "the service_role key name"),
+)
+
 
 def inline(html, base_dir):
     def css_sub(m):
@@ -34,7 +58,10 @@ def inline(html, base_dir):
         return "<style>\n" + path.read_text(encoding="utf-8") + "\n</style>"
 
     def js_sub(m):
-        path = base_dir / m.group(1)
+        name = m.group(1)
+        if name in SKIP_INLINE:
+            return m.group(0)            # leave the tag; do not read the file
+        path = base_dir / name
         if not path.exists():
             raise FileNotFoundError(f"assemble.py: missing {path} (referenced in index.html)")
         return "<script>\n" + path.read_text(encoding="utf-8") + "\n</script>"
@@ -59,11 +86,21 @@ def main():
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    leaked = [why for rx, why in SECRET_PATTERNS if rx.search(assembled)]
+    if leaked:
+        out_path.unlink(missing_ok=True)
+        raise SystemExit(
+            "assemble.py: refusing to write — the build contains "
+            + ", ".join(leaked)
+            + ". Supabase config must never be inlined into dist/."
+        )
+
     out_path.write_text(assembled, encoding="utf-8")
 
-    remaining_local = LOCAL_CSS_RE.search(assembled) or LOCAL_JS_RE.search(assembled)
+    remaining = LOCAL_CSS_RE.search(assembled) or LOCAL_JS_RE.search(assembled)
     print(f"✓ wrote {out_path} ({len(assembled):,} bytes)")
-    if remaining_local:
+    if remaining:
         print("⚠ a local <link>/<script> reference survived inlining — check index.html")
 
 

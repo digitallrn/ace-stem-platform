@@ -120,13 +120,29 @@ window.Dashboard = (function(){
 
   async function loadAssignsAndBugs(){
     assigns = []; bugs = [];
+    /* Phase H §3: assignments are one row per assignment
+       (assign:<CODE>:<assignmentId>), which is what removes the Phase F
+       read-modify-write clobber. Legacy assign:<CODE> arrays still load. */
+    const byCode = {};
+    const entry = c => (byCode[c] = byCode[c] || { code: c, list: [], sentinel: false });
     const aKeys = await AttemptStore.list("assign:");
     if(aKeys){
       for(const k of aKeys){
-        const list = await AttemptStore.get(k);
-        if(Array.isArray(list)) assigns.push({ code: k.slice("assign:".length), list });
+        const rest = k.slice("assign:".length);
+        const sep = rest.indexOf(":");
+        const code = sep === -1 ? rest : rest.slice(0, sep);
+        const e = entry(code);
+        const v = await AttemptStore.get(k);
+        if(sep === -1){
+          if(Array.isArray(v)) e.list = e.list.concat(v.filter(Boolean));   // legacy array
+        } else if(rest.slice(sep) === ":__none"){
+          e.sentinel = true;                       // explicitly "assigned nothing"
+        } else if(v && v.assignmentId){
+          e.list.push(v);
+        }
       }
     }
+    Object.keys(byCode).forEach(c => assigns.push(byCode[c]));
     const bKeys = await AttemptStore.list("bug:");
     if(bKeys){
       for(const k of bKeys){
@@ -244,10 +260,25 @@ window.Dashboard = (function(){
       return;
     }
     r.released = !r.released;
-    const ok = await AttemptStore.set(r.attemptId, r);
+    /* setLocal, not set(): set() would enqueue this through the STUDENT RPC,
+       and fn_upsert_attempt deliberately ignores `released` so students can't
+       self-release. The tutor's authenticated table write is the only path
+       that can actually flip it. */
+    let ok = await AttemptStore.setLocal(r.attemptId, r);
+    if(ok && AttemptStore.isRemote()){
+      try{
+        await AttemptStore.adminUpsert(r.attemptId, (r.student && r.student.key) || null, r);
+      }catch(e){ ok = false; }
+    }
     if(!ok){
       r.released = !r.released;                 // roll back — nothing persisted
-      $("dashStatus").textContent = "Release toggle didn't save — storage unavailable.";
+      $("dashStatus").textContent = AttemptStore.isRemote()
+        ? "Release didn't save to the server — check your tutor sign-in and try again."
+        : "Release toggle didn't save — storage unavailable.";
+    } else if(AttemptStore.isRemote()){
+      $("dashStatus").textContent = r.released
+        ? "Released — the student sees Score Details at their next sign-in or refresh."
+        : "Un-released — Score Details hidden from the student again.";
     }
     render();
   }
@@ -471,7 +502,9 @@ window.Dashboard = (function(){
         .concat(assigns.map(a => a.code))
     )).sort();
     // codes that currently HAVE an assign key (non-empty list) — reset targets
-    const assignedCodes = assigns.filter(e => Array.isArray(e.list) && e.list.length)
+    // reset targets: any code that has rows OR an explicit "assigned nothing"
+    const assignedCodes = assigns
+      .filter(e => (Array.isArray(e.list) && e.list.length) || e.sentinel)
       .map(e => e.code).sort();
     const d = new Date();
     const today = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
@@ -510,7 +543,7 @@ window.Dashboard = (function(){
             <label>Student codes (seen in storage)
               <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></label>
             <label>More codes (comma-separated)
-              <input id="afFree" placeholder="AS-1234, AS-9XYZ" autocomplete="off"></label>
+              <input id="afFree" placeholder="AS-7K4M9PXR, AS-3TQV8BND" autocomplete="off"></label>
             <label>Test
               <select id="afTest">${(window.TEST_DATA || []).map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
             <label>Category
@@ -556,7 +589,7 @@ window.Dashboard = (function(){
   async function createAssignment(){
     const sel = Array.from($("afCodes").selectedOptions).map(o => o.value);
     const free = $("afFree").value.split(/[\s,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
-    const bad = free.filter(c => !/^AS-[A-Z0-9]{4}$/.test(c));
+    const bad = free.filter(c => !StudentCode.valid(c));
     if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
     const codes = Array.from(new Set(sel.concat(free)));
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
@@ -568,48 +601,59 @@ window.Dashboard = (function(){
       ? String(Math.floor(100000 + Math.random() * 900000)) : null;
     const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
     const expires = $("afExpires").value ? new Date($("afExpires").value + "T23:59:00").toISOString() : null;
-    let okAll = true, readFailed = false;
+    /* Phase H §3: one row per assignment. No read-modify-write, so the
+       Phase F clobber is gone — concurrent writers touch different keys. */
+    let okAll = true, remoteFailed = false;
     for(const code of codes){
-      const key = "assign:" + code;
-      // read-modify-write: a failed READ must not be treated as "no
-      // assignments" — appending to [] would clobber every existing
-      // assignment (including a live proctored one). Skip this code on a
-      // read error rather than destroy its list.
-      const res = await AttemptStore.getResult(key);
-      if(res.status === "error" || res.status === "nostorage"){ readFailed = true; continue; }
-      const list = Array.isArray(res.value) ? res.value : [];
-      list.push({
+      const a = {
         assignmentId: "a-" + Math.floor(Date.now()/1000) + "-" + Math.random().toString(16).slice(2, 6),
         testId, category, startCode, timing,
         windowOpens: opens, expiresAt: expires,
         assignedAt: new Date().toISOString(),
         completedAttemptId: null
-      });
-      if(!(await AttemptStore.set(key, list))) okAll = false;
+      };
+      const key = "assign:" + code + ":" + a.assignmentId;
+      if(!(await AttemptStore.setLocal(key, a))) okAll = false;
+      await AttemptStore.remove("assign:" + code + ":__none");   // no longer "nothing assigned"
+      if(AttemptStore.isRemote()){
+        try{
+          await AttemptStore.adminUpsert(key, code, a);
+          await AttemptStore.adminDelete("assign:" + code + ":__none");
+        }catch(e){ remoteFailed = true; }
+      }
     }
     lastStartCode = startCode;
-    $("dashStatus").textContent = readFailed
-      ? "Couldn't read some students' existing assignments — those were skipped to avoid overwriting. Try again."
-      : okAll
-        ? "Assigned " + testId + " to " + codes.join(", ") + "."
-        : "Some assignment writes failed — storage problem.";
+    $("dashStatus").textContent = !okAll
+      ? "Some assignment writes failed — storage problem."
+      : remoteFailed
+        ? "Saved locally, but the server write failed — students won't see this until it syncs. Check your tutor sign-in and try again."
+        : "Assigned " + testId + " to " + codes.join(", ") +
+          (AttemptStore.isRemote() ? " (synced)." : ".");
     await loadAssignsAndBugs();
     render();
   }
 
   async function deleteAssignment(code, assignmentId){
-    const key = "assign:" + code;
-    const list = await AttemptStore.get(key);
-    if(!Array.isArray(list)) return;
-    const remaining = list.filter(x => !(x && x.assignmentId === assignmentId));
-    // decision (b): [] and absent stay distinct — deleting the last assignment
-    // leaves the student with NO tests (not the all-tests default). Confirm
-    // that outcome, and point at Reset to default for the other intent.
+    const key = "assign:" + code + ":" + assignmentId;
+    const keys = (await AttemptStore.list("assign:" + code + ":")) || [];
+    const remaining = keys.filter(k => k !== key && k.slice(-7) !== ":__none");
+    // decision (b): "assigned nothing" and "never configured" stay distinct —
+    // deleting the last assignment leaves the student with NO tests, not the
+    // all-tests default. Confirm that, and point at Reset for the other intent.
     if(remaining.length === 0 &&
        !confirm("This is " + code + "'s last assignment. Deleting it leaves them with NO tests on their home screen.\n\nTo instead give them every published test as practice, cancel and use “Reset to default (all tests)”.\n\nDelete anyway?")){
       return;
     }
-    await AttemptStore.set(key, remaining);
+    await AttemptStore.remove(key);
+    if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete(key); }catch(e){} }
+    if(remaining.length === 0){
+      // sentinel keeps "assigned nothing" distinct from "never configured"
+      const sk = "assign:" + code + ":__none";
+      await AttemptStore.setLocal(sk, { none: true, at: new Date().toISOString() });
+      if(AttemptStore.isRemote()){
+        try{ await AttemptStore.adminUpsert(sk, code, { none: true }); }catch(e){}
+      }
+    }
     await loadAssignsAndBugs();
     render();
   }
@@ -617,12 +661,61 @@ window.Dashboard = (function(){
   async function resetToDefault(code){
     if(!code) return;
     if(!confirm("Reset " + code + " to default? Their assignment list will be removed, so they'll see every published test as practice again.")) return;
-    const ok = await AttemptStore.remove("assign:" + code);   // absent key -> default
+    const keys = (await AttemptStore.list("assign:" + code)) || [];   // rows + legacy array
+    let ok = true;
+    for(const k of keys){
+      if(!(await AttemptStore.remove(k))) ok = false;
+      if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete(k); }catch(e){ ok = false; } }
+    }
     $("dashStatus").textContent = ok
       ? code + " reset to default — sees all published tests as practice."
-      : "Reset failed — storage problem.";
+      : "Reset partly failed — check the connection and try again.";
     await loadAssignsAndBugs();
     render();
+  }
+
+  /* ---------- Phase H §7: one-time migration ----------
+     Push records this device recorded during local-mode use up to the server,
+     skipping any key that already exists remotely so re-running is harmless. */
+  async function migrateLocalToServer(){
+    if(!AttemptStore.isRemote()){
+      $("dashStatus").textContent = "No server configured — nothing to upload to.";
+      return;
+    }
+    if(!AttemptStore.hasAuthToken()){
+      $("dashStatus").textContent = "Sign in as tutor first — uploading needs an authenticated session.";
+      return;
+    }
+    $("dashStatus").textContent = "Checking what the server already has…";
+    let remoteKeys;
+    try{
+      const rows = await AttemptStore.adminSelectAll();
+      remoteKeys = {};
+      (rows || []).forEach(r => { remoteKeys[r.key] = true; });
+    }catch(e){
+      $("dashStatus").textContent = "Couldn't read the server: " + (e.message || e);
+      return;
+    }
+    let sent = 0, skipped = 0, failed = 0;
+    for(const prefix of ["attempt:", "assign:", "bug:"]){
+      const keys = (await AttemptStore.list(prefix)) || [];
+      for(const k of keys){
+        if(remoteKeys[k]){ skipped++; continue; }
+        const v = await AttemptStore.get(k);
+        if(!v) { failed++; continue; }
+        // owner: attempts carry student.code; assignment keys embed the code
+        let owner = null;
+        if(k.indexOf("attempt:") === 0) owner = (v.student && v.student.key) || null;
+        else if(k.indexOf("assign:") === 0) owner = k.split(":")[1] || null;
+        else if(k.indexOf("bug:") === 0) owner = v.studentCode || null;
+        try{ await AttemptStore.adminUpsert(k, owner, v); sent++; }
+        catch(e){ failed++; }
+      }
+    }
+    $("dashStatus").textContent =
+      "Upload finished — " + sent + " sent, " + skipped + " already on the server" +
+      (failed ? ", " + failed + " failed" : "") + ".";
+    await loadFromStorage();
   }
 
   /* ---------- Phase F §9: bug reports ---------- */
@@ -724,9 +817,14 @@ window.Dashboard = (function(){
     if(wired) return;
     wired = true;
     $("dashRefreshBtn").addEventListener("click", loadFromStorage);
+    $("dashMigrateBtn").addEventListener("click", migrateLocalToServer);
+    $("dashMigrateBtn").classList.toggle("hidden", !AttemptStore.isRemote());
     $("dashExportBtn").addEventListener("click", exportAll);
     $("dashDeleteBtn").addEventListener("click", deleteArchived);
-    $("dashSignoutBtn").addEventListener("click", () => { if(showOnlyFn) showOnlyFn("screen-signin"); });
+    $("dashSignoutBtn").addEventListener("click", () => {
+      AttemptStore.signOutTutor();          // drop the tutor session with the view
+      if(showOnlyFn) showOnlyFn("screen-signin");
+    });
     $("dashDetailClose").addEventListener("click", () => $("dashDetail").classList.add("hidden"));
     $("dashDetail").addEventListener("click", e => { if(e.target.id === "dashDetail") $("dashDetail").classList.add("hidden"); });
     $("dashFilterTest").addEventListener("change", render);

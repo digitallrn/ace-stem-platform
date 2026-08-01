@@ -22,8 +22,8 @@
   <div class="signin-card">
     <h1>Sign In</h1>
     <label for="nameInput">Student code</label>
-    <input type="text" id="nameInput" placeholder="AS-1234" autocomplete="off" spellcheck="false">
-    <div class="signin-error hidden" id="signinError">Enter the code your tutor gave you — it looks like AS-1234.</div>
+    <input type="text" id="nameInput" placeholder="AS-7K4M9PXR" autocomplete="off" spellcheck="false">
+    <div class="signin-error hidden" id="signinError">Enter the code your tutor gave you — it looks like AS-7K4M9PXR.</div>
     <button class="pill yellow" id="signinBtn">✦&nbsp; Sign in to practice</button>
     <div class="signin-note">Ace STEM practice simulator — no College Board account needed. Don't have a code? Ask your tutor.</div>
   </div>
@@ -97,6 +97,10 @@
     <span class="local-tag hidden" id="localModeTag" title="This copy stores results in this browser. Download your results to hand them to your tutor.">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>
       Local mode — results save on this device
+    </span>
+    <!-- remote mode: sync state replaces the local-mode pill (Phase H §1) -->
+    <span class="local-tag sync-tag hidden" id="syncTag" title="Your work saves on this device first and syncs to your tutor in the background.">
+      <span class="sync-dot" id="syncDot"></span><span id="syncTagText">Synced</span>
     </span>
     <div class="home-user"><span id="homeUserName">Student</span><span class="avatar" id="homeAvatar">S</span></div>
   </div>
@@ -391,6 +395,7 @@
       <button class="pill ghost" id="dashRefreshBtn">↻ Refresh</button>
       <button class="pill ghost" id="dashExportBtn">⬇ Download all attempts (JSON)</button>
       <button class="pill ghost danger" id="dashDeleteBtn" disabled title="Enabled after a successful download this session">🗑 Delete archived attempts</button>
+      <button class="pill ghost hidden" id="dashMigrateBtn" title="Send records saved on this device up to the server, skipping any already there">⬆ Upload local records to server</button>
       <button class="pill ghost" id="dashSignoutBtn">Sign out</button>
     </div>
   </div>
@@ -432,6 +437,25 @@
   </div>
 </div>
 
+<!-- Tutor sign-in (Phase H §4) — real Supabase Auth on remote deployments;
+     replaces the acestem-admin magic name entirely when remote is configured -->
+<div class="modal-overlay hidden" id="tutorAuthModal">
+  <div class="modal-card">
+    <button class="panel-x dark" id="tutorAuthClose">✕</button>
+    <h2>Tutor sign-in</h2>
+    <p class="modal-sub">Dashboard access uses your Supabase account.</p>
+    <label class="ta-label" for="tutorEmail">Email</label>
+    <input type="email" id="tutorEmail" autocomplete="username" spellcheck="false">
+    <label class="ta-label" for="tutorPassword">Password</label>
+    <input type="password" id="tutorPassword" autocomplete="current-password">
+    <div class="signin-error hidden" id="tutorAuthError"></div>
+    <div class="modal-actions">
+      <button class="pill ghost" id="tutorAuthCancel">Cancel</button>
+      <button class="pill" id="tutorAuthGo">Sign in</button>
+    </div>
+  </div>
+</div>
+
 <!-- Save-and-Exit failure guard (Phase F §8) -->
 <div class="modal-overlay hidden" id="saveFailModal">
   <div class="modal-card">
@@ -446,6 +470,11 @@
   </div>
 </div>
 
+<!-- Optional Supabase config (gitignored; see config.example.js). Absent on a
+     fresh clone and in the artifact build — the 404 is harmless and simply
+     leaves the app in local mode. The extra attribute keeps assemble.py from
+     inlining it, so keys never enter dist/index-live.html. -->
+<script src="config.js" data-no-inline></script>
 <script src="test-data.js"></script>
 <script src="render.js"></script>
 <script src="grading.js"></script>
