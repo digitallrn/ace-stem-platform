@@ -162,7 +162,7 @@
     if(!AttemptStore.available()){
       devMark("storage", false, "No storage in this copy — attempts won't be recorded");
     } else {
-      const mode = AttemptStore.isDev() ? "practice (dev) storage" : "shared storage";
+      const mode = AttemptStore.isLocal() ? "local mode — saves on this device" : "shared storage";
       const wrote = await AttemptStore.set("devicecheck:probe", { t: Date.now() });
       if(wrote) await AttemptStore.remove("devicecheck:probe");
       devMark("storage", wrote, wrote ? mode : mode + " — write failed");
@@ -186,6 +186,8 @@
      Practice and Prepare carries practice assignments, or every published
      test when this code has no assign: key at all. */
   function renderHome(){
+    // local mode indicator — records stay on this device, nothing is synced
+    el("localModeTag").classList.toggle("hidden", !AttemptStore.isLocal());
     document.querySelectorAll("#practiceSeg .seg-btn").forEach(b =>
       b.classList.toggle("on", b.dataset.seg === state.practiceTab));
     renderYourTests();
@@ -960,10 +962,15 @@
      flag from the dashboard. */
   function showSubmitted(){
     const working = Attempts.storageWorking();
-    el("subSaveNote").textContent = working
-      ? "Your attempt was recorded automatically."
-      : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
-    el("subDownloadBtn").classList.toggle("hidden", working);   // spec §6 fallback
+    const local = AttemptStore.isLocal();
+    // Local mode: the record can't be released remotely, so the JSON file IS
+    // the handoff — offer it even when the local write succeeded.
+    el("subSaveNote").textContent = local
+      ? "Saved on this device. Download your results and send the file to your tutor."
+      : working
+        ? "Your attempt was recorded automatically."
+        : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
+    el("subDownloadBtn").classList.toggle("hidden", working && !local);   // spec §6 fallback
     showOnly("screen-submitted");
   }
   el("subDownloadBtn").addEventListener("click", ()=> Attempts.downloadJson());

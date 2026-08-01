@@ -90,12 +90,15 @@ window.Dashboard = (function(){
   /* ---------- data load ---------- */
   async function loadFromStorage(){
     source = "storage";
-    $("dashStatus").textContent = "Loading attempts from shared storage…";
+    const local = AttemptStore.isLocal();
+    $("dashStatus").textContent = local
+      ? "Loading attempts saved on this device…"
+      : "Loading attempts from shared storage…";
     const keys = await AttemptStore.list("attempt:");
     if(keys === null){
+      // only reachable when even localStorage is unusable (private mode, quota)
       recs = [];
-      $("dashStatus").innerHTML = "<b>No shared storage in this copy.</b> Records are only written in the published app. You can still inspect a downloaded archive: use “Load archive file”." +
-        (AttemptStore.isDev() ? "" : " (For local testing, reopen with ?devstorage=1.)");
+      $("dashStatus").innerHTML = "<b>Storage isn't readable in this browser.</b> Attempts can't be listed here. You can still inspect a downloaded archive: use “Load archive file”.";
       renderAll();
       return;
     }
@@ -107,7 +110,9 @@ window.Dashboard = (function(){
     }
     recs = loaded;
     await loadAssignsAndBugs();
-    $("dashStatus").textContent = recs.length + " attempt(s) in storage." +
+    $("dashStatus").textContent = recs.length +
+      (local ? " attempt(s) saved on this device (local mode — not synced)."
+             : " attempt(s) in shared storage.") +
       (failed ? " (" + failed + " unreadable — see console.)" : "") +
       (lastExport ? "" : " Download an archive before deleting anything.");
     renderAll();
@@ -454,7 +459,7 @@ window.Dashboard = (function(){
 
   function viewAssign(){
     if(!AttemptStore.available()){
-      return '<p class="dash-empty">No storage in this copy — assignments can only be managed where records live (published app, or ?devstorage=1 locally).</p>';
+      return '<p class="dash-empty">Storage isn\'t usable in this browser, so assignments can\'t be managed here.</p>';
     }
     if(source === "file"){
       // statuses/delete-gating are computed from recs; against an archive file

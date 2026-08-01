@@ -15,14 +15,20 @@
      await storage.get(key, true)      -> {value: string}
      await storage.list(prefix, true)  -> {keys: [string]}
      await storage.delete(key, true)
-   Dev shim: append ?devstorage=1 to the URL to back the same API with
-   localStorage (for local testing of recording + dashboard). */
+   TWO DEPLOYMENT MODES (see CLAUDE.md "Deployment modes"):
+     shared — published claude.ai artifact: window.storage exists, records
+              are shared, so the tutor dashboard sees every student.
+     local  — static host (or a file:// copy): window.storage is absent, so
+              the same API is backed by localStorage. Records never leave the
+              device, so the JSON download is the student's handoff.
+   Local mode engages automatically when window.storage is absent; the older
+   ?devstorage=1 switch still forces it and is no longer required. */
 window.AttemptStore = (function(){
   "use strict";
 
-  const devMode = /[?&]devstorage=1/.test(location.search);
+  const forcedLocal = /[?&]devstorage=1/.test(location.search);
 
-  const devBackend = {
+  const localBackend = {
     async set(key, value){ localStorage.setItem("devstore:" + key, value); return true; },
     async get(key){ const v = localStorage.getItem("devstore:" + key); return v === null ? null : { value: v }; },
     async list(prefix){
@@ -36,14 +42,20 @@ window.AttemptStore = (function(){
     async delete(key){ localStorage.removeItem("devstore:" + key); return true; }
   };
 
+  /* Resolved per call, never cached: a host may install window.storage after
+     these scripts run, and the test harness swaps it at runtime. */
   function backend(){
-    if(devMode) return devBackend;
-    return window.storage || null;
+    if(forcedLocal) return localBackend;
+    return window.storage || localBackend;   // static host -> local mode
   }
+  function isLocal(){ return forcedLocal || !window.storage; }
 
   return {
+    /* Storage is now always available in some form; available() stays for
+       callers that only care that reads/writes can be attempted. */
     available(){ return !!backend(); },
-    isDev(){ return devMode; },
+    isLocal: isLocal,
+    isDev: isLocal,          // deprecated alias, kept for older call sites
 
     /* All four return-or-null / return-false, never throw. */
     async set(key, obj){

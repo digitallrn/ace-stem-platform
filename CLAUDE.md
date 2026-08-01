@@ -42,6 +42,24 @@ no relationship to it and should never generate or overwrite it.
 `assemble.py` builds `dist/index-live.html` only — a preview file, not
 that fork.
 
+## Deployment modes
+The app detects at runtime which storage it has and adapts. Nothing to
+configure, no build flag, no query parameter.
+
+| | **Shared mode** | **Local mode** |
+|---|---|---|
+| Where | published claude.ai artifact | static host (Netlify/GitHub Pages), or a `file://` copy |
+| Trigger | `window.storage` exists | `window.storage` absent (auto) |
+| Records | shared — tutor dashboard sees every student | localStorage, this browser only |
+| Release flow | works (tutor flips `released`) | not reachable — the student's JSON download is the handoff |
+| Student sees | normal home screen | a quiet "Local mode — results save on this device" tag on the home screen, and Download Results JSON always offered on the submit confirmation |
+
+Consequences worth remembering for local mode: each device is its own
+island (a student on two laptops has two separate histories), clearing
+site data destroys the records, and the tutor dashboard opened on that
+device only shows attempts taken on it. `?devstorage=1` still forces
+local mode but is no longer needed for local testing.
+
 ## Workflow
 1. Edit the split files directly.
 2. `python3 assemble.py` to produce `dist/index-live.html` whenever you
@@ -72,6 +90,9 @@ Three rules:
 
 `tests/injection-proof.js` is a paste-into-the-console regression proof —
 run it against `dist/index-live.html` after touching any render surface.
+`tests/local-mode.test.js` (`node tests/local-mode.test.js`) covers the
+storage-adapter mode resolution; the preview pane strips query strings, so
+the `?devstorage=1` cases can only be checked there.
 
 ## Known limitations (accepted for launch)
 - **Concurrent `assign:<CODE>` writes can clobber.** Each student's
