@@ -450,7 +450,7 @@
         const built = buildScoreRows(test, record);
         const rawRw = built.tally["Reading and Writing"].correct;
         const rawMath = built.tally["Math"].correct;
-        const scaled = scaledScores(test, rawRw, rawMath);
+        const scaled = scaledScores(test, rawRw, rawMath, built.moduleRaw);
         scoreLine = scaled
           ? `<div class="pcard-total">${scaled.total}${scaled.estimated ? EST : ""}<span class="pcard-total-range">400–1600</span></div>`
           : `<div class="pcard-total">${rawRw + rawMath}<span class="pcard-total-of">/ ${built.tally["Reading and Writing"].graded + built.tally["Math"].graded} correct</span></div>`;
@@ -1812,14 +1812,33 @@
   }
 
   /* §3: scaled scores only when the test carries a scoring table; otherwise
-     null and the page falls back to raw counts — never invent numbers. */
-  function scaledScores(test, rawRw, rawMath){
+     null and the page falls back to raw counts — never invent numbers.
+     Two forms (SCHEMA v1.2 scoring addendum):
+     - per-section: sc.rw[rawRw] / sc.math[rawMath] — arrays over section raw.
+     - per-module (sc.model === "per-module"): section scaled = sc.base +
+       <sec>M1[raw correct in module 1] + <sec>M2[raw correct in module 2].
+       Needs the per-module raws from buildScoreRows; without them (or with a
+       malformed table) this returns null and the raw fallback shows. */
+  function scaledScores(test, rawRw, rawMath, moduleRaw){
     const sc = test.scoring;
-    if(!sc || !Array.isArray(sc.rw) || !Array.isArray(sc.math)) return null;
-    const rw = sc.rw[Math.max(0, Math.min(rawRw, sc.rw.length - 1))];
-    const math = sc.math[Math.max(0, Math.min(rawMath, sc.math.length - 1))];
+    if(!sc) return null;
+    const pick = (arr, raw) => Array.isArray(arr) && typeof raw === "number"
+      ? arr[Math.max(0, Math.min(raw, arr.length - 1))] : undefined;
+    let rw, math;
+    if(sc.model === "per-module"){
+      if(!moduleRaw || typeof sc.base !== "number") return null;
+      const rw1 = pick(sc.rwM1,   moduleRaw.rw[0]),   rw2 = pick(sc.rwM2,   moduleRaw.rw[1]);
+      const ma1 = pick(sc.mathM1, moduleRaw.math[0]), ma2 = pick(sc.mathM2, moduleRaw.math[1]);
+      if([rw1, rw2, ma1, ma2].some(v => typeof v !== "number")) return null;
+      rw = sc.base + rw1 + rw2;
+      math = sc.base + ma1 + ma2;
+    } else {
+      rw = pick(sc.rw, rawRw);
+      math = pick(sc.math, rawMath);
+    }
     if(typeof rw !== "number" || typeof math !== "number") return null;
-    return { rw, math, total: rw + math, estimated: !!sc.estimated };
+    return { rw, math, total: rw + math,
+      estimated: !!sc.estimated || sc.scoringSource === "estimated" };
   }
   const EST = '<sup class="sd-est" title="Estimated — approximate conversion">Est.</sup>';
 
@@ -1831,7 +1850,14 @@
     const secCount = {};   // per-section running question number
     const tally = { "Reading and Writing": {correct:0, graded:0}, "Math": {correct:0, graded:0} };
     const domains = {};    // section -> domain -> {correct, graded}
+    /* per-module raw correct, in document order within each section — feeds
+       the per-module scoring form. Index = which module of its section. */
+    const SEC_KEY = { "Reading and Writing": "rw", "Math": "math" };
+    const moduleRaw = { rw: [0, 0], math: [0, 0] };
+    const modOrd = {};     // section -> how many of its modules seen so far
     test.modules.forEach(mod => {
+      const mKey = SEC_KEY[mod.section];
+      const mIdx = (modOrd[mod.section] = (modOrd[mod.section] || 0) + 1) - 1;
       const st = ms[mod.moduleId];
       mod.questions.forEach(q => {
         const noKey = !hasKey(q);
@@ -1841,7 +1867,10 @@
         secCount[mod.section] = (secCount[mod.section] || 0) + 1;
         if(!noKey && tally[mod.section]){
           tally[mod.section].graded++;
-          if(correct) tally[mod.section].correct++;
+          if(correct){
+            tally[mod.section].correct++;
+            if(mKey && mIdx < 2) moduleRaw[mKey][mIdx]++;
+          }
         }
         if(!noKey){
           const dd = (domains[mod.section] = domains[mod.section] || {});
@@ -1852,7 +1881,7 @@
           given, noKey, correct, domain });
       });
     });
-    return { rows, tally, domains };
+    return { rows, tally, domains, moduleRaw };
   }
 
   function answerLetter(q, val){
@@ -1867,6 +1896,7 @@
   function openScoreDetails(test, record, origin){
     const built = buildScoreRows(test, record);
     sdCtx = { test, record, rows: built.rows, tally: built.tally, domains: built.domains,
+      moduleRaw: built.moduleRaw,
       filter: "all", page: 0, pageSize: 10, showCorrect: false, origin: origin || "home" };
     qrShowAnswer = false;   // §5: the popup toggle is sticky per session, fresh per visit
     renderScoreDetails();
@@ -1884,10 +1914,10 @@
   }
 
   function renderScoreDetails(){
-    const { test, record, tally, domains } = sdCtx;
+    const { test, record, tally, domains, moduleRaw } = sdCtx;
     const rawRw = tally["Reading and Writing"].correct;
     const rawMath = tally["Math"].correct;
-    const scaled = scaledScores(test, rawRw, rawMath);
+    const scaled = scaledScores(test, rawRw, rawMath, moduleRaw);
     const badge = timingBadge(record.timing);
     const dateStr = fmtCardDate(record.startedAt);
 
