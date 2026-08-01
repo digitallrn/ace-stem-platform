@@ -4,7 +4,9 @@
   /* ================= STATE ================= */
   const state = {
     /* manifest entries only — {testId, testName, testVersion, moduleCount,
-       questionCount, sections, legacyIds}. Questions arrive via loadTest(). */
+       questionCount, sections, legacyIds}. Questions arrive via loadTest().
+       If the manifest script itself failed, this is [] — which is NOT the same
+       as "this student has nothing assigned"; see manifestLoaded() below. */
     tests: (window.TEST_MANIFEST || []),
     userName: "Student",
     currentTest: null,
@@ -194,6 +196,17 @@
     for(const t of state.tests){
       const r = await findResumableAnyId(code, t);
       if(r) state.resumeRecords[t.testId] = r;
+    }
+    /* A manifest that never loaded leaves state.tests empty, and an empty
+       library renders exactly like "nothing assigned" — the conflation
+       CLAUDE.md forbids, because it would tell a student with a proctored
+       sitting that they have nothing to do. Treat it like the unavailable
+       branch below: stop at sign-in with a retry rather than guess. */
+    if(!manifestLoaded()){
+      el("signinError").textContent = "Couldn't load the test list. Check your connection and try again.";
+      el("signinError").classList.remove("hidden");
+      showOnly("screen-signin");
+      return false;
     }
     // Phase F §2: assignment objects; absent resolves to [] (nothing granted)
     const assigns = await Attempts.assignments(code);
@@ -409,6 +422,13 @@
   function testIdAliases(entry){
     return entry ? [entry.testId].concat(entry.legacyIds || []) : [];
   }
+  /* Did testdata/manifest.js actually execute? An absent global means the
+     script failed; an empty array means a genuinely empty library. Both are
+     unusable, but neither may be reported as "nothing assigned". */
+  function manifestLoaded(){
+    return Array.isArray(window.TEST_MANIFEST) && window.TEST_MANIFEST.length > 0;
+  }
+
   /* Attempt keys embed the testId, so an attempt started before a rename lives
      under the old prefix. Every lookup must therefore try each alias, or the
      sitting looks absent — which shows the card as "Start" and lets a student
@@ -467,7 +487,14 @@
         if(k && k.indexOf(TESTCACHE_PREFIX + entry.testId + ":") === 0 && k !== cacheKey(entry)) stale.push(k);
       }
       stale.forEach(k => localStorage.removeItem(k));
-      localStorage.setItem(cacheKey(entry), JSON.stringify(test));
+      /* Serialise ONLY the content fields. Anything another module hangs off
+         the shared test object (a lookup index, a memo) must never ride into
+         the cache — it is not content, and one such index once inflated this
+         by 26x. Belt and braces with the dashboard keeping its index outside. */
+      localStorage.setItem(cacheKey(entry), JSON.stringify({
+        testId: test.testId, testName: test.testName, testVersion: test.testVersion,
+        legacyIds: test.legacyIds, scoring: test.scoring, modules: test.modules
+      }));
     }catch(e){ /* quota or private mode: the sitting still works, just online */ }
   }
 
@@ -517,9 +544,13 @@
     }
     const fetched = await fetchTestFile(entry.testId);
     if((fetched.testVersion || "unversioned") !== (entry.testVersion || "unversioned")){
-      // manifest and content disagree: refuse rather than run a sitting whose
-      // version cannot be trusted for review-matching later (ATTEMPTS-SPEC §9)
-      throw new Error("version mismatch");
+      /* manifest and content disagree: refuse rather than run a sitting whose
+         version cannot be trusted for review-matching later (ATTEMPTS-SPEC §9).
+         Flagged as permanent — retrying re-downloads the same mismatched file
+         forever, so the UI must not offer Retry as if it were a blip. */
+      const e = new Error("version mismatch");
+      e.permanent = true;
+      throw e;
     }
     writeCachedTest(entry, fetched);
     return fetched;
@@ -530,26 +561,37 @@
 
   /* Shared loading/retry gate. Never leaves a blank screen: on failure the
      student gets a message and a Retry, and can always get back home. */
+  const LOADING_DEFAULT_MSG = "This may take up to a minute. Please don't refresh this page or quit the app.";
   async function withTestContent(entry, onReady, origin){
     showOnly("screen-loading");
     el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + (entry ? entry.testName : "test") + "…");
     try{
       const full = await loadTest(entry);
+      // restore the standing instruction: this screen is reused by the normal
+      // start/resume beat, which must not inherit a stale "Loading X…"
+      el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
       onReady(full);
     }catch(e){
-      showTestLoadError(entry, () => withTestContent(entry, onReady, origin), origin);
+      el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
+      showTestLoadError(entry, () => withTestContent(entry, onReady, origin), origin, e);
     }
   }
   /* `origin` decides where the escape hatch goes. A tutor who opened this from
      the dashboard has no student home to return to — sending them to the
      student home screen would strand them in the wrong app. */
-  function showTestLoadError(entry, retry, origin){
+  function showTestLoadError(entry, retry, origin, err){
     const name = entry ? entry.testName : "this test";
     const toDashboard = origin === "dashboard";
+    const permanent = !!(err && err.permanent);
     el("loadErrTitle").textContent = "Couldn't load " + name;
-    el("loadErrBody").textContent = toDashboard
-      ? "The test content didn't download, so the question-by-question view can't be shown. The attempt record itself is fine."
-      : "The test content didn't download. Check your connection and try again — nothing you've already done has been lost.";
+    el("loadErrBody").textContent = permanent
+      // a mismatch re-downloads identically forever; say so instead of
+      // blaming the connection and inviting an endless retry
+      ? "This test's content doesn't match the version on record, so it can't be opened safely. Retrying won't help — tell your tutor."
+      : toDashboard
+        ? "The test content didn't download, so the question-by-question view can't be shown. The attempt record itself is fine."
+        : "The test content didn't download. Check your connection and try again — nothing you've already done has been lost.";
+    el("loadErrRetry").classList.toggle("hidden", permanent);
     el("loadErrRetry").onclick = retry;
     el("loadErrHome").textContent = toDashboard ? "Back to dashboard" : "Back to home";
     el("loadErrHome").onclick = toDashboard

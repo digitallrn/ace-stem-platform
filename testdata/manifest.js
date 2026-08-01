@@ -31,7 +31,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202512usav1",
   "testName": "2025 December US v1 (stub)",
-  "testVersion": "2025-12-01-a",
+  "testVersion": "2025-12-01-b",
   "moduleCount": 4,
   "questionCount": 10,
   "sections": [

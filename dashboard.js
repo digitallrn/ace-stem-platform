@@ -50,20 +50,35 @@ window.Dashboard = (function(){
       fullTests[entry.testId] = full;
       loadingTests[entry.testId] = false;
       render();
-    }).catch(()=>{ loadingTests[entry.testId] = false; });
+      /* the attempt-detail pane lives outside render()'s output, so it would
+         otherwise keep showing "question text unavailable" until reopened */
+      if(openAttemptId && !$("dashDetail").classList.contains("hidden")) openDetail(openAttemptId);
+    }).catch(()=>{
+      /* leave loadingTests true: a failed fetch must not be re-issued on every
+         subsequent render, which would hammer the network silently */
+      loadingTests[entry.testId] = "failed";
+    });
   }
 
   /* ---------- helpers ---------- */
+  /* The index lives HERE, not on the test object. Hanging it off the test
+     mutated the same object app.js keeps in window.__TESTDATA__ and re-caches,
+     and because every entry points back at its whole parent module,
+     JSON.stringify blew a 100 KB test up to ~2.6 MB — enough to blow the
+     localStorage quota, whose failure is swallowed, silently killing the
+     offline cache that keeps a sitting alive when the network drops. */
+  const qIndexes = {};
   function qIndex(testId){
     const entry = testsById[testId];
     if(!entry) return null;
     const t = fullTests[entry.testId];
     if(!t){ ensureTestLoaded(testId); return null; }
-    if(!t.__qIndex){
-      t.__qIndex = {};
-      t.modules.forEach(mod => mod.questions.forEach(q => { t.__qIndex[q.id] = { q, mod }; }));
+    if(!qIndexes[entry.testId]){
+      const idx = {};
+      t.modules.forEach(mod => mod.questions.forEach(q => { idx[q.id] = { q, mod }; }));
+      qIndexes[entry.testId] = idx;
     }
-    return t.__qIndex;
+    return qIndexes[entry.testId];
   }
   function fmtDate(isoStr){
     if(!isoStr) return "—";
@@ -132,7 +147,8 @@ window.Dashboard = (function(){
   function filtered(){
     const ft = $("dashFilterTest").value;
     const fs = $("dashFilterStudent").value;
-    return recs.filter(r => (!ft || r.testId === ft) && (!fs || (r.student && r.student.key) === fs));
+    // match through the manifest so a renamed test's older attempts still match
+    return recs.filter(r => (!ft || sameTest(r.testId, ft)) && (!fs || (r.student && r.student.key) === fs));
   }
 
   /* ---------- data load ---------- */
@@ -293,7 +309,9 @@ window.Dashboard = (function(){
   function renderAll(){
     // (re)build filter options, preserving selection
     const keepT = $("dashFilterTest").value, keepS = $("dashFilterStudent").value;
-    const tests = [...new Set(recs.map(r => r.testId))];
+    /* Collapse legacy ids onto the canonical one, or a renamed test appears as
+       two rows in the filter and each shows only half its attempts. */
+    const tests = [...new Set(recs.map(r => (testsById[r.testId] || {}).testId || r.testId))];
     const students = [...new Set(recs.map(r => r.student && r.student.key).filter(Boolean))].sort();
     $("dashFilterTest").innerHTML = '<option value="">All tests</option>' +
       tests.map(t => `<option value="${escAttr(t)}">${esc((recs.find(r=>r.testId===t)||{}).testName || t)}</option>`).join("");
@@ -581,9 +599,20 @@ window.Dashboard = (function(){
 
   /* ---------- attempt detail ---------- */
   /* ---------- Phase F §3: assignments ---------- */
+  /* Two testIds can name the SAME test across a rename, so compare through the
+     manifest. Matching raw ids missed an in-progress attempt written under the
+     other id, which showed the row as "pending" — and pending rows offer
+     Delete, i.e. the dashboard would offer to delete an assignment a student
+     was sitting at that moment. */
+  function sameTest(a, b){
+    if(!a || !b) return false;
+    if(a === b) return true;
+    const ea = testsById[a], eb = testsById[b];
+    return !!(ea && eb && ea.testId === eb.testId);
+  }
   function assignRowStatus(code, a){
     if(a.completedAttemptId) return "completed";
-    if(recs.some(r => r.status === "in-progress" && r.testId === a.testId &&
+    if(recs.some(r => r.status === "in-progress" && sameTest(r.testId, a.testId) &&
         r.student && r.student.key === code)) return "in-progress";
     if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
     return "pending";
@@ -941,9 +970,11 @@ window.Dashboard = (function(){
       </div>`).join("");
   }
 
+  let openAttemptId = null;      // so a lazy test load can refresh this pane
   function openDetail(attemptId){
     const r = recs.find(x => x.attemptId === attemptId);
     if(!r) return;
+    openAttemptId = attemptId;
     const idx = qIndex(r.testId);
     const test = testsById[r.testId];
     const versionNote = (test && test.testVersion && r.testVersion !== (test.testVersion || "unversioned"))
@@ -1045,7 +1076,10 @@ window.Dashboard = (function(){
       AttemptStore.signOutTutor();          // drop the tutor session with the view
       if(showOnlyFn) showOnlyFn("screen-signin");
     });
-    $("dashDetailClose").addEventListener("click", () => $("dashDetail").classList.add("hidden"));
+    $("dashDetailClose").addEventListener("click", () => {
+      openAttemptId = null;
+      $("dashDetail").classList.add("hidden");
+    });
     $("dashDetail").addEventListener("click", e => { if(e.target.id === "dashDetail") $("dashDetail").classList.add("hidden"); });
     $("dashFilterTest").addEventListener("change", render);
     $("dashFilterStudent").addEventListener("change", render);

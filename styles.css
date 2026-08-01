@@ -816,6 +816,15 @@
   .fmt-quote{ margin:10px 0 10px 40px; }
   /* Fill-in blank: one fixed width test-wide, however many underscores the
      source data happens to carry (52px, measured from reference 33). */
+  /* test-content load failure — shares the loading screen's centred card */
+  #screen-loaderror{
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .loaderr-card{ max-width:520px; text-align:center; }
+  .loaderr-card h1{ font-size:24px; margin:0 0 12px; }
+  .loaderr-card p{ font-size:15.5px; line-height:1.6; color:var(--ink-soft); margin:0 0 22px; }
+  .loaderr-actions{ display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+
   .fmt-blank{
     display:inline-block; width:52px; border-bottom:2px solid currentColor;
     margin:0 2px; vertical-align:baseline;

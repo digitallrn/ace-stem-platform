@@ -98,7 +98,14 @@
   async function run(){
     const results = [];
     clean();
-    const test = window.TEST_DATA[0];
+    /* Test content is lazy-loaded per test now, so fetch the first one in the
+       manifest through the app's own loader rather than reading a global that
+       no longer exists. Poisoning happens on the loaded object, exactly as it
+       did on window.TEST_DATA[0]. */
+    if(!window.AppTestLoader || !Array.isArray(window.TEST_MANIFEST) || !window.TEST_MANIFEST.length){
+      throw new Error("no test manifest/loader — open the app first, then paste this");
+    }
+    const test = await window.AppTestLoader.load(window.TEST_MANIFEST[0]);
 
     /* future-content fields: rationale goes through fmt(), which must escape
        prose while still honouring {{i}}/{{m}} tokens; an SPR correctAnswer
