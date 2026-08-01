@@ -89,9 +89,15 @@ testdata/<testId>.js      the full test; registers itself into
   (ATTEMPTS-SPEC §9). Version-gating is per test.
 - **Offline:** content is cached in `localStorage` under
   `acestem:testcache:<testId>:<testVersion>` the moment it loads, so a student
-  who drops connectivity mid-sitting keeps going and can resume. The version is
-  in the key, so a bumped test can never be served from a stale cache. The
-  network is never on the critical path once a sitting has begun.
+  who drops connectivity mid-sitting keeps answering, and a reload restores
+  from cache rather than the network. The version is in the key, so a bumped
+  test can never be served from a stale cache. Precisely: **no test-content
+  fetch is on the critical path once a sitting has begun** — the sitting holds
+  the full test in `state.currentTest`, and module boundaries never re-fetch.
+  What this does NOT provide is offline delivery of the *app itself*: there is
+  no service worker, so a hard reload with no connection fails at `index.html`
+  before any of this runs. Closing that needs a service worker; the cache here
+  only protects a sitting whose page is already loaded or reloadable.
 - **`assemble.py` inlines every test** into `dist/index-live.html`, because a
   single-file artifact has no origin to fetch from. The loader checks memory
   before cache before network, so the artifact simply never fetches.

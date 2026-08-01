@@ -192,10 +192,8 @@
        under the old one becomes unreachable. */
     state.resumeRecords = {};
     for(const t of state.tests){
-      for(const id of testIdAliases(t)){
-        const r = await Attempts.findInProgress(code, id, t.testVersion);
-        if(r){ state.resumeRecords[t.testId] = r; break; }
-      }
+      const r = await findResumableAnyId(code, t);
+      if(r) state.resumeRecords[t.testId] = r;
     }
     // Phase F §2: assignment objects; absent resolves to [] (nothing granted)
     const assigns = await Attempts.assignments(code);
@@ -411,6 +409,19 @@
   function testIdAliases(entry){
     return entry ? [entry.testId].concat(entry.legacyIds || []) : [];
   }
+  /* Attempt keys embed the testId, so an attempt started before a rename lives
+     under the old prefix. Every lookup must therefore try each alias, or the
+     sitting looks absent — which shows the card as "Start" and lets a student
+     begin a SECOND attempt on top of one already in progress. One helper, used
+     everywhere, so the two call sites cannot drift apart again. */
+  async function findResumableAnyId(code, entry){
+    for(const id of testIdAliases(entry)){
+      const r = await Attempts.findInProgress(code, id, entry.testVersion);
+      if(r) return r;
+    }
+    return null;
+  }
+
   /* Counts work on a manifest entry OR a fully loaded test, so the home screen
      renders identically before and after the questions arrive. */
   function testModuleCount(t){
@@ -460,17 +471,31 @@
     }catch(e){ /* quota or private mode: the sitting still works, just online */ }
   }
 
+  /* A dead connection often does not fire onerror — it just hangs. Without a
+     deadline the loading screen would sit there forever with no message and no
+     way out, which is the exact silent-blank this is supposed to prevent. */
+  const TEST_FETCH_TIMEOUT_MS = 20000;
   function fetchTestFile(testId){
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
+      let done = false;
+      const finish = (fn, arg) => {
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        s.remove();
+        fn(arg);
+      };
+      const timer = setTimeout(() => finish(reject, new Error("timed out")), TEST_FETCH_TIMEOUT_MS);
       s.src = "testdata/" + encodeURIComponent(testId) + ".js";
       s.async = true;
       s.onload = () => {
-        s.remove();
+        // look the test up BY THE ID WE ASKED FOR: a file that registers some
+        // other id must not be accepted as this one
         const t = (window.__TESTDATA__ || {})[testId];
-        t ? resolve(t) : reject(new Error("loaded but registered nothing"));
+        t ? finish(resolve, t) : finish(reject, new Error("loaded but registered nothing"));
       };
-      s.onerror = () => { s.remove(); reject(new Error("network")); };
+      s.onerror = () => finish(reject, new Error("network"));
       document.head.appendChild(s);
     });
   }
@@ -505,24 +530,31 @@
 
   /* Shared loading/retry gate. Never leaves a blank screen: on failure the
      student gets a message and a Retry, and can always get back home. */
-  async function withTestContent(entry, onReady){
+  async function withTestContent(entry, onReady, origin){
     showOnly("screen-loading");
     el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + (entry ? entry.testName : "test") + "…");
     try{
       const full = await loadTest(entry);
       onReady(full);
     }catch(e){
-      showTestLoadError(entry, () => withTestContent(entry, onReady));
+      showTestLoadError(entry, () => withTestContent(entry, onReady, origin), origin);
     }
   }
-  function showTestLoadError(entry, retry){
+  /* `origin` decides where the escape hatch goes. A tutor who opened this from
+     the dashboard has no student home to return to — sending them to the
+     student home screen would strand them in the wrong app. */
+  function showTestLoadError(entry, retry, origin){
     const name = entry ? entry.testName : "this test";
+    const toDashboard = origin === "dashboard";
     el("loadErrTitle").textContent = "Couldn't load " + name;
-    el("loadErrBody").textContent =
-      "The test content didn't download. Check your connection and try again — " +
-      "nothing you've already done has been lost.";
+    el("loadErrBody").textContent = toDashboard
+      ? "The test content didn't download, so the question-by-question view can't be shown. The attempt record itself is fine."
+      : "The test content didn't download. Check your connection and try again — nothing you've already done has been lost.";
     el("loadErrRetry").onclick = retry;
-    el("loadErrHome").onclick = ()=>{ renderHome(); showOnly("screen-home"); };
+    el("loadErrHome").textContent = toDashboard ? "Back to dashboard" : "Back to home";
+    el("loadErrHome").onclick = toDashboard
+      ? ()=>{ showOnly("screen-dashboard"); }
+      : ()=>{ renderHome(); showOnly("screen-home"); };
     showOnly("screen-loaderror");
   }
 
@@ -530,7 +562,13 @@
      (expiry gates starting, never resuming); then window/expiry gates Start. */
   function assignmentState(a){
     if(a.completedAttemptId) return "completed";
-    if(state.resumeRecords[a.testId]) return "resume";
+    /* resumeRecords is keyed by the CANONICAL testId, but an assignment can
+       still carry a legacy one, so compare through the manifest. Keying
+       straight off a.testId made a renamed test's in-progress sitting show
+       "Start" instead of "Resume" — which starts a second attempt over the
+       top of one already underway. */
+    const entry = testById(a.testId);
+    if(entry && state.resumeRecords[entry.testId]) return "resume";
     if(a.windowOpens && Date.now() < Date.parse(a.windowOpens)) return "notyet";
     if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
     return "ready";
@@ -831,7 +869,16 @@
      so a failed fetch never leaves a blank test. */
   function resumeTestFlow(entry, record){
     if(!entry || !record) return false;
-    withTestContent(entry, full => resumeTestFlowLoaded(full, record));
+    withTestContent(entry, full => {
+      /* Content arrived but the RECORD itself is unrestorable. Nothing else
+         acts on that false, so land them home with the In Progress card rather
+         than leaving them staring at the loading screen. */
+      if(!resumeTestFlowLoaded(full, record)){
+        state.currentTest = null;
+        renderHome();
+        showOnly("screen-home");
+      }
+    });
     return true;
   }
   function resumeTestFlowLoaded(test, record){
@@ -1628,9 +1675,12 @@
       show("saveFailModal");
       return;
     }
-    // re-read from storage so the home card reflects what actually persisted
-    const r = await Attempts.findInProgress(state.userName, test.testId, test.testVersion);
-    if(r) state.resumeRecords[test.testId] = r;
+    /* Re-read from storage so the home card reflects what actually persisted.
+       Through the alias helper: `test` here is the loaded test carrying the
+       canonical id, but the attempt may live under a pre-rename prefix. */
+    const entry = testById(test.testId) || test;
+    const r = await findResumableAnyId(state.userName, entry);
+    if(r) state.resumeRecords[entry.testId] = r;
     state.currentTest = null;
     renderHome();
     showOnly("screen-home");
@@ -2294,7 +2344,7 @@
      the loading state and the retry rather than an empty report. */
   function openScoreDetails(entryOrTest, record, origin){
     if(entryOrTest && entryOrTest.modules) return openScoreDetailsLoaded(entryOrTest, record, origin);
-    withTestContent(entryOrTest, full => openScoreDetailsLoaded(full, record, origin));
+    withTestContent(entryOrTest, full => openScoreDetailsLoaded(full, record, origin), origin);
   }
   function openScoreDetailsLoaded(test, record, origin){
     const built = buildScoreRows(test, record);

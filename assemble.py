@@ -50,6 +50,36 @@ SECRET_PATTERNS = (
 )
 
 
+MANIFEST_REL = "testdata/manifest.js"
+
+
+def inlined_tests(base_dir):
+    """Every test the manifest lists, as one <script>.
+
+    Test content is normally fetched per test at runtime, which a single
+    self-contained file cannot do — the published artifact has no origin, and
+    file:// blocks the fetch. The loader checks memory before cache before
+    network, so with these present the preview and the artifact never fetch.
+    """
+    testdata_dir = base_dir / "testdata"
+    manifest = testdata_dir / MANIFEST_REL.split("/")[-1]
+    if not manifest.exists():
+        raise FileNotFoundError("assemble.py: testdata/manifest.js is missing")
+    ids = re.findall(r'"testId"\s*:\s*"([^"]+)"', manifest.read_text(encoding="utf-8"))
+    if not ids:
+        raise ValueError("assemble.py: testdata/manifest.js lists no tests")
+    blobs = []
+    for tid in ids:
+        f = testdata_dir / (tid + ".js")
+        if not f.exists():
+            raise FileNotFoundError(
+                f"assemble.py: manifest lists {tid} but testdata/{tid}.js is missing")
+        blobs.append(f.read_text(encoding="utf-8"))
+    return ("<script>\n/* inlined test content — see assemble.py. Placed before "
+            "app.js on purpose: app.js boots during parse. */\n"
+            + "\n".join(blobs) + "\n</script>")
+
+
 def inline(html, base_dir):
     def css_sub(m):
         path = base_dir / m.group(1)
@@ -64,31 +94,20 @@ def inline(html, base_dir):
         path = base_dir / name
         if not path.exists():
             raise FileNotFoundError(f"assemble.py: missing {path} (referenced in index.html)")
-        return "<script>\n" + path.read_text(encoding="utf-8") + "\n</script>"
+        out = "<script>\n" + path.read_text(encoding="utf-8") + "\n</script>"
+        # Test content rides immediately behind the manifest, which is the first
+        # script in the document. It MUST land before app.js: app.js ends in a
+        # boot IIFE that runs during parse, and a crash-resume there reads the
+        # test content — appending at </body> would leave it undefined and send
+        # a resuming student to the download-failed screen in the one build that
+        # has no origin to download from.
+        if name == MANIFEST_REL:
+            out += "\n" + inlined_tests(base_dir)
+        return out
 
     html = LOCAL_CSS_RE.sub(css_sub, html)
     html = LOCAL_JS_RE.sub(js_sub, html)
 
-    # Test content is normally fetched per test at runtime, which a single
-    # self-contained file cannot do (the published artifact has no origin to
-    # fetch from, and file:// blocks it). So every test in the manifest is
-    # inlined here. The loader checks window.__TESTDATA__ before the cache and
-    # the network, so the preview and the artifact simply never fetch.
-    testdata_dir = base_dir / "testdata"
-    manifest = testdata_dir / "manifest.js"
-    if manifest.exists():
-        ids = re.findall(r'"testId"\s*:\s*"([^"]+)"', manifest.read_text(encoding="utf-8"))
-        blobs = []
-        for tid in ids:
-            f = testdata_dir / (tid + ".js")
-            if not f.exists():
-                raise FileNotFoundError(
-                    f"assemble.py: manifest lists {tid} but testdata/{tid}.js is missing")
-            blobs.append(f.read_text(encoding="utf-8"))
-        if blobs:
-            html = html.replace("</body>",
-                "<script>\n/* inlined test content — see assemble.py */\n"
-                + "\n".join(blobs) + "\n</script>\n</body>")
     return html
 
 
