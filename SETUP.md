@@ -31,8 +31,8 @@ fresh clone needs no setup at all.
 **2. Create your tutor login.** Authentication → Users → add a user with your
 email and a password. That account is what the dashboard signs in with.
 
-**3. Point the app at the project.** Copy `config.example.js` to `config.js`
-and fill in:
+**3a. Point the app at the project — locally.** Copy `config.example.js` to
+`config.js` and fill in:
 
 ```js
 window.ACESTEM_CONFIG = {
@@ -43,8 +43,35 @@ window.ACESTEM_CONFIG = {
 
 `config.js` is gitignored and is **never** committed or inlined into
 `dist/index-live.html` — `assemble.py` skips it and aborts the build if any
-key-shaped value reaches the output. On Netlify, `config.js` must sit in the
-publish directory beside `index.html`.
+key-shaped value reaches the output.
+
+**3b. Point the app at the project — on Netlify.** Because `config.js` is
+gitignored it is not in the deploy checkout, so `netlify.toml` runs
+`node gen-config.js` at build time to generate it. Set these two variables
+under **Site configuration → Environment variables**:
+
+| Variable | Value |
+|---|---|
+| `SUPABASE_URL` | `https://<your-ref>.supabase.co` |
+| `SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_…` (or set `SUPABASE_ANON_KEY` for a legacy JWT key) |
+
+If either is missing, malformed, or still a placeholder, **the build fails**
+rather than deploying — a config-less deploy would come up in local mode and
+silently record to each browser instead of syncing, which is invisible until
+someone notices results never reach the dashboard. The generator also refuses
+a `sb_secret_…` / `service_role` key outright, since that would bypass RLS in
+the browser. It never prints the key into the build log.
+
+The publish directory is the repo root (`publish = "."`), which is also where
+`_headers` must live. `netlify.toml` 404s `/reference/*`, `/supabase/*` and
+`/tests/*` so internal files — including the reference College Board PDFs —
+aren't served from the live domain.
+
+You can run the generator locally too:
+`SUPABASE_URL=… SUPABASE_PUBLISHABLE_KEY=… node gen-config.js`
+
+For a deliberate local-mode deploy, delete the `[build]` section from
+`netlify.toml`.
 
 Both Supabase key generations work: the current `sb_publishable_…` and the
 legacy JWT anon key. The app talks to PostgREST directly with `fetch`, so

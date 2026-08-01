@@ -50,6 +50,7 @@ configure, no build flag, no query parameter.
 |---|---|---|---|
 | Where | published claude.ai artifact | static host **with** `config.js` (Supabase) | static host without config, or a `file://` copy |
 | Trigger | `window.storage` exists | Supabase config present, no `window.storage` | neither (auto fallback) |
+| How config gets there | n/a | Netlify build runs `node gen-config.js`, which writes `config.js` from the `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` env vars (or `SUPABASE_ANON_KEY` for a legacy key) | n/a |
 | Records | shared artifact storage | localStorage first, synced to Supabase in the background | localStorage, this browser only |
 | Release flow | works | works across devices — the point of Phase H | not reachable; the JSON download is the handoff |
 | Tutor access | `acestem-admin` magic name | **real Supabase Auth** (the magic name is gone) | `acestem-admin` magic name |
@@ -147,12 +148,15 @@ the `?devstorage=1` cases can only be checked there.
   §7c, which is also what makes the dashboard worth protecting. Same
   "obscurity, not security" posture as §7, now stated for local mode too.
   Accepted for launch 2026-07-31.
-- **`_headers` must sit in Netlify's publish directory.** The repo-root
-  `_headers` (X-Robots-Tag: noindex on `/*`) is correct while Netlify
-  publishes the repo root — which is today's setup: no `netlify.toml`, no
-  build step, `dist/` gitignored, so `index.html` plus the split files are
-  served from root. If the publish directory ever becomes `dist/`, move the
-  file or the noindex silently stops being sent.
+- **`_headers` must sit in Netlify's publish directory.** `netlify.toml` now
+  pins `publish = "."`, so the repo-root `_headers` (X-Robots-Tag: noindex on
+  `/*`) is correct. If the publish directory ever changes, move `_headers`
+  with it or the noindex silently stops being sent.
+- **The publish root is the whole repo.** `netlify.toml` 404s `/reference/*`,
+  `/supabase/*` and `/tests/*` — `reference/` holds real College Board PDFs
+  and screenshots that must not be served from the live domain. The `.md`
+  specs at the root are still fetchable; add redirect blocks if that ever
+  matters. Netlify redirect behaviour can only be confirmed on a real deploy.
 
 ## Known open items
 - ✅ 2026-07-23: Attempt recording + tutor dashboard implemented per
