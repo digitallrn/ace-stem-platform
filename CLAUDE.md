@@ -13,6 +13,29 @@ because a review that lands after the push has already failed at its job — thi
 happened on 49cddb7, where the review found a crash between modules that lost a
 student's whole sitting, minutes after it went live.
 
+Two clarifications learned the hard way on 7467039, which was pushed early:
+**"the review completed" means the completion notification arrived** — a
+partial count of verdicts in the journal is not that signal, and reading one as
+if it were is how a 49-agent review gets mistaken for a finished one. And
+**a review that confirms findings after the push is not a pass**; the fix goes
+out as its own commit, and the miss gets said out loud rather than folded
+quietly into the next message.
+
+**A test that needs propping up is a broken test (2026-08-01).** The moment a
+check requires a workaround to go green — hand-feeding it a global, setting up
+state it should establish itself, skipping the build it is supposed to cover —
+**stop and treat the check itself as the defect**. Fix the check first, then
+re-run it; a green obtained by scaffolding proves nothing and actively hides
+the thing it was built to catch. Two instances, both mine, both in the same
+change: `tests/injection-proof.js` still read the removed `window.TEST_DATA`
+and threw on its first line, and I kept it "passing" for several runs by
+assigning that global by hand — my only XSS regression gate, dead, while
+reporting 25/25. And `dist/index-live.html` went unopened for the whole test-
+library restructure, so a boot-order bug that broke resume in the published
+artifact survived every check I did run. Corollary: when a check is awkward to
+run, that awkwardness is information about the check, not an obstacle to route
+around.
+
 **Assignments are the only source of student-visible material (2026-08-01).**
 A student code with no assignments sees **nothing** — both Your Tests and
 Practice and Prepare render their empty states. Absent and explicitly-empty are
