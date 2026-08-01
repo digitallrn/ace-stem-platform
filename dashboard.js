@@ -620,7 +620,7 @@ window.Dashboard = (function(){
               <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></label>
             <label>More codes (comma-separated)
               <span class="af-codegen">
-                <input id="afFree" placeholder="AS-7K4M9PXR, AS-3TQV8BND" autocomplete="off">
+                <input id="afFree" placeholder="AS-XXXXXXXX, AS-XXXXXXXX" autocomplete="off">
                 <button type="button" class="pill ghost" id="afGenBtn"
                   title="Generate a new unused code (unambiguous alphabet, no O/0/I/1)">Generate</button>
               </span></label>

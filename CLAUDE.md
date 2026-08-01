@@ -1,6 +1,14 @@
 # Mission brief: Ace STEM Bluebook Simulator — the PLATFORM repo
 *Read automatically at the start of every Claude Code session in this folder.*
 
+**Product name (2026-08-01): the simulator brands itself "Ace SAT"** on every
+user-facing surface — sign-in logo/note/footer, page title, 404, printed
+score-report wordmark — with no ™. "Ace STEM" remains the name of the tutoring
+business (and of internal identifiers: `ACESTEM_CONFIG`, `acestem-admin`,
+`acestem:code`, the archive schema string — never rename those). New
+user-facing copy says Ace SAT; never show a real or issuable student code as
+an example (use `AS-XXXXXXXX`).
+
 ## Read first
 `SCHEMA-v1.2.md` — the data contract. It's authoritative over instinct,
 including for anything below.

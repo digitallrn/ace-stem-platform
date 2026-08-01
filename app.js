@@ -112,7 +112,7 @@
     // bearer secret on remote deployments, so they need real entropy)
     const code = StudentCode.normalize(v);
     if(!StudentCode.valid(code)){
-      el("signinError").textContent = "Enter the code your tutor gave you — it looks like AS-7K4M9PXR.";
+      el("signinError").textContent = "Enter the code your tutor gave you — it looks like AS-XXXXXXXX.";
       el("signinError").classList.remove("hidden");
       el("nameInput").focus();
       return;

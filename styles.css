@@ -1052,7 +1052,7 @@
     .sd-hero-sub, .sd-hero-range, .sd-hero-of, .sd-sec-range{ color:#333 !important; }
     .sd-home, .sd-hero-actions, .sd-tabs, .sd-table-controls, .sd-pager, .sd-review-link{ display:none !important; }
     .sd-hero h1{ font-size:26px; }
-    .sd-hero h1::before{ content:"Ace STEM — "; }
+    .sd-hero h1::before{ content:"Ace SAT — "; }
     .sd-hero-num{ font-size:44px; color:#000; }
     .sd-sec-num{ color:#000; }
     .sd-est{ color:#7a5c00 !important; }
