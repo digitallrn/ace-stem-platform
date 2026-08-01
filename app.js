@@ -3,7 +3,9 @@
 
   /* ================= STATE ================= */
   const state = {
-    tests: (window.TEST_DATA || []),
+    /* manifest entries only — {testId, testName, testVersion, moduleCount,
+       questionCount, sections, legacyIds}. Questions arrive via loadTest(). */
+    tests: (window.TEST_MANIFEST || []),
     userName: "Student",
     currentTest: null,
     moduleIndex: 0,
@@ -38,7 +40,7 @@
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-scoredetails","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-scoredetails","screen-dashboard"];
   // body-level overlays that live outside the SCREENS set — a screen change
   // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
   // them floating as a full-screen click blocker over the next screen
@@ -185,10 +187,15 @@
     el("tfName").textContent = shown;
     // Phase C: an in-progress attempt for this code + test resumes rather
     // than starting fresh (starting over is a tutor-dashboard action)
+    /* Attempt keys embed the testId, so a test that has been renamed must be
+       searched under every id it has carried or an in-flight sitting written
+       under the old one becomes unreachable. */
     state.resumeRecords = {};
     for(const t of state.tests){
-      const r = await Attempts.findInProgress(code, t.testId, t.testVersion);
-      if(r) state.resumeRecords[t.testId] = r;
+      for(const id of testIdAliases(t)){
+        const r = await Attempts.findInProgress(code, id, t.testVersion);
+        if(r){ state.resumeRecords[t.testId] = r; break; }
+      }
     }
     // Phase F §2: assignment objects; absent resolves to [] (nothing granted)
     const assigns = await Attempts.assignments(code);
@@ -235,10 +242,12 @@
       const cp = rec.checkpoint;
       if(!cp || typeof cp !== "object") continue;
       if(typeof cp.moduleIndex !== "number" || cp.moduleIndex < 0) continue;
+      /* `test` is a MANIFEST entry here — the questions are not loaded yet, so
+         the range check uses the manifest's module count. Anything deeper
+         (does that module have questions?) is the loader's job, and a content
+         failure there surfaces as the retry screen rather than a blank test. */
       const test = testById(testId);
-      if(!test || cp.moduleIndex >= test.modules.length) continue;
-      const mod = test.modules[cp.moduleIndex];
-      if(!mod || !mod.questions || !mod.questions.length) continue;
+      if(!test || cp.moduleIndex >= testModuleCount(test)) continue;
       // a questionIndex past the end is clamped by beginModule, but a
       // non-numeric one means the blob is not trustworthy at all
       if(cp.questionIndex !== undefined &&
@@ -390,7 +399,132 @@
     } finally { el("tutorAuthGo").disabled = false; }
   });
 
-  function testById(id){ return state.tests.find(t => t.testId === id) || null; }
+  /* Manifest entries, not full tests. Also resolves an id a test used to carry,
+     so attempt records and assignments written before a rename still find their
+     test instead of silently vanishing from the home screen. */
+  function testById(id){
+    if(!id) return null;
+    return state.tests.find(t => t.testId === id) ||
+           state.tests.find(t => (t.legacyIds || []).indexOf(id) !== -1) || null;
+  }
+  /* every id this test has ever been keyed under — attempt keys embed the id */
+  function testIdAliases(entry){
+    return entry ? [entry.testId].concat(entry.legacyIds || []) : [];
+  }
+  /* Counts work on a manifest entry OR a fully loaded test, so the home screen
+     renders identically before and after the questions arrive. */
+  function testModuleCount(t){
+    return (t && typeof t.moduleCount === "number") ? t.moduleCount
+         : (t && t.modules ? t.modules.length : 0);
+  }
+  function testQuestionCount(t){
+    if(t && typeof t.questionCount === "number") return t.questionCount;
+    return (t && t.modules) ? t.modules.reduce((s,m)=>s+m.questions.length,0) : 0;
+  }
+  /* A count read back out of a record is untrusted like any other record value
+     (ATTEMPTS-SPEC §7) — coerce, never interpolate raw. Mirrors dashboard.js. */
+  function num(v){ return typeof v === "number" && isFinite(v) ? v : null; }
+
+  /* ================= TEST CONTENT LOADING =================
+     Only the manifest loads at startup. A test's questions arrive when a
+     sitting starts or resumes, from whichever source can answer first:
+       1. already in memory (inlined by assemble.py in the single-file build,
+          or loaded earlier this session)
+       2. the local cache, keyed by testId AND testVersion — this is what keeps
+          a student going when the network drops mid-sitting
+       3. the network
+     The cache write happens as soon as content is in hand, so from the moment
+     a sitting begins the network is never again on the critical path. */
+  const TESTCACHE_PREFIX = "acestem:testcache:";
+  function cacheKey(entry){ return TESTCACHE_PREFIX + entry.testId + ":" + (entry.testVersion || "unversioned"); }
+
+  function readCachedTest(entry){
+    try{
+      const raw = localStorage.getItem(cacheKey(entry));
+      if(!raw) return null;
+      const t = JSON.parse(raw);
+      // a cache entry from a superseded version must never be served
+      return (t && t.testId && t.modules && (t.testVersion || "unversioned") === (entry.testVersion || "unversioned")) ? t : null;
+    }catch(e){ return null; }
+  }
+  function writeCachedTest(entry, test){
+    try{
+      // drop other versions of this same test so the cache can't grow forever
+      const stale = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf(TESTCACHE_PREFIX + entry.testId + ":") === 0 && k !== cacheKey(entry)) stale.push(k);
+      }
+      stale.forEach(k => localStorage.removeItem(k));
+      localStorage.setItem(cacheKey(entry), JSON.stringify(test));
+    }catch(e){ /* quota or private mode: the sitting still works, just online */ }
+  }
+
+  function fetchTestFile(testId){
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "testdata/" + encodeURIComponent(testId) + ".js";
+      s.async = true;
+      s.onload = () => {
+        s.remove();
+        const t = (window.__TESTDATA__ || {})[testId];
+        t ? resolve(t) : reject(new Error("loaded but registered nothing"));
+      };
+      s.onerror = () => { s.remove(); reject(new Error("network")); };
+      document.head.appendChild(s);
+    });
+  }
+
+  /* Resolves to the full test object, or throws. Callers show the retry. */
+  async function loadTest(entryOrId){
+    const entry = (typeof entryOrId === "string") ? testById(entryOrId) : entryOrId;
+    if(!entry) throw new Error("unknown test");
+    const inMemory = (window.__TESTDATA__ || {})[entry.testId];
+    if(inMemory && (inMemory.testVersion || "unversioned") === (entry.testVersion || "unversioned")){
+      writeCachedTest(entry, inMemory);
+      return inMemory;
+    }
+    const cached = readCachedTest(entry);
+    if(cached){
+      window.__TESTDATA__ = window.__TESTDATA__ || {};
+      window.__TESTDATA__[entry.testId] = cached;
+      return cached;
+    }
+    const fetched = await fetchTestFile(entry.testId);
+    if((fetched.testVersion || "unversioned") !== (entry.testVersion || "unversioned")){
+      // manifest and content disagree: refuse rather than run a sitting whose
+      // version cannot be trusted for review-matching later (ATTEMPTS-SPEC §9)
+      throw new Error("version mismatch");
+    }
+    writeCachedTest(entry, fetched);
+    return fetched;
+  }
+
+  // the dashboard needs full content for item analysis; same loader, same cache
+  window.AppTestLoader = { load: loadTest, byId: testById };
+
+  /* Shared loading/retry gate. Never leaves a blank screen: on failure the
+     student gets a message and a Retry, and can always get back home. */
+  async function withTestContent(entry, onReady){
+    showOnly("screen-loading");
+    el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + (entry ? entry.testName : "test") + "…");
+    try{
+      const full = await loadTest(entry);
+      onReady(full);
+    }catch(e){
+      showTestLoadError(entry, () => withTestContent(entry, onReady));
+    }
+  }
+  function showTestLoadError(entry, retry){
+    const name = entry ? entry.testName : "this test";
+    el("loadErrTitle").textContent = "Couldn't load " + name;
+    el("loadErrBody").textContent =
+      "The test content didn't download. Check your connection and try again — " +
+      "nothing you've already done has been lost.";
+    el("loadErrRetry").onclick = retry;
+    el("loadErrHome").onclick = ()=>{ renderHome(); showOnly("screen-home"); };
+    showOnly("screen-loaderror");
+  }
 
   /* Phase F §2 semantics: completed wins; a resumable attempt always resumes
      (expiry gates starting, never resuming); then window/expiry gates Start. */
@@ -428,7 +562,8 @@
     if(!test) return null;                      // assignment for an unpublished test
     const st = assignmentState(a);
     const isTest = a.category === "test";
-    const totalQ = test.modules.reduce((s,m)=>s+m.questions.length,0);
+    // counts come from the manifest — the questions are not loaded yet
+    const totalQ = testQuestionCount(test);
     const card = document.createElement("div");
     card.className = "pcard" + ((st === "ready" || st === "resume") ? " clickable" : "");
     const status =
@@ -436,7 +571,7 @@
       st === "resume"    ? '<span class="pc-ico">🕐</span> In Progress' :
       st === "notyet"    ? 'Opens ' + fmtCardDate(a.windowOpens) :
       st === "expired"   ? 'Expired' :
-      `${test.modules.length} modules · ${totalQ} questions` + (isTest ? ' · proctored' : '');
+      `${testModuleCount(test)} modules · ${totalQ} questions` + (isTest ? ' · proctored' : '');
     const action =
       st === "resume"  ? '<button class="pill ghost">Resume</button>' :
       st === "ready"   ? '<button class="pill ghost">Start</button>' :
@@ -524,21 +659,35 @@
     }
     list.forEach(record => {
       const released = record.released === true;
-      const test = state.tests.find(t => t.testId === record.testId);
+      const test = testById(record.testId);   // resolves legacy ids too
       // reviewing against a different test build would mislabel questions
       // (ATTEMPTS-SPEC §9) — the tutor dashboard remains the archive view
       const canView = released && test &&
         (test.testVersion || "unversioned") === record.testVersion;
-      // §6: released cards show the scaled TOTAL, or raw fallback
+      /* §6: released cards show the scaled TOTAL, or a raw fallback.
+         The scaled figure needs the questions, which are lazy-loaded — and the
+         home screen must not pull a test file just to draw a card. So use the
+         full content when it already happens to be in hand (the common case:
+         the student just took it, so it is cached), and otherwise fall back to
+         the raw correct/graded the record already carries. Opening Score
+         Details loads the content and shows the scaled score either way. */
+      const loadedTest = canView ? (window.__TESTDATA__ || {})[test.testId] : null;
       let scoreLine = "";
-      if(canView){
-        const built = buildScoreRows(test, record);
+      if(canView && loadedTest){
+        const built = buildScoreRows(loadedTest, record);
         const rawRw = built.tally["Reading and Writing"].correct;
         const rawMath = built.tally["Math"].correct;
-        const scaled = scaledScores(test, rawRw, rawMath, built.moduleRaw);
+        const scaled = scaledScores(loadedTest, rawRw, rawMath, built.moduleRaw);
         scoreLine = scaled
           ? `<div class="pcard-total">${scaled.total}${scaled.estimated ? EST : ""}<span class="pcard-total-range">400–1600</span></div>`
           : `<div class="pcard-total">${rawRw + rawMath}<span class="pcard-total-of">/ ${built.tally["Reading and Writing"].graded + built.tally["Math"].graded} correct</span></div>`;
+      } else if(canView){
+        // content not loaded: the record's own tally is enough for a raw line
+        const c = num(record.score && record.score.correct);
+        const g = num(record.score && record.score.graded);
+        if(c !== null && g !== null){
+          scoreLine = `<div class="pcard-total">${c}<span class="pcard-total-of">/ ${g} correct</span></div>`;
+        }
       }
       const badge = timingBadge(record.timing);
       const card = document.createElement("div");
@@ -576,7 +725,13 @@
   /* ================= FLOW: LOADING → READY → TEST ================= */
   /* Phase F §2: conditions come from the ceremony, not a toggle — a start
      code means proctored; everything else is self-administered practice. */
-  function startTestFlow(test, assignment){
+  /* Entry points take a MANIFEST entry and fetch the content first. The
+     loading screen is already the natural place for the wait, so a lazy fetch
+     costs the student nothing they weren't already seeing. */
+  function startTestFlow(entry, assignment){
+    withTestContent(entry, full => startTestFlowLoaded(full, assignment));
+  }
+  function startTestFlowLoaded(test, assignment){
     state.currentTest = test;
     state.activeAssignment = assignment || null;
     state.timing = (assignment && assignment.timing) || 1;    // Phase G §1: default standard
@@ -671,7 +826,15 @@
      the crash checkpoint — identical restore path either way (answers,
      annotations, flags, timer). Returns false if the record can't be restored,
      so the caller can fall back to the home card instead of a blank test. */
-  function resumeTestFlow(test, record){
+  /* Manifest-entry front door: fetch, then restore. Returns true if a restore
+     was STARTED — the loader owns the failure path from here (message + retry),
+     so a failed fetch never leaves a blank test. */
+  function resumeTestFlow(entry, record){
+    if(!entry || !record) return false;
+    withTestContent(entry, full => resumeTestFlowLoaded(full, record));
+    return true;
+  }
+  function resumeTestFlowLoaded(test, record){
     const resume = record.resume || record.checkpoint || {};
     if(!test || !test.modules || !test.modules.length) return false;
     state.currentTest = test;
@@ -2125,7 +2288,15 @@
     return q.type === "spr" ? String(q.correctAnswer) : String.fromCharCode(65 + q.correctAnswer);
   }
 
-  function openScoreDetails(test, record, origin){
+  /* Reviewing needs the questions too, so it goes through the same gate. In
+     practice the content is already cached from the sitting, so this resolves
+     without a fetch — but a student reviewing on a different device still gets
+     the loading state and the retry rather than an empty report. */
+  function openScoreDetails(entryOrTest, record, origin){
+    if(entryOrTest && entryOrTest.modules) return openScoreDetailsLoaded(entryOrTest, record, origin);
+    withTestContent(entryOrTest, full => openScoreDetailsLoaded(full, record, origin));
+  }
+  function openScoreDetailsLoaded(test, record, origin){
     const built = buildScoreRows(test, record);
     sdCtx = { test, record, rows: built.rows, tally: built.tally, domains: built.domains,
       moduleRaw: built.moduleRaw,
@@ -2477,7 +2648,7 @@
   // regardless of release (admin-only path). Guards a missing/mismatched test.
   window.AppScoreView = {
     open(testId, record){
-      const test = state.tests.find(t => t.testId === testId);
+      const test = testById(testId);          // resolves legacy ids too
       if(!test) return false;
       // admin path: show that student's identity, resolved from their profile
       state.userName = (record.student && record.student.code) || state.userName;

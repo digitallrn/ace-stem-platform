@@ -1,6 +1,18 @@
 # Mission brief: Ace STEM Bluebook Simulator — the PLATFORM repo
 *Read automatically at the start of every Claude Code session in this folder.*
 
+**A push is a deploy — hold it for the review (2026-08-01).** Real students
+are about to exist, and `git push` on this repo builds and publishes
+sat.davidsatprep.com. So for any change touching **attempt records, timing,
+scoring, sync, resume, or a security surface**: run the adversarial review of
+the diff, and **do not push until it has completed and every confirmed finding
+is either fixed or explicitly rejected with a stated reason**. Committing while
+the review runs is fine; pushing is not. Cosmetic and content-rendering changes
+(copy, CSS, tokens, test-data regens) may push without waiting. The rule exists
+because a review that lands after the push has already failed at its job — this
+happened on 49cddb7, where the review found a crash between modules that lost a
+student's whole sitting, minutes after it went live.
+
 **Assignments are the only source of student-visible material (2026-08-01).**
 A student code with no assignments sees **nothing** — both Your Tests and
 Practice and Prepare render their empty states. Absent and explicitly-empty are
@@ -40,15 +52,51 @@ attempts.js   — AttemptStore (shared-storage adapter, ?devstorage=1 local
                 shim) + Attempts (recording per ATTEMPTS-SPEC.md)
 app.js        — state machine, screens, event handlers, results
 dashboard.js  — tutor dashboard (hidden admin sign-in acestem-admin)
-test-data.js  — window.TEST_DATA = [tests...] — generated from the
-                test-bank repo's validated JSON; carries testVersion
-                (frozen once students take a test — ATTEMPTS-SPEC §9)
+testdata/     — the test library: manifest.js (loaded at startup) plus
+                one lazy-loaded <testId>.js per test. See "The test
+                library" below.
 assemble.py   — inlines the local files above into dist/index-live.html,
                 the single-file preview used in the claude.ai panel
 tsv_to_bluebook_json.py — the extraction→JSON converter
 ```
 
-Load order matters: `test-data.js`, `render.js`, `grading.js`,
+## The test library (`testdata/`)
+One file per test, so the library can grow without growing the startup cost.
+
+```
+testdata/manifest.js      window.TEST_MANIFEST — one small entry per test:
+                          testId, testName, testVersion, moduleCount,
+                          questionCount, sections[], legacyIds[].
+                          The ONLY test file loaded at startup.
+testdata/<testId>.js      the full test; registers itself into
+                          window.__TESTDATA__[testId]. Lazy — fetched only
+                          when a sitting starts or resumes (or Score Details
+                          opens, or the dashboard needs item analysis).
+```
+
+- **`testId` is internal.** It follows the source-PDF convention
+  `YYYYMM + region + v#` (e.g. `202606asiav1`). Students only ever see
+  `testName`. Attempt keys embed the testId (`attempt:<testId>:…`), so a
+  rename would orphan records — that is what `legacyIds` is for: list the old
+  id there and resolution, resume-lookup and the dashboard all still find it.
+- **Adding a test:** convert in the test-bank repo, drop
+  `testdata/<testId>.js` in (registering into `window.__TESTDATA__`), add its
+  manifest entry, done. `build-site.js` reads the manifest and ships every test
+  it lists — a manifest entry with no file **fails the build** rather than
+  404ing mid-sitting. Nothing else needs touching.
+- **Never hand-edit a test file** — regenerate from the test-bank JSON and bump
+  `testVersion` on any content change after students have taken it
+  (ATTEMPTS-SPEC §9). Version-gating is per test.
+- **Offline:** content is cached in `localStorage` under
+  `acestem:testcache:<testId>:<testVersion>` the moment it loads, so a student
+  who drops connectivity mid-sitting keeps going and can resume. The version is
+  in the key, so a bumped test can never be served from a stale cache. The
+  network is never on the critical path once a sitting has begun.
+- **`assemble.py` inlines every test** into `dist/index-live.html`, because a
+  single-file artifact has no origin to fetch from. The loader checks memory
+  before cache before network, so the artifact simply never fetches.
+
+Load order matters: `testdata/manifest.js`, `render.js`, `grading.js`,
 `attempts.js`, `app.js`, `dashboard.js` — plain (non-module) scripts, so
 top-level declarations are globals used across files. Don't wrap
 `render.js`/`grading.js` in IIFEs, and don't redefine `escapeHtml`,
@@ -184,9 +232,10 @@ record-derived value.
   "obscurity, not security" posture as §7, now stated for local mode too.
   Accepted for launch 2026-07-31.
 - **The live site is an allowlist, not the repo root.** `netlify.toml` builds
-  `_site/` via `build-site.js` and publishes that; only the 11 files the
+  `_site/` via `build-site.js` and publishes that; only the files the
   running app needs are copied in (`index.html`, `404.html`, `styles.css`,
-  the five app JS files, `test-data.js`, `config.js`, `_headers`). Everything
+  the five app JS files, `testdata/manifest.js` plus every test the manifest
+  lists, `config.js`, `_headers`). Everything
   else — design docs, specs, `assemble.py`, the build scripts, `reference/`
   (real College Board PDFs), `supabase/`, `tests/` — is simply not deployed.
   **Adding a file the app needs means adding it to `ALLOW` in
@@ -210,8 +259,9 @@ record-derived value.
   before restructuring `renderResults()` in `app.js` beyond small tweaks,
   since the tutor dashboard and future score-report generation both read
   the same results data.
-- `test-data.js` holds "2026 June Asia v1" (97 questions, converted from
-  the frozen fork; m2-q11 pending key adjudication in the test-bank
-  repo). Regenerate from the test-bank repo's JSON — never hand-edit —
-  and bump `testVersion` on any content change after students have
+- `testdata/202606asiav1.js` holds "2026 June Asia v1" (98 questions) at
+  testVersion 2026-08-01-c. `testdata/202512usav1.js` is a deliberate STUB —
+  a placeholder proving the multi-test path; replace it wholesale when a real
+  conversion lands. Regenerate from the test-bank repo's JSON — never
+  hand-edit — and bump `testVersion` on any content change after students have
   taken it (ATTEMPTS-SPEC §9).

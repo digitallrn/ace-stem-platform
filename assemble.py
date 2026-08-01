@@ -68,6 +68,27 @@ def inline(html, base_dir):
 
     html = LOCAL_CSS_RE.sub(css_sub, html)
     html = LOCAL_JS_RE.sub(js_sub, html)
+
+    # Test content is normally fetched per test at runtime, which a single
+    # self-contained file cannot do (the published artifact has no origin to
+    # fetch from, and file:// blocks it). So every test in the manifest is
+    # inlined here. The loader checks window.__TESTDATA__ before the cache and
+    # the network, so the preview and the artifact simply never fetch.
+    testdata_dir = base_dir / "testdata"
+    manifest = testdata_dir / "manifest.js"
+    if manifest.exists():
+        ids = re.findall(r'"testId"\s*:\s*"([^"]+)"', manifest.read_text(encoding="utf-8"))
+        blobs = []
+        for tid in ids:
+            f = testdata_dir / (tid + ".js")
+            if not f.exists():
+                raise FileNotFoundError(
+                    f"assemble.py: manifest lists {tid} but testdata/{tid}.js is missing")
+            blobs.append(f.read_text(encoding="utf-8"))
+        if blobs:
+            html = html.replace("</body>",
+                "<script>\n/* inlined test content — see assemble.py */\n"
+                + "\n".join(blobs) + "\n</script>\n</body>")
     return html
 
 

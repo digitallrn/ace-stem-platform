@@ -27,13 +27,38 @@ window.Dashboard = (function(){
   let tab = "attempts";
   let sortKey = "startedAt", sortDir = -1;
   let lastExport = null;         // {ids:[attemptId], when} — unlocks delete
+  /* Manifest entries — names and versions, no questions. Keyed under every id
+     a test has carried so records written before a rename still resolve. */
   const testsById = {};
-  (window.TEST_DATA || []).forEach(t => { testsById[t.testId] = t; });
+  (window.TEST_MANIFEST || []).forEach(t => {
+    testsById[t.testId] = t;
+    (t.legacyIds || []).forEach(old => { testsById[old] = t; });
+  });
+
+  /* Question-level views (item analysis, the per-question detail pane) need the
+     full file, which is lazy-loaded. Ask for it, then re-render once it lands;
+     until then the existing "question text unavailable" fallbacks apply, so a
+     slow or failed load degrades rather than blanking the dashboard. */
+  const fullTests = {};
+  const loadingTests = {};
+  function ensureTestLoaded(testId){
+    const entry = testsById[testId];
+    if(!entry || fullTests[entry.testId] || loadingTests[entry.testId]) return;
+    if(!window.AppTestLoader) return;
+    loadingTests[entry.testId] = true;
+    window.AppTestLoader.load(entry).then(full => {
+      fullTests[entry.testId] = full;
+      loadingTests[entry.testId] = false;
+      render();
+    }).catch(()=>{ loadingTests[entry.testId] = false; });
+  }
 
   /* ---------- helpers ---------- */
   function qIndex(testId){
-    const t = testsById[testId];
-    if(!t) return null;
+    const entry = testsById[testId];
+    if(!entry) return null;
+    const t = fullTests[entry.testId];
+    if(!t){ ensureTestLoaded(testId); return null; }
     if(!t.__qIndex){
       t.__qIndex = {};
       t.modules.forEach(mod => mod.questions.forEach(q => { t.__qIndex[q.id] = { q, mod }; }));
@@ -632,7 +657,7 @@ window.Dashboard = (function(){
               <input id="afName" placeholder="Erin K" autocomplete="off"
                 title="Shown to the student and in this dashboard. Stored in its own profile row — never inside an attempt record."></label>
             <label>Test
-              <select id="afTest">${(window.TEST_DATA || []).map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
+              <select id="afTest">${(window.TEST_MANIFEST || []).map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
             <label>Category
               <select id="afCat">
                 <option value="test">Test — proctored, start code</option>

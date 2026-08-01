@@ -165,11 +165,23 @@
 </div>
 
 <!-- ============ LOADING ============ -->
+<!-- test content failed to download: explicit message + retry, never a blank -->
+<div id="screen-loaderror" class="hidden">
+  <div class="loading-card loaderr-card">
+    <h1 id="loadErrTitle">Couldn't load the test</h1>
+    <p id="loadErrBody"></p>
+    <div class="loaderr-actions">
+      <button class="pill yellow" id="loadErrRetry">Try again</button>
+      <button class="pill ghost" id="loadErrHome">Back to home</button>
+    </div>
+  </div>
+</div>
+
 <div id="screen-loading" class="hidden">
   <h1>We're Preparing Your Practice Test</h1>
   <div class="loading-card">
     <span class="hourglass">⏳</span>
-    <p>This may take up to a minute. Please don't refresh this page or quit the app.</p>
+    <p id="loadingMsg">This may take up to a minute. Please don't refresh this page or quit the app.</p>
   </div>
 </div>
 
@@ -479,7 +491,8 @@
      leaves the app in local mode. The extra attribute keeps assemble.py from
      inlining it, so keys never enter dist/index-live.html. -->
 <script src="config.js" data-no-inline></script>
-<script src="test-data.js"></script>
+<!-- only the manifest loads at startup; testdata/<testId>.js arrives on demand -->
+<script src="testdata/manifest.js"></script>
 <script src="render.js"></script>
 <script src="grading.js"></script>
 <script src="attempts.js"></script>
