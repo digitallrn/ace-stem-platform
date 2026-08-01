@@ -43,9 +43,12 @@ Semantics — get these exact:
   sitting together (real proctor-code behavior). Retake = David creates a
   new assignment; a completed assignment's card shows Completed and offers
   nothing else (View My Responses arrives via release, as today).
-- **Default when a student code has no `assign:` key:** all published tests
+- ~~**Default when a student code has no `assign:` key:** all published tests
   visible under Practice and Prepare (preserves today's zero-config
-  behavior).
+  behavior).~~ **REVERSED 2026-08-01** — a code with no assignments now sees
+  nothing; both home sections render their empty states. Absent and
+  explicitly-empty are equivalent. All student-visible material must be
+  explicitly granted by the tutor. See ATTEMPTS-SPEC §10.
 - **Conditions auto-set:** attempts started through a start code record
   `conditions: "proctored"`; category "practice" records
   `"self-administered"`. Remove the sign-in toggle — the ceremony is the

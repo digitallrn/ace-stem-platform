@@ -179,7 +179,10 @@ window.Dashboard = (function(){
         if(sep === -1){
           if(Array.isArray(v)) e.list = e.list.concat(v.filter(Boolean));   // legacy array
         } else if(rest.slice(sep) === ":__none"){
-          e.sentinel = true;                       // explicitly "assigned nothing"
+          // vestigial: nothing writes these any more (absent == empty since
+          // 2026-08-01). Still read so pre-existing rows behave, and so the
+          // code still appears in the clear-assignments picker to tidy them.
+          e.sentinel = true;
         } else if(v && v.assignmentId){
           e.list.push(v);
         }
@@ -413,8 +416,7 @@ window.Dashboard = (function(){
         body = `<p class="dash-hint">${
           hasAny ? "No attempts match the current filter."
           : assigned ? "No attempts yet — " + assigned + " test(s) assigned."
-          : ae && ae.sentinel ? "No attempts yet — assigned nothing, so their home screen is empty."
-          : "No attempts yet — copy the sign-in link to get them started."}</p>`;
+          : "No attempts yet — nothing assigned, so their home screen is empty."}</p>`;
       }
       return `<div class="dcard">
         <h3>${studentCell(k)} <span class="dcard-sub">${list.length} attempt(s)</span>
@@ -660,14 +662,14 @@ window.Dashboard = (function(){
             <th>Student</th><th>Test</th><th>Category</th><th>Timing</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
           </tr></thead><tbody>${rowsHtml}</tbody></table>
           <p class="dash-hint">Assignments with an attempt (in-progress or completed) can't be deleted.</p>`
-          : '<p class="dash-empty">No assignments yet. Students with no assignments see every published test as practice.</p>'}
+          : '<p class="dash-empty">No assignments yet. A student with no assignments sees an empty home screen — everything has to be assigned.</p>'}
         ${assignedCodes.length ? `
           <div class="assign-reset">
-            <h3>Reset a student to default</h3>
-            <p class="dash-hint">Removes the student's assignment list entirely, so they see every published test as practice again. (Deleting a student's last assignment instead leaves them with no tests.)</p>
+            <h3>Clear a student's assignments</h3>
+            <p class="dash-hint">Removes every assignment for that student. Their home screen goes empty until something new is assigned; recorded attempts are untouched.</p>
             <div class="af-actions">
               <select id="afResetCode">${assignedCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select>
-              <button class="pill ghost" id="afResetBtn" style="padding:9px 22px;">Reset to default (all tests)</button>
+              <button class="pill ghost" id="afResetBtn" style="padding:9px 22px;">Clear all assignments</button>
             </div>
           </div>` : ""}
       </div>`;
@@ -802,7 +804,7 @@ window.Dashboard = (function(){
       };
       const key = "assign:" + code + ":" + a.assignmentId;
       if(!(await AttemptStore.setLocal(key, a))) okAll = false;
-      await AttemptStore.remove("assign:" + code + ":__none");   // no longer "nothing assigned"
+      await AttemptStore.remove("assign:" + code + ":__none");   // tidy any vestigial sentinel
       if(AttemptStore.isRemote()){
         try{
           await AttemptStore.adminUpsert(key, code, a);
@@ -825,30 +827,26 @@ window.Dashboard = (function(){
     const key = "assign:" + code + ":" + assignmentId;
     const keys = (await AttemptStore.list("assign:" + code + ":")) || [];
     const remaining = keys.filter(k => k !== key && k.slice(-7) !== ":__none");
-    // decision (b): "assigned nothing" and "never configured" stay distinct —
-    // deleting the last assignment leaves the student with NO tests, not the
-    // all-tests default. Confirm that, and point at Reset for the other intent.
+    // "assigned nothing" and "never configured" are the same thing now, so
+    // deleting the last assignment needs no sentinel to record the difference —
+    // it just leaves the student with an empty home screen, which is still
+    // worth confirming since it is easy to do by accident.
     if(remaining.length === 0 &&
-       !confirm("This is " + code + "'s last assignment. Deleting it leaves them with NO tests on their home screen.\n\nTo instead give them every published test as practice, cancel and use “Reset to default (all tests)”.\n\nDelete anyway?")){
+       !confirm("This is " + code + "'s last assignment.\n\nDeleting it leaves them with NOTHING on their home screen until you assign something new.\n\nDelete anyway?")){
       return;
     }
     await AttemptStore.remove(key);
     if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete(key); }catch(e){} }
-    if(remaining.length === 0){
-      // sentinel keeps "assigned nothing" distinct from "never configured"
-      const sk = "assign:" + code + ":__none";
-      await AttemptStore.setLocal(sk, { none: true, at: new Date().toISOString() });
-      if(AttemptStore.isRemote()){
-        try{ await AttemptStore.adminUpsert(sk, code, { none: true }); }catch(e){}
-      }
-    }
     await loadAssignsAndBugs();
     render();
   }
 
-  async function resetToDefault(code){
+  /* Clears every assignment row for a student, including any legacy array and
+     the vestigial __none sentinel. There is no default set to fall back to, so
+     the confirmation says plainly what the student will see. */
+  async function clearAssignments(code){
     if(!code) return;
-    if(!confirm("Reset " + code + " to default? Their assignment list will be removed, so they'll see every published test as practice again.")) return;
+    if(!confirm("Clear all assignments for " + code + "?\n\nThey will see NOTHING on their home screen — both Your Tests and Practice and Prepare will be empty — until you assign something new.\n\nTheir recorded attempts are not affected.")) return;
     const keys = (await AttemptStore.list("assign:" + code)) || [];   // rows + legacy array
     let ok = true;
     for(const k of keys){
@@ -856,8 +854,8 @@ window.Dashboard = (function(){
       if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete(k); }catch(e){ ok = false; } }
     }
     $("dashStatus").textContent = ok
-      ? code + " reset to default — sees all published tests as practice."
-      : "Reset partly failed — check the connection and try again.";
+      ? "Cleared every assignment for " + code + " — their home screen is now empty."
+      : "Clear partly failed — check the connection and try again.";
     await loadAssignsAndBugs();
     render();
   }
@@ -992,7 +990,7 @@ window.Dashboard = (function(){
     const nb = $("afNameBtn");
     if(nb) nb.addEventListener("click", saveNameOnly);
     const rb = $("afResetBtn");
-    if(rb) rb.addEventListener("click", () => resetToDefault($("afResetCode").value));
+    if(rb) rb.addEventListener("click", () => clearAssignments($("afResetCode").value));
     document.querySelectorAll("#dashBody .assign-del").forEach(btn =>
       btn.addEventListener("click", () => deleteAssignment(btn.dataset.code, btn.dataset.aid)));
     document.querySelectorAll("#dashBody .bug-dismiss").forEach(btn =>

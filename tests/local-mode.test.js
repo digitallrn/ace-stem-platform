@@ -136,6 +136,52 @@ const CODE = 'AS-7K4M9PXR';
     check(SC.valid(gen), 'code: generate() produces a valid code', gen);
   }
 
+  /* ---- assignment resolution (2026-08-01: no zero-config default) ----
+     A code with nothing assigned resolves to an EMPTY list, not to every
+     published test. Absent and explicitly-empty are the same state; a read
+     failure is still distinct and must stay "unavailable", or a student with
+     a proctored sitting would be told they have nothing. */
+  {
+    const mk = () => load({});
+    const A = mk();
+    check(JSON.stringify(await A.sandbox.Attempts.assignments(CODE)) === '[]',
+      'assign: no rows at all -> [] (no all-tests default)');
+
+    const B = mk();
+    await B.AS.setLocal('assign:' + CODE + ':__none', { none: true });
+    check(JSON.stringify(await B.sandbox.Attempts.assignments(CODE)) === '[]',
+      'assign: vestigial __none row still resolves to []');
+
+    const C = mk();
+    await C.AS.setLocal('assign:' + CODE + ':a1',
+      { assignmentId: 'a1', testId: 't1', category: 'practice' });
+    const cRes = await C.sandbox.Attempts.assignments(CODE);
+    check(Array.isArray(cRes) && cRes.length === 1 && cRes[0].testId === 't1',
+      'assign: an assigned test still resolves');
+
+    const D = mk();
+    await D.AS.setLocal('assign:' + CODE + ':__none', { none: true });
+    await D.AS.setLocal('assign:' + CODE + ':a1',
+      { assignmentId: 'a1', testId: 't1', category: 'test' });
+    const dRes = await D.sandbox.Attempts.assignments(CODE);
+    check(Array.isArray(dRes) && dRes.length === 1 && dRes[0].category === 'test',
+      'assign: a real row alongside a stale __none wins');
+
+    // legacy Phase D array of bare testIds still normalises
+    const E = mk();
+    await E.AS.setLocal('assign:' + CODE, ['t9']);
+    const eRes = await E.sandbox.Attempts.assignments(CODE);
+    check(Array.isArray(eRes) && eRes.length === 1 && eRes[0].testId === 't9' &&
+          eRes[0].category === 'practice',
+      'assign: legacy array still normalises to practice');
+
+    // a hard read failure must NOT look like "nothing assigned"
+    const F = mk();
+    F.AS.getResult = async () => ({ status: 'error', value: null });
+    check(await F.sandbox.Attempts.assignments(CODE) === 'unavailable',
+      'assign: read failure stays "unavailable", never []');
+  }
+
   console.log(pass ? '\nALL ADAPTER + SYNC CASES PASS' : '\nFAILURES PRESENT');
   process.exit(pass ? 0 : 1);
 })();

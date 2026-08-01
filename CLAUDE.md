@@ -1,6 +1,18 @@
 # Mission brief: Ace STEM Bluebook Simulator — the PLATFORM repo
 *Read automatically at the start of every Claude Code session in this folder.*
 
+**Assignments are the only source of student-visible material (2026-08-01).**
+A student code with no assignments sees **nothing** — both Your Tests and
+Practice and Prepare render their empty states. Absent and explicitly-empty are
+equivalent. This **reverses the Phase D / Phase F "zero-config" default** (no
+`assign:` key ⇒ every published test as practice); the reason is that all
+material should be explicitly granted, so a never-configured code can't
+silently carry the whole bank. Don't reintroduce an "if nothing assigned, show
+everything" branch — the empty state is the correct outcome. A read *failure*
+stays distinct and still returns `"unavailable"` (sign-in shows a retry), since
+answering "nothing assigned" from a failed read would hide a proctored sitting.
+See ATTEMPTS-SPEC §10.
+
 **Product name (2026-08-01): the simulator brands itself "Ace SAT"** on every
 user-facing surface — sign-in logo/note/footer, page title, 404, printed
 score-report wordmark — with no ™. "Ace STEM" remains the name of the tutoring
@@ -140,8 +152,11 @@ record-derived value.
   by moving to one row per assignment (`assign:<CODE>:<assignmentId>`), listed
   and filtered by prefix. There is no longer a read-modify-write of a shared
   array, so concurrent writers touch different keys. An explicit
-  `assign:<CODE>:__none` sentinel preserves the "assigned nothing" vs "never
-  configured" distinction. Historical description kept below for context:
+  `assign:<CODE>:__none` sentinel preserved the "assigned nothing" vs "never
+  configured" distinction — **vestigial since 2026-08-01**, since those two are
+  now the same state (see the assignment-default note above); it is still read
+  so old rows behave, but nothing writes new ones. Historical description kept
+  below for context:
 - **(historical) Concurrent `assign:<CODE>` writes can clobber.** Each student's
   assignments live in ONE storage key holding an array, mutated by
   unguarded read-modify-write from two sides: the tutor dashboard

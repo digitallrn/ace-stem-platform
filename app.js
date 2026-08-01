@@ -21,7 +21,7 @@
     activeHlColor: "yellow",     // last-used swatch — what mode-drag + underline pairing apply
     hlMode: false,               // Highlights & Notes toggle: drag-select highlights instantly
     resumeRecords: {},           // testId -> in-progress attempt record (Phase C)
-    assignments: null,           // Phase F: assignment objects; null = default all-practice
+    assignments: null,           // Phase F: assignment objects; [] once resolved
     activeAssignment: null,      // the assignment the running attempt started through
     pendingStart: null,          // {test, assignment} while the Start Code screen is up
     displayName: null,           // from the student:<CODE> profile row; null = show the code
@@ -185,7 +185,7 @@
       const r = await Attempts.findInProgress(code, t.testId, t.testVersion);
       if(r) state.resumeRecords[t.testId] = r;
     }
-    // Phase F §2: assignment objects (absent -> all published tests as practice)
+    // Phase F §2: assignment objects; absent resolves to [] (nothing granted)
     const assigns = await Attempts.assignments(code);
     if(assigns === "unavailable"){
       // a read error must not silently downgrade access (an ungated proctored
@@ -446,32 +446,13 @@
     cards.forEach(c => wrap.appendChild(c));
   }
 
+  /* Everything a student sees is tutor-assigned (2026-08-01). There is no
+     longer an "no assignments -> every published test" fallback: a code with
+     nothing assigned shows the empty state in both sections. state.assignments
+     is [] rather than null after any successful resolve; the || [] covers the
+     pre-sign-in initial value only. */
   function renderActiveCards(wrap){
-    if(state.assignments === null){
-      // no assign: key — default: every published test as plain practice
-      if(!state.tests.length){
-        wrap.innerHTML = '<div class="no-tests-card"><h3>No Practice Tests</h3><p>Add tests to test-data.js following the schema documented at the top of that file.</p></div>';
-        return;
-      }
-      state.tests.forEach(test => {
-        const totalQ = test.modules.reduce((s,m)=>s+m.questions.length,0);
-        const resume = state.resumeRecords[test.testId];
-        const card = document.createElement("div");
-        card.className = "pcard clickable";
-        card.innerHTML = `
-          <div class="pcard-head">Full-Length Practice — ${escapeHtml(test.testName)}</div>
-          <div class="pcard-body">
-            <div class="pcard-status">${resume
-              ? '<span class="pc-ico">🕐</span> In Progress'
-              : `${test.modules.length} modules · ${totalQ} questions`}</div>
-            <div class="pcard-action"><button class="pill ghost">${resume ? "Resume" : "Start"}</button></div>
-          </div>`;
-        card.addEventListener("click", ()=> resume ? resumeTestFlow(test, resume) : startTestFlow(test, null));
-        wrap.appendChild(card);
-      });
-      return;
-    }
-    const practice = state.assignments.filter(a => a.category === "practice");
+    const practice = (state.assignments || []).filter(a => a.category === "practice");
     // branch on renderable cards, not raw count — assignments for unpublished
     // testIds would otherwise skip the empty-state and leave the section blank
     const cards = practice.map(assignmentCard).filter(Boolean);

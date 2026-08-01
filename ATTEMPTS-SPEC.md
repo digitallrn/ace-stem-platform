@@ -253,6 +253,20 @@ Rules that prevent this:
 
 ## 10. Notes / decisions
 
+- **Assignments are the only source of student-visible material (2026-08-01).**
+  A student code with no assignments sees nothing: both Your Tests and Practice
+  and Prepare render their empty states. **This reverses the Phase D / Phase F
+  "zero-config" default**, where a code with no `assign:` key showed every
+  published test as practice. The reason is that all material should be
+  explicitly granted — a tutor decides what a student can open, and a code that
+  was never configured should not silently carry the whole bank. Consequences:
+  absent and explicitly-empty are now the same state, so the
+  `assign:<CODE>:__none` sentinel that existed only to tell them apart is
+  **vestigial** — existing rows are still read (they resolve to the same empty
+  list) but nothing writes new ones. A read *failure* is still distinct from an
+  empty list and still returns `"unavailable"`; that distinction matters more
+  under this default, not less, since answering "nothing assigned" from a failed
+  read would hide a proctored sitting the student is due to take.
 - The platform, published as its own artifact, gets its **own** storage. The
   fork's July 11 attempts stay in the fork — don't migrate. Keep that chat
   and artifact alive as the archive for those.

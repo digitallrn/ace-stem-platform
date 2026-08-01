@@ -526,8 +526,11 @@ window.Attempts = (function(){
   /* ---- per-assignment rows (spec §3) ----
      One row per assignment (assign:<CODE>:<assignmentId>) instead of one array
      per student, which is what removes the Phase F read-modify-write clobber.
-     assign:<CODE>:__none is an explicit "assigned nothing" sentinel, so the
-     [] vs absent distinction David decided on survives the move to rows. */
+     assign:<CODE>:__none was an explicit "assigned nothing" sentinel, back
+     when absent meant "all published tests as practice" and the two had to be
+     told apart. VESTIGIAL since 2026-08-01: absent and empty are the same
+     thing now, so nothing writes one any more. Existing rows are still read —
+     they resolve to the same empty list — so old data keeps working. */
   const ASSIGN_SYNC_PREFIX = "devstore:__assignsync:";
   const NONE_SUFFIX = ":__none";
 
@@ -711,33 +714,39 @@ window.Attempts = (function(){
 
     /* ---- Phase D/F: home-screen data ---- */
     /* Phase F assignments v2: assign:<CODE> -> array of assignment objects.
-       null (absent/unreadable) = default: all published tests as practice.
-       Legacy Phase D arrays of bare testIds normalize to practice
-       assignments so old keys keep working. */
+       Legacy Phase D arrays of bare testIds normalize to practice assignments
+       so old keys keep working.
+
+       2026-08-01: everything a student sees must be explicitly granted, so an
+       absent assignment list is no longer "all published tests as practice" —
+       absent and explicitly-empty both resolve to []. This reverses the
+       Phase D zero-config default. A read FAILURE still returns "unavailable"
+       rather than [], and that distinction now matters more, not less:
+       answering [] from a failed read would tell a student they have nothing
+       when they may have a proctored sitting waiting. */
     async assignments(code){
       const key = String(code || "").trim().toUpperCase();
 
       /* Remote mode (spec §2): pull from the server, cache locally, and on an
          unreachable server fall back to cache ONLY if this device has synced
          this student before. With no cache we return "unavailable" rather than
-         null — null means "no assignments configured -> all tests as practice",
-         and answering that from a failed read would turn a proctored,
-         start-code-gated test into an ungated practice card. */
+         an empty list, so a failed read never reads as "nothing assigned". */
       if(AttemptStore.isRemote()){
         try{
           const rows = await AttemptStore.rpc("fn_get_assignments", { p_code: key });
           await cacheRemoteAssignments(key, Array.isArray(rows) ? rows : []);
           const pulled = await readLocalAssignments(key);
-          return pulled === "none" ? [] : pulled;
+          // absent (null) and the vestigial "none" sentinel are the same thing
+          return (pulled === null || pulled === "none") ? [] : pulled;
         }catch(e){
           if(!localStorage.getItem(ASSIGN_SYNC_PREFIX + key)) return "unavailable";
           // fall through to the cached copy below
         }
       }
 
-      // a genuine read failure must NOT collapse to "no key -> all published
-      // tests as practice" (same reasoning as above). Retry the transient
-      // blip; only a clean missing/no-storage result means "default".
+      // a genuine read failure must NOT collapse to "nothing assigned" (same
+      // reasoning as above). Retry the transient blip; only a clean
+      // missing/no-storage result means the list is really empty.
       let res = null;
       for(let attempt = 0; attempt < 3; attempt++){
         res = await AttemptStore.getResult("assign:" + key);
@@ -746,8 +755,8 @@ window.Attempts = (function(){
       if(res.status === "error") return "unavailable";     // caller shows a retry, not a downgrade
       const legacy = (res.status === "ok" && Array.isArray(res.value)) ? res.value : null;
       const perRow = await readLocalAssignments(key);       // per-assignment rows (spec §3)
-      if(perRow === null && legacy === null) return null;   // nothing configured -> default
-      if(perRow === "none" ) return [];                     // explicitly assigned nothing
+      if(perRow === null && legacy === null) return [];     // nothing configured -> nothing shown
+      if(perRow === "none" ) return [];                     // vestigial sentinel, same result
       const merged = (perRow === null ? [] : perRow).concat(
         (legacy || []).filter(Boolean).map(item => (typeof item === "string")
           ? { assignmentId: "legacy-" + item, testId: item, category: "practice",
