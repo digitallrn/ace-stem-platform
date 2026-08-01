@@ -109,6 +109,24 @@ the `?devstorage=1` cases can only be checked there.
   (`assign:<CODE>:<assignmentId>`), enumerated with `storage.list`, the
   same one-key-per-record pattern ATTEMPTS-SPEC §1 chose for attempts to
   avoid exactly this clobber. Accepted as-is for launch 2026-07-31.
+- **The tutor dashboard is reachable in local mode, unauthenticated.** The
+  hidden `acestem-admin` sign-in works on a static deployment too, so anyone
+  on that machine who knows the name can open the dashboard. **Kept
+  deliberately** — it's load-bearing for single-machine proctoring (David
+  runs a sitting and reviews it on the same laptop), and the exposure is
+  bounded: local mode reads only that device's own localStorage, so it can
+  never surface another student's records. Deliberately **no PIN** — a
+  client-side gate on a file anyone can read is theatre, and it would add a
+  credential to lose. Real auth arrives with the backend in ATTEMPTS-SPEC
+  §7c, which is also what makes the dashboard worth protecting. Same
+  "obscurity, not security" posture as §7, now stated for local mode too.
+  Accepted for launch 2026-07-31.
+- **`_headers` must sit in Netlify's publish directory.** The repo-root
+  `_headers` (X-Robots-Tag: noindex on `/*`) is correct while Netlify
+  publishes the repo root — which is today's setup: no `netlify.toml`, no
+  build step, `dist/` gitignored, so `index.html` plus the split files are
+  served from root. If the publish directory ever becomes `dist/`, move the
+  file or the noindex silently stops being sent.
 
 ## Known open items
 - ✅ 2026-07-23: Attempt recording + tutor dashboard implemented per
