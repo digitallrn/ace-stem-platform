@@ -62,10 +62,22 @@ someone notices results never reach the dashboard. The generator also refuses
 a `sb_secret_…` / `service_role` key outright, since that would bypass RLS in
 the browser. It never prints the key into the build log.
 
-The publish directory is the repo root (`publish = "."`), which is also where
-`_headers` must live. `netlify.toml` 404s `/reference/*`, `/supabase/*` and
-`/tests/*` so internal files — including the reference College Board PDFs —
-aren't served from the live domain.
+The build then runs `node build-site.js`, which copies **only** the files the
+running app needs into `_site/` — the published directory. Internal files
+(design docs, specs, `assemble.py`, the build scripts, `reference/`,
+`supabase/`, `tests/`) are never deployed, so no URL can reach them in any
+capitalisation. `_headers` is copied in because it only works inside the
+publish directory.
+
+**If you add a file the app needs, add it to `ALLOW` in `build-site.js`.** The
+build fails if `index.html` references a file that isn't allowlisted, so a
+forgotten entry shows up as a failed deploy instead of a 404 for a student.
+
+This replaced an earlier attempt to block internal paths with redirect rules.
+That approach cannot work: Netlify matches redirect `from` paths
+case-sensitively but serves files case-insensitively, so
+`/tests/injection-proof.js` 404'd while `/TESTS/injection-proof.js` returned
+200 and served the file.
 
 You can run the generator locally too:
 `SUPABASE_URL=… SUPABASE_PUBLISHABLE_KEY=… node gen-config.js`

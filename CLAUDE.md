@@ -148,15 +148,23 @@ the `?devstorage=1` cases can only be checked there.
   §7c, which is also what makes the dashboard worth protecting. Same
   "obscurity, not security" posture as §7, now stated for local mode too.
   Accepted for launch 2026-07-31.
-- **`_headers` must sit in Netlify's publish directory.** `netlify.toml` now
-  pins `publish = "."`, so the repo-root `_headers` (X-Robots-Tag: noindex on
-  `/*`) is correct. If the publish directory ever changes, move `_headers`
-  with it or the noindex silently stops being sent.
-- **The publish root is the whole repo.** `netlify.toml` 404s `/reference/*`,
-  `/supabase/*` and `/tests/*` — `reference/` holds real College Board PDFs
-  and screenshots that must not be served from the live domain. The `.md`
-  specs at the root are still fetchable; add redirect blocks if that ever
-  matters. Netlify redirect behaviour can only be confirmed on a real deploy.
+- **The live site is an allowlist, not the repo root.** `netlify.toml` builds
+  `_site/` via `build-site.js` and publishes that; only the 11 files the
+  running app needs are copied in (`index.html`, `404.html`, `styles.css`,
+  the five app JS files, `test-data.js`, `config.js`, `_headers`). Everything
+  else — design docs, specs, `assemble.py`, the build scripts, `reference/`
+  (real College Board PDFs), `supabase/`, `tests/` — is simply not deployed.
+  **Adding a file the app needs means adding it to `ALLOW` in
+  `build-site.js`;** the build fails if `index.html` references something
+  unlisted, so a miss is a red build rather than a 404 for a student.
+  `_headers` only works inside the publish directory, so it is copied in too.
+  **Why an allowlist and not redirect rules:** measured against the live site,
+  Netlify matches redirect `from` paths case-SENSITIVELY but serves files
+  case-INSENSITIVELY — `/tests/injection-proof.js` 404'd while
+  `/TESTS/injection-proof.js` returned 200 and served the file. Every
+  blocklist rule is therefore bypassable by changing capitalisation, and an
+  n-character path has 2^n variants. Deny-by-default is the only mechanism
+  that actually holds.
 
 ## Known open items
 - ✅ 2026-07-23: Attempt recording + tutor dashboard implemented per

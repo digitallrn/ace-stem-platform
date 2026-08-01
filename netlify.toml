@@ -1,41 +1,34 @@
 # netlify.toml — Ace STEM Bluebook Simulator
 #
-# The site is served straight from the repo root: index.html plus the split
-# js/css files, exactly as they sit here. There is no bundler. The only build
-# step generates config.js (gitignored, so absent from the checkout) from
-# environment variables — and fails the build if they are missing, so a
-# misconfigured environment can never quietly deploy a local-mode site.
+# The build does two things, in order:
+#   1. gen-config.js  — writes config.js from environment variables, failing
+#                       the build if they are missing (see SETUP.md).
+#   2. build-site.js  — copies ONLY the files the running app needs into
+#                       _site/, which is what gets published.
 #
 # Required environment variables (Site configuration → Environment variables):
 #   SUPABASE_URL              https://<ref>.supabase.co
 #   SUPABASE_PUBLISHABLE_KEY  sb_publishable_...  (or SUPABASE_ANON_KEY)
 #
-# For a deliberate local-mode deploy, delete this [build] section.
+# WHY publish is an allowlisted directory rather than the repo root:
+# publishing "." exposed every internal file, and redirect rules could not fix
+# it. Measured against the live site, Netlify matches redirect `from` paths
+# case-SENSITIVELY but serves files case-INSENSITIVELY:
+#
+#     /tests/injection-proof.js  -> 404   (redirect matched)
+#     /TESTS/injection-proof.js  -> 200   (file served anyway)
+#
+# so every blocklist rule is bypassable by changing capitalisation. Building an
+# allowlisted publish directory is deny-by-default: internal files are not
+# deployed at all, so no capitalisation of any URL can reach them. It also
+# covers files added in future without anyone remembering to write a rule.
+#
+# _headers (X-Robots-Tag: noindex) is copied into _site by build-site.js —
+# it only takes effect inside the publish directory.
+#
+# For a deliberate local-mode deploy, drop gen-config.js from the command;
+# build-site.js will then fail on the missing config.js, which is intentional.
 
 [build]
-  command = "node gen-config.js"
-  publish = "."
-
-# _headers (X-Robots-Tag: noindex) sits in the repo root, which publish = "."
-# makes the publish directory — keep those two in step if either ever moves.
-
-# The publish root is the whole repo, so these paths would otherwise be
-# fetchable on the live domain. reference/ in particular holds real College
-# Board PDFs and screenshots that should not be served from davidsatprep.com.
-[[redirects]]
-  from = "/reference/*"
-  to = "/404.html"
-  status = 404
-  force = true
-
-[[redirects]]
-  from = "/supabase/*"
-  to = "/404.html"
-  status = 404
-  force = true
-
-[[redirects]]
-  from = "/tests/*"
-  to = "/404.html"
-  status = 404
-  force = true
+  command = "node gen-config.js && node build-site.js"
+  publish = "_site"
