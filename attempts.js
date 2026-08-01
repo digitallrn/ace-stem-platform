@@ -518,8 +518,26 @@ window.Attempts = (function(){
        would then resume the student INTO the module they just completed.
        It also stops a student who backed out of the ready screen from being
        auto-launched into a test they never began. */
-    if(deliberateExit || !curModule) delete rec.checkpoint;
-    else rec.checkpoint = positionBlob();
+    if(deliberateExit){
+      delete rec.checkpoint;
+    } else if(curModule){
+      /* Fold this sitting's elapsed seconds into the open module entry and
+         restart the sitting clock, exactly as suspend() does. Without this a
+         crash loses every second since moduleStart from the record's timing —
+         the student's own clock is fine (it comes from the checkpoint), but
+         the tutor's pacing data silently under-reports. Folding here means a
+         crash costs at most one interval of module time, same as answers. */
+      const m = rec.modules.find(x => x.moduleId === curModule.moduleId && !x.endedAt);
+      if(m){
+        m.timeSpentSeconds = (m.timeSpentSeconds || 0) +
+          Math.round((Date.now() - curModule.startedAt) / 1000);
+        curModule = { moduleId: curModule.moduleId, startedAt: Date.now() };
+      }
+      rec.checkpoint = positionBlob();
+    }
+    /* else: between modules. Leave whatever moduleEnd left — writing a live
+       blob here would record a module that has already finished, and deleting
+       it would drop the whole sitting off the home card. */
     return rec;
   }
 
@@ -682,6 +700,28 @@ window.Attempts = (function(){
           }
         }
         curModule = null;
+        /* Forward-looking boundary checkpoint. A crash on the break or
+           module-over screen would otherwise leave neither blob, and since
+           resumability keys on `resume || checkpoint` the whole sitting would
+           disappear from the home card — a student losing a completed module
+           because their laptop died during the break. Points at the NEXT
+           module with question 0 and no timeRemainingSeconds, so it opens with
+           its full limit rather than inheriting the finished module's clock.
+           The break itself is not re-offered; resuming into the next module is
+           the lesser loss. */
+        if(rec && appState && appState.currentTest){
+          const next = (typeof appState.moduleIndex === "number" ? appState.moduleIndex : 0) + 1;
+          if(next < appState.currentTest.modules.length){
+            const b = positionBlob();
+            b.moduleIndex = next;
+            b.questionIndex = 0;
+            delete b.timeRemainingSeconds;        // full limit for the new module
+            b.elapsedSeconds = 0;
+            rec.checkpoint = b;
+          } else {
+            delete rec.checkpoint;                // last module: finalize owns it
+          }
+        }
         save();                                   // module boundary — the important write
       }catch(e){}
     },

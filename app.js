@@ -241,7 +241,11 @@
       if(!mod || !mod.questions || !mod.questions.length) continue;
       // a questionIndex past the end is clamped by beginModule, but a
       // non-numeric one means the blob is not trustworthy at all
-      if(cp.questionIndex !== undefined && typeof cp.questionIndex !== "number") continue;
+      if(cp.questionIndex !== undefined &&
+         (typeof cp.questionIndex !== "number" || cp.questionIndex < 0)) continue;
+      // a negative or non-numeric clock would hand back an unlimited module
+      if(cp.timeRemainingSeconds !== undefined &&
+         (typeof cp.timeRemainingSeconds !== "number" || cp.timeRemainingSeconds < 0)) continue;
       // testVersion is already matched by findInProgress
       return { test, record: rec };
     }
