@@ -830,6 +830,31 @@
     renderNotesRail();
   }
 
+  /* The zoom / reset / expand frame is a component, not a Math feature: an RW
+     figure gets the identical chrome (reference 33). Where it sits differs by
+     section, and only because the figure means something different — in RW it
+     is part of the stimulus, so it belongs above the passage in the left pane;
+     in Math it belongs with the question. */
+  function figureFrameHtml(q){
+    if(!q.figure) return "";
+    return `
+      <div class="fig-frame">
+        <div class="fig-toolbar">
+          <button id="figZin" title="Zoom in">🔍+</button>
+          <button id="figZout" title="Zoom out">🔍−</button>
+          <span id="figPct">100%</span>
+          <button id="figReset">Reset</button>
+          <span class="sep"></span>
+          <button id="figExpand" title="Expand">⛶</button>
+        </div>
+        <div class="fig-imgwrap"><img id="figImg" src="${escapeHtml(q.figure)}" alt="Question figure"></div>
+        ${q.figureCaption ? `<div class="fig-caption">${fmt(q.figureCaption)}</div>` : ""}
+      </div>`;
+  }
+  function figureGoesLeft(mod, q){
+    return !!q.figure && mod.section === "Reading and Writing";
+  }
+
   function renderQuestionView(){
     const mod = currentModule();
     const q = currentQuestion();
@@ -840,17 +865,22 @@
     updateHeaderTools(mod);
 
     const isSpr = q.type === "spr";
-    const hasLeft = !!q.passage || isSpr;
+    // an RW figure opens the stimulus pane even with no passage
+    const figLeft = figureGoesLeft(mod, q);
+    const hasLeft = !!q.passage || isSpr || figLeft;
     const tBody = el("tBody");
     tBody.classList.toggle("single", !hasLeft);
 
     const left = el("paneLeft");
     const right = el("paneRight");
 
-    if(q.passage){
+    if(q.passage || figLeft){
       const saved = ms.passageHtml[q.id];
-      left.innerHTML = '<div class="passage-text" id="passageText">' +
-        (saved !== undefined ? sanitizeSavedHtml(saved) : fmt(q.passage)) + '</div>';
+      left.innerHTML = (figLeft ? figureFrameHtml(q) : "") +
+        (q.passage
+          ? '<div class="passage-text" id="passageText">' +
+            (saved !== undefined ? sanitizeSavedHtml(saved) : fmt(q.passage)) + '</div>'
+          : "");
     } else if(isSpr){
       left.innerHTML = sprDirectionsHtml();
     } else {
@@ -874,19 +904,8 @@
     const flagged = ms.flags.has(q.id);
     const abcOn = state.elimMode && !isSpr;
 
-    const figHtml = q.figure ? `
-      <div class="fig-frame">
-        <div class="fig-toolbar">
-          <button id="figZin" title="Zoom in">🔍+</button>
-          <button id="figZout" title="Zoom out">🔍−</button>
-          <span id="figPct">100%</span>
-          <button id="figReset">Reset</button>
-          <span class="sep"></span>
-          <button id="figExpand" title="Expand">⛶</button>
-        </div>
-        <div class="fig-imgwrap"><img id="figImg" src="${escapeHtml(q.figure)}" alt="Question figure"></div>
-        ${q.figureCaption ? `<div class="fig-caption">${fmt(q.figureCaption)}</div>` : ""}
-      </div>` : "";
+    // RW figures render in the stimulus pane instead (reference 33)
+    const figHtml = figureGoesLeft(currentModule(), q) ? "" : figureFrameHtml(q);
 
     let body;
     if(isSpr){
@@ -1025,16 +1044,40 @@
   }
 
   /* ================= NAV BUTTONS ================= */
-  el("btnBack").addEventListener("click", ()=>{
+  /* One navigation per transition, matching the real app. A second click while
+     a transition is in flight is DISCARDED, never queued: queueing is what
+     turns an impatient double-click into a skipped question, and on a timed
+     test that is unrecoverable — the student cannot get the time back. The
+     same lock covers Next-from-review, so a double-click can't submit twice.
+     The buttons are disabled for the window too, so the discard is visible
+     rather than the click just seeming to do nothing. */
+  const NAV_LOCK_MS = 260;
+  let navLocked = false;
+  function navigate(fn){
+    if(navLocked) return;                       // discarded, not queued
+    navLocked = true;
+    const back = el("btnBack"), next = el("btnNext");
+    back.disabled = next.disabled = true;
+    try{ fn(); }
+    finally{
+      setTimeout(()=>{
+        navLocked = false;
+        back.disabled = next.disabled = false;
+      }, NAV_LOCK_MS);
+    }
+  }
+  window.AppNav = { locked: ()=> navLocked, lockMs: NAV_LOCK_MS };
+
+  el("btnBack").addEventListener("click", ()=> navigate(()=>{
     if(state.view === "review"){ state.view = "question"; renderTest(); return; }
     if(state.questionIndex > 0){ state.questionIndex--; renderTest(); }
-  });
-  el("btnNext").addEventListener("click", ()=>{
+  }));
+  el("btnNext").addEventListener("click", ()=> navigate(()=>{
     if(state.view === "review"){ submitModule(); return; }
     const total = currentModule().questions.length;
     if(state.questionIndex < total-1){ state.questionIndex++; renderTest(); }
     else { state.view = "review"; renderTest(); }
-  });
+  }));
 
   /* ================= QUESTION NAVIGATOR POPUP ================= */
   el("qnavBtn").addEventListener("click", openQnav);

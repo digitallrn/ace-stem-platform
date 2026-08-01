@@ -224,6 +224,36 @@
       note: hostileLinks.length ? hostileLinks.length + " link(s) on invalid codes"
                                 : "copy-link only appears on valid AS- codes" });
 
+    /* v1.2 addendum tokens: {{bullets}}/{{item}}, {{quote}}, {{credit}}.
+       Test data is untrusted on the same terms as a record (contract rule 1),
+       and these tokens add three new paths from data into markup, so each is
+       driven with the payload as its content. fmt() is escape-first, so the
+       assertion is that the payload survives as visible TEXT inside the new
+       wrapper, never as an element. */
+    const tokenCases = [
+      ["{{bullets}}", "Notes:{{bullets}}" + PAYLOAD + "{{item}}second{{/bullets}}", "ul.fmt-bullets li"],
+      ["{{quote}}",   "{{quote}}" + PAYLOAD + "{{/quote}}",   "div.fmt-quote"],
+      ["{{credit}}",  "{{credit}}" + PAYLOAD + "{{/credit}}", "div.fmt-credit"],
+      ["nested in bullets", "{{bullets}}{{i}}" + PAYLOAD + "{{/i}}{{item}}x{{/bullets}}", "ul.fmt-bullets li i"]
+    ];
+    const tokenProbe = document.createElement("div");
+    document.body.appendChild(tokenProbe);
+    const tokenBad = [];
+    tokenCases.forEach(([label, src, sel]) => {
+      tokenProbe.innerHTML = fmt(src);
+      const wrapper = tokenProbe.querySelector(sel);
+      const inert = !!wrapper && wrapper.textContent.indexOf("PWN") !== -1 &&
+                    !tokenProbe.querySelector('img[src="x"]') &&
+                    ![...tokenProbe.querySelectorAll("*")].some(e => [...e.attributes].some(a => /^on/i.test(a.name)));
+      if(!inert) tokenBad.push(label);
+    });
+    await wait(120);
+    results.push({ surface: "fmt() v1.2 tokens escape their content",
+      pass: tokenBad.length === 0 && !window.__XSS_FIRED,
+      note: tokenBad.length ? "leaked: " + tokenBad.join(", ")
+                            : tokenCases.length + " token surfaces render payload as inert text" });
+    tokenProbe.remove();
+
     /* Magic-link fragment (…/#AS-XXXXXXXX). The fragment is user-controlled
        input that reaches sign-in, so it is a genuine untrusted surface. The
        gate is AppMagicLink.parse: anything that is not a well-formed code must
