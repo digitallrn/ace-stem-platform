@@ -14,6 +14,21 @@ filtering and practice-set building. Empty or missing stays valid; v1.1 TSVs
 convert unchanged. The extractor never generates tags; they come from a
 separate text-only tagging pass or manual authoring.
 
+**v1.2 addendum (2026-08-01, render tokens):** three tokens join the §2
+vocabulary — `{{bullets}} … {{item}} … {{/bullets}}` for bulleted notes,
+`{{quote}}…{{/quote}}` for an indented excerpt, and `{{credit}}…{{/credit}}`
+for a right-aligned source line, all implemented in `render.js`.
+`{{bullets}}`/`{{item}}` reuse the `{{table}}`/`{{row}}` grammar (paired
+container + void separator), so the converter validates them with the same
+balance/nesting walk: `{{item}}` outside `{{bullets}}` fails a row exactly as
+`{{row}}` outside `{{table}}` does. Purely additive — data using none of them
+is unaffected, so no `testVersion` bump is warranted.
+
+> **This file is a COPY.** The canonical contract lives in the test-bank repo
+> (`test-bank-repo/SCHEMA-v1.2.md`), which the converter enforces. That copy
+> also carries two addenda this one does not yet mirror (optional `rationale`,
+> and the `scoring` sidecar). Prefer the test-bank copy when they disagree.
+
 ---
 
 ## 1. TSV columns (extractor → converter)
@@ -59,6 +74,13 @@ single place they become HTML. Unknown or unbalanced tokens fail validation.
 | `{{mm}}…{{/mm}}` | paired | **display LaTeX** — centered block equation (systems, standalone equations) |
 | `{{table}} … {{/table}}` | paired | data table. Cells separated by `\|`, rows separated by `{{row}}`; the first row is the header row |
 | `{{row}}` | void | row separator, valid only inside `{{table}}` |
+| `{{bullets}} … {{/bullets}}` | paired | bulleted notes list — the rhetorical-synthesis "a student has taken the following notes" stimulus. Items separated by `{{item}}`; wrapped lines hang to the text, not the bullet |
+| `{{item}}` | void | item separator, valid only inside `{{bullets}}` |
+| `{{quote}}…{{/quote}}` | paired | indented excerpt block, set in from the surrounding prose |
+| `{{credit}}…{{/credit}}` | paired | right-aligned source / copyright line |
+
+Example bullets:
+`While researching a topic, a student has taken the following notes:{{bullets}} Lewis was a sculptor. {{item}} {{i}}Forever Free{{/i}} (1867) is a marble sculpture. {{/bullets}}`
 
 Example table:
 `{{table}} x \| f(x) {{row}} 1 \| 3 {{row}} 2 \| 7 {{/table}}`
