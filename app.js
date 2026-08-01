@@ -30,7 +30,9 @@
     elapsedSec: 0,               // count-up seconds for untimed modules
     fiveMinAlerted: false,       // Phase F §6: five-minute popup shown for this module
     pastAttempts: [],            // completed/timed-out records for this code (Phase D)
-    practiceTab: "active"        // home Practice toggle: "active" | "past"
+    practiceTab: "active",       // home Practice toggle: "active" | "past"
+    testsTab: "active",          // home Your Tests toggle: "active" | "past"
+    lastWasProctored: false      // which section the just-finished attempt lands in
   };
 
   function el(id){ return document.getElementById(id); }
@@ -41,9 +43,13 @@
   // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
   // them floating as a full-screen click blocker over the next screen
   const FLOATING_OVERLAYS = ["saveFailModal","bugModal","deviceModal","qrModal"];
+  /* The persistent bar belongs to the signed-in non-test screens. In-test
+     screens keep their own header, and sign-in has its own branding. */
+  const TOPBAR_SCREENS = ["screen-home", "screen-scoredetails"];
   function showOnly(id){
     SCREENS.forEach(s => s===id ? show(s) : hide(s));
     FLOATING_OVERLAYS.forEach(o => hide(o));
+    el("appTopBar").classList.toggle("hidden", TOPBAR_SCREENS.indexOf(id) === -1);
   }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
 
@@ -158,6 +164,7 @@
     state.assignments = assigns;
     state.pastAttempts = await Attempts.pastAttempts(code);
     state.practiceTab = "active";
+    state.testsTab = "active";
     rememberSession(code);            // stay signed in on this device
     renderHome();
     showOnly("screen-home");
@@ -324,10 +331,14 @@
     updateSyncTag();
     document.querySelectorAll("#practiceSeg .seg-btn").forEach(b =>
       b.classList.toggle("on", b.dataset.seg === state.practiceTab));
+    document.querySelectorAll("#testsSeg .seg-btn").forEach(b =>
+      b.classList.toggle("on", b.dataset.seg === state.testsTab));
     renderYourTests();
     const wrap = el("practiceCards");
     wrap.innerHTML = "";
-    if(state.practiceTab === "past") renderPastCards(wrap);
+    /* Proctored sittings belong to Your Tests, so Past here is everything
+       else — the conditions field is what the ceremony stamped (§2). */
+    if(state.practiceTab === "past") renderPastCards(wrap, r => r.conditions !== "proctored", "No completed practice yet.");
     else renderActiveCards(wrap);
   }
 
@@ -377,16 +388,27 @@
     else startTestFlow(test, a);
   }
 
+  /* Both home sections are always present now (screenshot 29). An empty
+     "Your Tests" is informative — it's where a scheduled sitting will appear —
+     so it gets a real empty-state card rather than being hidden. We
+     deliberately do NOT copy the real app's paper-ticket sentence: that's
+     College Board administration logistics and doesn't apply here. */
   function renderYourTests(){
-    const row = el("yourTestsRow"), wrap = el("testCards");
+    const wrap = el("testCards");
     wrap.innerHTML = "";
+    if(state.testsTab === "past"){
+      renderPastCards(wrap, r => r.conditions === "proctored", "No completed tests yet.");
+      return;
+    }
     const testAssigns = (state.assignments || []).filter(a => a.category === "test");
-    // gate visibility on cards that actually render, not the raw assignment
-    // count — an assignment for an unpublished testId yields no card, and a
-    // bare "Your Tests" heading over empty space would just confuse
+    // an assignment for an unpublished testId yields no card, so branch on
+    // cards that actually render rather than the raw assignment count
     const cards = testAssigns.map(assignmentCard).filter(Boolean);
-    row.classList.toggle("hidden", !cards.length);
-    wrap.classList.toggle("hidden", !cards.length);
+    if(!cards.length){
+      wrap.innerHTML = '<div class="no-tests-card"><h3>You Have No Upcoming Tests</h3>' +
+        '<p>Proctored tests appear here when your tutor schedules one.</p></div>';
+      return;
+    }
     cards.forEach(c => wrap.appendChild(c));
   }
 
@@ -432,12 +454,13 @@
     return d.toLocaleDateString(undefined, {month:"short", day:"numeric", year:"numeric"});
   }
 
-  function renderPastCards(wrap){
-    if(!state.pastAttempts.length){
-      wrap.innerHTML = '<div class="no-tests-card"><h3>No Past Practice</h3><p>Completed practice tests will appear here.</p></div>';
+  function renderPastCards(wrap, keep, emptyLine){
+    const list = state.pastAttempts.filter(keep || (()=>true));
+    if(!list.length){
+      wrap.innerHTML = '<p class="past-empty">' + escapeHtml(emptyLine || "No completed tests yet.") + '</p>';
       return;
     }
-    state.pastAttempts.forEach(record => {
+    list.forEach(record => {
       const released = record.released === true;
       const test = state.tests.find(t => t.testId === record.testId);
       // reviewing against a different test build would mislabel questions
@@ -479,6 +502,12 @@
   document.querySelectorAll("#practiceSeg .seg-btn").forEach(b =>
     b.addEventListener("click", ()=>{
       state.practiceTab = b.dataset.seg;
+      renderHome();
+    }));
+
+  document.querySelectorAll("#testsSeg .seg-btn").forEach(b =>
+    b.addEventListener("click", ()=>{
+      state.testsTab = b.dataset.seg;
       renderHome();
     }));
 
@@ -1073,6 +1102,9 @@
     } else {
       Attempts.finalize(endedBy || "submitted");
       delete state.resumeRecords[state.currentTest.testId];   // completed ≠ resumable
+      // which home section the finished attempt lands in; read after the
+      // assignment is cleared below
+      state.lastWasProctored = !!(state.activeAssignment && state.activeAssignment.category === "test");
       if(state.activeAssignment){
         // Phase F §2: the assignment is consumed — its card becomes Completed
         state.activeAssignment.completedAttemptId = Attempts.currentAttemptId() || "unknown";
@@ -1110,7 +1142,10 @@
   el("subDownloadBtn").addEventListener("click", ()=> Attempts.downloadJson());
   el("subHomeBtn").addEventListener("click", async ()=>{
     state.pastAttempts = await Attempts.pastAttempts(state.userName);
-    state.practiceTab = "past";      // land them where the new attempt now shows
+    /* land them where the new attempt now shows — a proctored sitting lands
+       under Your Tests, everything else under Practice */
+    if(state.lastWasProctored){ state.testsTab = "past"; state.practiceTab = "active"; }
+    else { state.practiceTab = "past"; state.testsTab = "active"; }
     state.currentTest = null;
     renderHome();
     showOnly("screen-home");

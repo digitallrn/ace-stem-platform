@@ -131,10 +131,20 @@
     results.push(audit("Home welcome banner (hostile display name)", $("welcomeMsg")));
     results.push(audit("Home user chip + avatar (hostile display name)",
       $("homeUserName").parentElement));
+    /* Past cards live in two sections now: proctored sittings under Your
+       Tests, everything else under Practice. Switch both toggles and take the
+       card from wherever this record landed, so the proof follows the record
+       rather than assuming a section. */
     document.querySelector('#practiceSeg .seg-btn[data-seg="past"]').click();
+    document.querySelector('#testsSeg .seg-btn[data-seg="past"]').click();
+    await wait(200);
     results.push(audit("Past card (testName, total, timing badge)", $("practiceCards")));
+    results.push(audit("Your Tests past card (testName, total, timing badge)", $("testCards")));
 
-    document.querySelector("#practiceCards .pcard-link").click();
+    const pastLink = document.querySelector("#practiceCards .pcard-link") ||
+                     document.querySelector("#testCards .pcard-link");
+    if(!pastLink) throw new Error("no Past card rendered — check the section split");
+    pastLink.click();
     await wait(400);
     const root = $("sdRoot");
     $("sdShowCorrect").click();                                   // reveal correct-answer column

@@ -89,10 +89,12 @@
   </div>
 </div>
 
-<!-- ============ HOME ============ -->
-<div id="screen-home" class="hidden">
-  <div class="home-top">
-    <div class="bb-logo-sm"><span>✦</span>Bluebook<sup style="font-size:9px;">™</sup></div>
+<!-- Persistent top bar (screenshot 29): pinned while scrolling, shared by the
+     signed-in non-test screens. Lives outside the screens so home and Score
+     Details show the same one element — showOnly() decides when it appears.
+     In-test chrome keeps its own header and is deliberately not sticky. -->
+<div class="home-top hidden" id="appTopBar">
+  <div class="bb-logo-sm"><span>✦</span>Bluebook<sup style="font-size:9px;">™</sup></div>
     <!-- local mode indicator: records live on this device only, never synced -->
     <span class="local-tag hidden" id="localModeTag" title="This copy stores results in this browser. Download your results to hand them to your tutor.">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>
@@ -102,16 +104,27 @@
     <span class="local-tag sync-tag hidden" id="syncTag" title="Your work saves on this device first and syncs to your tutor in the background.">
       <span class="sync-dot" id="syncDot"></span><span id="syncTagText">Synced</span>
     </span>
-    <div class="home-user"><span id="homeUserName">Student</span><span class="avatar" id="homeAvatar">S</span>
-      <button class="linklike home-signout" id="homeSignoutBtn" title="Forget this code on this device">Sign out</button></div>
-  </div>
+  <div class="home-user"><span id="homeUserName">Student</span><span class="avatar" id="homeAvatar">S</span>
+    <button class="linklike home-signout" id="homeSignoutBtn" title="Forget this code on this device">Sign out</button></div>
+</div>
+
+<!-- ============ HOME ============ -->
+<div id="screen-home" class="hidden">
   <div class="welcome-band"><h1 id="welcomeMsg">Welcome. Good luck on test day!</h1></div>
   <div class="home-main">
-    <!-- Phase F §2: "Your Tests" returns, but for tutor-assigned proctored
-         sittings (category "test") — not real administrations. Hidden unless
-         this student code has test-category assignments. -->
-    <div class="home-sectionrow hidden" id="yourTestsRow"><h2>Your Tests</h2></div>
-    <div class="practice-cards hidden" id="testCards"></div>
+    <!-- Phase F §2: "Your Tests" is for tutor-assigned proctored sittings
+         (category "test"), not real administrations. Both sections now render
+         always, even when empty (screenshot 29) — a student with nothing
+         scheduled should still see where a test would appear. -->
+    <div class="home-sectionrow" id="yourTestsRow">
+      <h2>Your Tests</h2>
+      <div class="seg" id="testsSeg">
+        <button class="seg-btn on" data-seg="active">Active</button>
+        <button class="seg-btn" data-seg="past">Past</button>
+      </div>
+      <span class="section-aside">Don't see your test? Ask your tutor.</span>
+    </div>
+    <div class="practice-cards" id="testCards"></div>
 
     <div class="home-sectionrow">
       <h2>Practice and Prepare</h2>
@@ -121,16 +134,6 @@
       </div>
     </div>
     <div class="practice-cards" id="practiceCards"></div>
-
-    <div class="home-sectionrow"><h2>Explore BigFuture</h2></div>
-    <div class="bigfuture">
-      <div class="bf-img">🎓</div>
-      <div class="bf-body">
-        <h3>Plan for Life After High School</h3>
-        <p>Whether you're interested in a four-year university, community college, or career training, BigFuture has what you need to start planning your future, your way.</p>
-        <button class="pill ghost" style="padding:10px 22px;">Go to BigFuture</button>
-      </div>
-    </div>
 
     <div class="home-footer"><button class="linklike" id="homeBugBtn">Report a bug</button></div>
   </div>

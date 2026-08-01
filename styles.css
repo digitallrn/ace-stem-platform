@@ -4,6 +4,9 @@
     --cb-blue-bg:   #3B4FC0;
     --cb-navy:      #232C63;
     --cb-lightband: #E3EAF8;
+    /* in-test header/footer tint, sampled from
+       reference/bluebook-screenshots/30 — the real test chrome isn't white */
+    --cb-testchrome:#E6EDF8;
     --cb-yellow:    #FFCE31;
     --cb-red:       #B72C3D;
     --ink:          #1E1E1E;
@@ -18,7 +21,11 @@
     --flag-red: #C23349;      /* bookmark red, sampled from screenshot 15 */
   }
   *{ box-sizing:border-box; }
-  html,body{ height:100%; }
+  /* body grows with its content: a sticky child only sticks within its
+     parent's box, so a fixed height:100% would release the top bar after one
+     viewport. The full-height screens size themselves in vh, not %. */
+  html{ height:100%; }
+  body{ min-height:100%; }
   body{ margin:0; font-family:var(--sans); color:var(--ink); background:#fff; -webkit-font-smoothing:antialiased; }
   button{ font-family:inherit; cursor:pointer; }
   .hidden{ display:none !important; }
@@ -75,8 +82,11 @@
 
   /* ================= HOME ================= */
   #screen-home{ min-height:100vh; }
+  /* Persistent bar (screenshot 29): pinned while scrolling home and Score
+     Details. Opaque background so content scrolls under it, not through it. */
   .home-top{
     display:flex; align-items:center; justify-content:space-between; padding:18px 42px;
+    position:sticky; top:0; z-index:60; background:#fff;
   }
   .home-top .bb-logo-sm{ color:var(--cb-blue); font-size:22px; font-weight:800; display:flex; align-items:center; gap:6px; }
   /* sync indicator (Phase H §1) — same quiet treatment as the local pill */
@@ -130,6 +140,10 @@
   }
   .no-tests-card h3{ margin:0 0 10px; font-size:20px; }
   .no-tests-card p{ margin:0; font-size:15px; line-height:1.6; }
+  /* static helper, top-right of Your Tests — deliberately not a link: there is
+     no self-service path, the tutor is the path */
+  .section-aside{ margin-left:auto; font-size:14.5px; color:var(--ink-soft); }
+  .past-empty{ margin:0; font-size:15px; color:var(--ink-soft); }
   .practice-cards{ display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start; }
   /* practice cards (Phase D, screenshots 2-3): grey header band with the test
      name, white body with status row + primary action; no trash (deliberate
@@ -154,17 +168,6 @@
     text-decoration:underline; text-underline-offset:2px; padding:4px 2px;
   }
   .pc-pending{ font-size:13.5px; color:var(--ink-soft); font-style:italic; }
-  .bigfuture{
-    display:flex; border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-top:16px;
-    box-shadow:0 2px 8px rgba(0,0,0,.06); max-width:900px;
-  }
-  .bigfuture .bf-img{
-    width:280px; min-height:180px; background:linear-gradient(135deg,#E5387A 0%, #324DC7 100%); flex-shrink:0;
-    display:flex; align-items:center; justify-content:center; color:#fff; font-size:44px;
-  }
-  .bigfuture .bf-body{ padding:26px 30px; }
-  .bigfuture h3{ margin:0 0 10px; font-size:21px; }
-  .bigfuture p{ margin:0 0 18px; font-size:15px; line-height:1.55; max-width:560px; }
 
   /* ================= LOADING ================= */
   #screen-loading{ min-height:100vh; display:flex; flex-direction:column; align-items:center; padding-top:90px; }
@@ -201,7 +204,7 @@
   #screen-test{ display:flex; flex-direction:column; height:100vh; overflow:hidden; position:relative; }
   .t-header{
     position:relative; padding:14px 24px 10px; flex-shrink:0;
-    border-bottom:2px dashed var(--ink);
+    border-bottom:2px dashed var(--ink); background:var(--cb-testchrome);
     display:grid; grid-template-columns:1fr auto 1fr; align-items:start;
   }
   .t-header .th-left h1{ margin:0; font-size:20px; font-weight:700; }
@@ -514,6 +517,7 @@
 
   .t-footer{
     flex-shrink:0; border-top:2px dashed var(--ink); padding:14px 30px;
+    background:var(--cb-testchrome);
     display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
   }
   .tf-name{ font-size:17px; font-weight:700; }
