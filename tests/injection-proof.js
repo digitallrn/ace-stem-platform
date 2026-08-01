@@ -15,6 +15,8 @@
    1. Open dist/index-live.html.
    2. Paste this whole file into the console and press Enter.
    3. Read the printed report. Every surface must show PASS.
+   Covers record-derived text (SPR answers, codes, testName), test-data text
+   (rationale via fmt), and the student:<CODE> display name.
    NOTE: run this with local mode active (no config.js beside the page), since
    it uses the acestem-admin route, which a remote deployment removes.
    4. Reload the page afterwards (the script cleans its own storage keys).   */
@@ -101,10 +103,20 @@
     const { rec, sprCount } = poisonedRecord(test);
     localStorage.setItem("as:" + rec.attemptId, JSON.stringify(rec));
 
+    /* display-name profile row (student:<CODE>) — a NEW untrusted string that
+       reaches the welcome banner, test footer, Score Details hero, printed
+       report header and the dashboard. Written by the tutor, but stored in the
+       same records table every other value comes from, so it gets the same
+       treatment as any record-derived text. */
+    localStorage.setItem("as:student:AS-XSSTEST2", JSON.stringify({ displayName: PAYLOAD }));
+
     $("nameInput").value = "AS-XSSTEST2";
     $("signinBtn").click();
     await wait(900);
 
+    results.push(audit("Home welcome banner (hostile display name)", $("welcomeMsg")));
+    results.push(audit("Home user chip + avatar (hostile display name)",
+      $("homeUserName").parentElement));
     document.querySelector('#practiceSeg .seg-btn[data-seg="past"]').click();
     results.push(audit("Past card (testName, total, timing badge)", $("practiceCards")));
 

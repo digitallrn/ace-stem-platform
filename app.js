@@ -24,6 +24,7 @@
     assignments: null,           // Phase F: assignment objects; null = default all-practice
     activeAssignment: null,      // the assignment the running attempt started through
     pendingStart: null,          // {test, assignment} while the Start Code screen is up
+    displayName: null,           // from the student:<CODE> profile row; null = show the code
     timing: 1,                   // Phase G §1: 1 | 1.5 | 2 | "untimed"
     untimed: false,              // current module runs count-up with no auto-submit
     elapsedSec: 0,               // count-up seconds for untimed modules
@@ -45,6 +46,12 @@
     FLOATING_OVERLAYS.forEach(o => hide(o));
   }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
+
+  /* What the student is shown. The profile row is display-only: state.userName
+     stays the CODE everywhere that records, keys or syncs anything, so no name
+     can reach an attempt record (ATTEMPTS-SPEC §7a). Silently falls back to the
+     code when no profile exists. */
+  function displayLabel(){ return state.displayName || state.userName; }
 
   /* ================= SIGN IN / HOME ================= */
   el("signinBtn").addEventListener("click", doSignin);
@@ -81,10 +88,16 @@
     el("signinError").classList.add("hidden");
     el("nameInput").value = code;
     state.userName = code;
-    el("homeUserName").textContent = state.userName;
-    el("homeAvatar").textContent = state.userName.charAt(0).toUpperCase();
-    el("welcomeMsg").textContent = "Welcome, " + firstName(state.userName) + ". Good luck on test day!";
-    el("tfName").textContent = state.userName;
+    // display name is a separate profile row, fetched by code; absent is fine
+    let prof = null;
+    try{ prof = await AttemptStore.getProfile(code); }catch(e){}
+    state.displayName = (prof && typeof prof.displayName === "string" && prof.displayName.trim())
+      ? prof.displayName.trim() : null;
+    const shown = displayLabel();
+    el("homeUserName").textContent = shown;
+    el("homeAvatar").textContent = shown.charAt(0).toUpperCase();
+    el("welcomeMsg").textContent = "Welcome, " + firstName(shown) + ". Good luck on test day!";
+    el("tfName").textContent = shown;
     // Phase C: an in-progress attempt for this code + test resumes rather
     // than starting fresh (starting over is a tutor-dashboard action)
     state.resumeRecords = {};
@@ -703,7 +716,7 @@
     const ms = currentModState();
 
     el("thTitle").textContent = sectionTitle(mod);
-    el("tfName").textContent = state.userName;
+    el("tfName").textContent = displayLabel();   // real Bluebook shows the name bottom-left
     updateHeaderTools(mod);
 
     const isSpr = q.type === "spr";
@@ -1047,7 +1060,7 @@
   });
 
   function showBreak(){
-    el("brkName").textContent = state.userName;
+    el("brkName").textContent = displayLabel();
     state.breakRemaining = 10 * 60;
     el("brkTimer").classList.remove("hidden");
     el("brkTitle").textContent = "Take a Break";
@@ -1871,7 +1884,7 @@
         <div class="sd-hero-top">
           <div>
             <h1>Score Details</h1>
-            <div class="sd-hero-sub">${escapeHtml(test.testName)} · ${escapeHtml(dateStr)}${badge ? ' · <span class="sd-badge">' + escapeHtml(badge) + '</span>' : ""}</div>
+            <div class="sd-hero-sub"><b>${escapeHtml(displayLabel())}</b>${state.displayName ? ' <span class="sd-code">' + escapeHtml(state.userName) + '</span>' : ""} · ${escapeHtml(test.testName)} · ${escapeHtml(dateStr)}${badge ? ' · <span class="sd-badge">' + escapeHtml(badge) + '</span>' : ""}</div>
           </div>
           <button class="sd-home" id="sdHomeBtn">Return to Home</button>
         </div>
@@ -2147,7 +2160,10 @@
     open(testId, record){
       const test = state.tests.find(t => t.testId === testId);
       if(!test) return false;
+      // admin path: show that student's identity, resolved from their profile
       state.userName = (record.student && record.student.code) || state.userName;
+      state.displayName = (window.Dashboard && Dashboard.nameFor)
+        ? (Dashboard.nameFor(state.userName) || null) : null;
       openScoreDetails(test, record, "dashboard");
       return true;
     }

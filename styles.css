@@ -864,6 +864,8 @@
   .dstatus.warn{ background:#FFF3D6; color:#8A6D00; }
   .dstatus.to{ background:#FBE9EB; color:var(--cb-red); }
   .dstatus.tm{ background:#EDE7FB; color:#4A3A8A; text-transform:none; }
+  /* code shown beside a resolved name — both stay searchable */
+  .dcode{ color:var(--ink-soft); font-size:12px; letter-spacing:.3px; }
   /* score release toggle (Phase D, score-visibility (b)) */
   .dash-rel{
     font-size:12px; font-weight:700; padding:4px 12px; border-radius:16px;
@@ -940,6 +942,9 @@
   .sd-hero-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:20px; }
   .sd-hero h1{ margin:0; font-size:40px; font-weight:400; }
   .sd-hero-sub{ font-size:16px; margin-top:6px; color:#DCE4F8; }
+  /* code stays visible beside the name so a printed report is still matchable
+     back to the pseudonymous records */
+  .sd-code{ opacity:.75; font-size:14px; letter-spacing:.4px; }
   .sd-badge{ background:#EDE7FB; color:#4A3A8A; border-radius:12px; padding:2px 10px; font-size:13px; font-weight:700; }
   .sd-home{ background:rgba(255,255,255,.15); border:1.5px solid rgba(255,255,255,.6); color:#fff;
     border-radius:22px; padding:9px 20px; font-size:14.5px; font-weight:700; flex-shrink:0; }

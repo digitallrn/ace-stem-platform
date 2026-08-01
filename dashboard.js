@@ -22,6 +22,7 @@ window.Dashboard = (function(){
   let assigns = [];              // Phase F §3: [{code, list:[assignment...]}]
   let bugs = [];                 // Phase F §9: bug reports, newest first
   let lastStartCode = null;      // the code David reads aloud, shown big
+  let profiles = {};             // CODE -> displayName, from student:<CODE> rows
   let source = "storage";        // "storage" | "file"
   let tab = "attempts";
   let sortKey = "startedAt", sortDir = -1;
@@ -76,6 +77,16 @@ window.Dashboard = (function(){
     const lbl = timingLabel(t);
     return lbl ? ` <span class="dstatus tm">${esc(lbl)}</span>` : "";
   }
+  /* Codes resolve to names for display only. The code is always shown too, so
+     both stay searchable and a row can still be matched to the pseudonymous
+     records — the name never lives in an attempt. */
+  function nameFor(code){ return profiles[String(code || "").toUpperCase()] || null; }
+  function studentCell(code){
+    const c = String(code || "?");
+    const n = nameFor(c);
+    return n ? `<b>${esc(n)}</b> <span class="dcode">${esc(c)}</span>` : esc(c);
+  }
+
   function givenLabel(entry, q){
     if(entry.given === null || entry.given === undefined) return "—";
     if(q && q.type === "mcq" && typeof entry.given === "number") return String.fromCharCode(65 + entry.given);
@@ -94,6 +105,17 @@ window.Dashboard = (function(){
     $("dashStatus").textContent = local
       ? "Loading attempts saved on this device…"
       : "Loading attempts from shared storage…";
+    /* Remote: pull the server's rows into the local cache first, or the
+       dashboard would only ever list what THIS browser happened to write —
+       records from students' own devices would be invisible. */
+    if(AttemptStore.isRemote() && AttemptStore.hasAuthToken()){
+      try{
+        const n = await AttemptStore.pullAllForTutor();
+        $("dashStatus").textContent = "Pulled " + n + " row(s) from the server…";
+      }catch(e){
+        $("dashStatus").textContent = "Couldn't reach the server — showing what's cached on this device.";
+      }
+    }
     const keys = await AttemptStore.list("attempt:");
     if(keys === null){
       // only reachable when even localStorage is unusable (private mode, quota)
@@ -119,7 +141,16 @@ window.Dashboard = (function(){
   }
 
   async function loadAssignsAndBugs(){
-    assigns = []; bugs = [];
+    assigns = []; bugs = []; profiles = {};
+    /* display-name profiles live in their own rows, never inside attempts */
+    const pKeys = await AttemptStore.list("student:");
+    if(pKeys){
+      for(const k of pKeys){
+        const v = await AttemptStore.get(k);
+        const nm = v && typeof v.displayName === "string" ? v.displayName.trim() : "";
+        if(nm) profiles[k.slice("student:".length).toUpperCase()] = nm;
+      }
+    }
     /* Phase H §3: assignments are one row per assignment
        (assign:<CODE>:<assignmentId>), which is what removes the Phase F
        read-modify-write clobber. Legacy assign:<CODE> arrays still load. */
@@ -298,7 +329,7 @@ window.Dashboard = (function(){
       `</tr></thead><tbody>` +
       sorted.map((r, i) => `
         <tr data-att="${escAttr(r.attemptId)}">
-          <td>${esc(r.student && r.student.code || "?")}</td>
+          <td>${studentCell(r.student && r.student.code)}</td>
           <td>${esc(r.testName || r.testId)}</td>
           <td>${fmtDate(r.startedAt)}</td>
           <td><b>${scoreStr(r)}</b></td>
@@ -518,13 +549,13 @@ window.Dashboard = (function(){
     }));
     const rowsHtml = rows.map(r => {
       if(r.legacy){
-        return `<tr><td>${esc(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>Standard</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
+        return `<tr><td>${studentCell(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>Standard</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
       }
       const a = r.a;
       const st = assignRowStatus(r.code, a);
       const deletable = st === "pending" || st === "expired";
       return `<tr>
-        <td>${esc(r.code)}</td>
+        <td>${studentCell(r.code)}</td>
         <td>${esc((testsById[a.testId] && testsById[a.testId].testName) || a.testId)}</td>
         <td>${esc(a.category || "?")}</td>
         <td>${esc(timingLabel(a.timing) || "Standard")}</td>
@@ -544,6 +575,9 @@ window.Dashboard = (function(){
               <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></label>
             <label>More codes (comma-separated)
               <input id="afFree" placeholder="AS-7K4M9PXR, AS-3TQV8BND" autocomplete="off"></label>
+            <label>Student name (display)
+              <input id="afName" placeholder="Erin K" autocomplete="off"
+                title="Shown to the student and in this dashboard. Stored in its own profile row — never inside an attempt record."></label>
             <label>Test
               <select id="afTest">${(window.TEST_DATA || []).map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
             <label>Category
@@ -565,6 +599,8 @@ window.Dashboard = (function(){
           </div>
           <div class="af-actions">
             <button class="pill" id="afCreateBtn" style="padding:10px 26px;">Create assignment</button>
+            <button class="pill ghost" id="afNameBtn" style="padding:10px 20px;"
+              title="Save just the display name for the selected code(s) — leaves assignments untouched">Save name only</button>
             <span class="dash-hint" id="afMsg"></span>
           </div>
           ${lastStartCode ? `<div class="af-code">Start code — read this aloud<div class="af-code-big">${esc(lastStartCode)}</div></div>` : ""}
@@ -586,13 +622,62 @@ window.Dashboard = (function(){
       </div>`;
   }
 
-  async function createAssignment(){
+  /* Codes chosen in the form: multi-select plus free entry. */
+  function formCodes(){
     const sel = Array.from($("afCodes").selectedOptions).map(o => o.value);
     const free = $("afFree").value.split(/[\s,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
-    const bad = free.filter(c => !StudentCode.valid(c));
+    return { codes: Array.from(new Set(sel.concat(free))),
+             bad: free.filter(c => !StudentCode.valid(c)) };
+  }
+
+  /* Write the display-name profile row. Its own key, its own row — never
+     merged into an attempt (ATTEMPTS-SPEC §7a). Writing goes through the
+     tutor's authenticated table access; there is deliberately no anon RPC for
+     this, so a student can't rename themselves or anyone else. */
+  async function saveProfiles(codes, name){
+    const clean = String(name || "").trim().slice(0, 60);
+    let ok = true;
+    for(const code of codes){
+      const key = "student:" + code;
+      if(clean){
+        if(!(await AttemptStore.setLocal(key, { displayName: clean }))) ok = false;
+        if(AttemptStore.isRemote()){
+          try{ await AttemptStore.adminUpsert(key, code, { displayName: clean }); }
+          catch(e){ ok = false; }
+        }
+        profiles[code] = clean;
+      } else {
+        await AttemptStore.remove(key);                 // blank clears the name
+        if(AttemptStore.isRemote()){
+          try{ await AttemptStore.adminDelete(key); }catch(e){ ok = false; }
+        }
+        delete profiles[code];
+      }
+    }
+    return ok;
+  }
+
+  async function saveNameOnly(){
+    const { codes, bad } = formCodes();
     if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
-    const codes = Array.from(new Set(sel.concat(free)));
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
+    const name = $("afName").value.trim();
+    const ok = await saveProfiles(codes, name);
+    $("dashStatus").textContent = ok
+      ? (name ? "Name saved for " + codes.join(", ") + " — assignments untouched."
+              : "Name cleared for " + codes.join(", ") + " — they'll see their code again.")
+      : "Couldn't save the name — check your tutor sign-in and try again.";
+    await loadAssignsAndBugs();
+    render();
+  }
+
+  async function createAssignment(){
+    const { codes, bad } = formCodes();
+    if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
+    if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
+    // a name typed here is saved as a profile row, separate from the assignment
+    const nameIn = $("afName").value.trim();
+    if(nameIn) await saveProfiles(codes, nameIn);
     const testId = $("afTest").value;
     const category = $("afCat").value;
     const timingRaw = $("afTiming").value;                       // Phase G §1
@@ -766,7 +851,7 @@ window.Dashboard = (function(){
     const canOpen = source === "storage" && test &&
       (test.testVersion || "unversioned") === r.testVersion;
     $("dashDetailBody").innerHTML = `
-      <h2>${esc(r.student && r.student.code || "?")} — ${esc(r.testName || r.testId)}</h2>
+      <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
       <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
         ${r.score && r.score.noKey ? " · " + r.score.noKey + " keyless" : ""} · version ${esc(r.testVersion||"?")}</p>
       ${canOpen ? '<p><button class="dash-rel" id="dashStudentView">Open student view →</button></p>' : ""}
@@ -794,6 +879,8 @@ window.Dashboard = (function(){
       }));
     const cb = $("afCreateBtn");
     if(cb) cb.addEventListener("click", createAssignment);
+    const nb = $("afNameBtn");
+    if(nb) nb.addEventListener("click", saveNameOnly);
     const rb = $("afResetBtn");
     if(rb) rb.addEventListener("click", () => resetToDefault($("afResetCode").value));
     document.querySelectorAll("#dashBody .assign-del").forEach(btn =>
@@ -839,6 +926,7 @@ window.Dashboard = (function(){
   }
 
   return {
+    nameFor: nameFor,
     open(showOnly){
       showOnlyFn = showOnly;
       wire();

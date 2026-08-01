@@ -103,6 +103,18 @@ run it against `dist/index-live.html` after touching any render surface.
 storage-adapter mode resolution; the preview pane strips query strings, so
 the `?devstorage=1` cases can only be checked there.
 
+## Student names vs. records (ATTEMPTS-SPEC §7a)
+Students see a display name, but **records stay pseudonymous**. The name is a
+separate row — key `student:<CODE>`, `owner_code` that code, value
+`{"displayName":"Erin K"}` — and is **never copied into an attempt**, an
+archive or an export. Code→name is a join, not a field, and doing it needs
+either that student's own code (`fn_get_profile`, one row, no enumeration) or
+tutor auth. Writes are tutor-only via the authenticated table path; there is
+no anon write RPC by design, so a student can't rename themselves or anyone
+else. A missing profile silently falls back to the code. Display names are
+untrusted strings on the render surfaces — escape them like any other
+record-derived value.
+
 ## Known limitations (accepted for launch)
 - **Student codes are bearer secrets (remote mode).** There are no student
   accounts by design. The `AS-` + 8-character code (unambiguous alphabet, no

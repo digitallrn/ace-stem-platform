@@ -206,6 +206,52 @@ window.AttemptStore = (function(){
     /* ---- tutor-only table access. RLS grants the authenticated role full
        read/write; anon has no table privileges at all, so these only work
        once signInTutor() has produced a token. ---- */
+    /* Display-name profile for ONE code. Lives in its own row so the name is
+       never inside an attempt record (ATTEMPTS-SPEC §7a). Remote reads go
+       through fn_get_profile, which is scoped to the code supplied and cannot
+       enumerate; the result is cached locally so a later offline sitting still
+       shows the name. Returns null when no profile exists — callers fall back
+       to the code. */
+    async getProfile(code){
+      const c = String(code || "").trim().toUpperCase();
+      const key = "student:" + c;
+      if(isRemote()){
+        try{
+          const rows = await rpc("fn_get_profile", { p_code: c });
+          if(Array.isArray(rows) && rows.length && rows[0] && rows[0].value){
+            const b = backend();
+            if(b) try{ await b.set(key, JSON.stringify(rows[0].value), true); }catch(e){}
+            return rows[0].value;
+          }
+          return null;                       // server says: no profile
+        }catch(e){ /* offline — fall through to whatever we cached */ }
+      }
+      const b = backend();
+      if(!b) return null;
+      try{
+        const r = await b.get(key, true);
+        if(!r || typeof r.value !== "string") return null;
+        return JSON.parse(r.value);
+      }catch(e){ return null; }
+    },
+
+    /* Tutor-only: pull every row the server has into the local cache so the
+       dashboard shows records from ALL devices, not just this one. Without
+       this the dashboard in remote mode only ever listed what this browser
+       happened to write. Cached with a direct backend write so nothing is
+       re-queued for upload. */
+    async pullAllForTutor(){
+      const rows = await httpJson("/rest/v1/records?select=key,owner_code,value", { timeoutMs: 20000 });
+      const b = backend();
+      if(!b || !Array.isArray(rows)) return 0;
+      let n = 0;
+      for(const r of rows){
+        if(!r || !r.key || r.value === undefined) continue;
+        try{ await b.set(r.key, JSON.stringify(r.value), true); n++; }catch(e){}
+      }
+      return n;
+    },
+
     async adminSelectAll(){
       return await httpJson("/rest/v1/records?select=key,owner_code,value", { timeoutMs: 20000 });
     },

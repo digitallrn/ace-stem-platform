@@ -172,6 +172,28 @@ private file on David's machine, never in storage. A leaked record then reads
 score. `displayName` in §2 becomes `studentCode`; §4's alias-merging problem
 mostly disappears, since codes don't have spelling variants.
 
+*Amended 2026-08-01 — display names, without weakening the above.* Students
+now see their own name rather than a bare code, but **attempt records are
+unchanged: they still carry `student.code` and never a name.** The name lives
+in a separate row —
+
+```jsonc
+// key: "student:AS-7K4M9PXR", owner_code: "AS-7K4M9PXR"
+{ "displayName": "Erin K" }
+```
+
+— so code→name is a *join*, not a field, and every archive, export and
+attempt stays code-keyed. Performing that join requires either the student's
+own code (`fn_get_profile(code)`, which returns only that one code's row and
+cannot enumerate) or tutor auth. A leaked attempt record therefore still reads
+"AS-7K4M9PXR scored 1210"; an attacker needs a *second* thing to attach a name
+to it. Writing a profile is tutor-only, through the authenticated table path —
+there is deliberately no anon write RPC, or a student could rename themselves
+or anyone else, and anyone holding a code could plant strings into the tutor's
+dashboard. Display names are untrusted input on the render surfaces and are
+escaped like every other record-derived value (see CLAUDE.md's escaping
+contract).
+
 **(b) Minimize data at rest — also now.** After each test day: download the
 JSON archive, verify it, then delete those keys from storage. The archive on
 David's machine is the record of account; the artifact holds only recent,
