@@ -458,7 +458,6 @@
   /* Stimulus stacked above the stem in the single Math column. */
   .q-stimulus{ margin-bottom:22px; }
   .q-stimulus .passage-text{ max-width:none; }
-  .q-stimulus .spr-dir{ max-width:none; }
   .choice:hover{ background:#FAFAFA; }
   .choice .clabel{
     width:27px; height:27px; border-radius:50%; border:1.5px solid var(--ink); flex-shrink:0;

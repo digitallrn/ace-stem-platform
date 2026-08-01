@@ -50,6 +50,11 @@
     SCREENS.forEach(s => s===id ? show(s) : hide(s));
     FLOATING_OVERLAYS.forEach(o => hide(o));
     el("appTopBar").classList.toggle("hidden", TOPBAR_SCREENS.indexOf(id) === -1);
+    /* Score Details is the parent-facing surface — it gets printed and handed
+       over — so it carries our wordmark rather than the simulated app's. */
+    el("appTopLogo").innerHTML = id === "screen-scoredetails"
+      ? '<span>✦</span>Ace SAT'
+      : '<span>✦</span>Bluebook<sup style="font-size:9px;">™</sup>';
   }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
 
@@ -762,7 +767,12 @@
     const disp = el("timerDisplay");
     disp.classList.toggle("warn", !state.untimed && state.timeRemainingSec <= 300);
     if(state.timerHidden){
-      disp.innerHTML = '<span class="clock-ico">⏱</span>';
+      /* The "Untimed" label stays in both states. It is an accommodation
+         indicator, not the clock, so hiding the time should not hide it — and
+         keeping it reserves the line, which is what stops the header changing
+         height when the student toggles Hide/Show on an untimed module. */
+      disp.innerHTML = (state.untimed ? '<span class="timer-untimed">Untimed</span>' : '') +
+        '<span class="clock-ico">⏱</span>';
     } else {
       // untimed counts up with a small "Untimed" label above the clock (§1)
       disp.innerHTML = (state.untimed ? '<span class="timer-untimed">Untimed</span>' : '') +
@@ -782,9 +792,28 @@
       return `<p>The questions in this section address a number of important reading and writing skills. Each question includes one or more passages, which may include a table or graph. Read each passage and question carefully, and then choose the best answer to the question based on the passage(s).</p>
               <p>All questions in this section are multiple-choice with four answer choices. Each question has a single best answer.</p>`;
     }
+    /* Math directions, per reference 36 — the fuller panel the real app shows:
+       the calculator/reference note, the "unless otherwise indicated"
+       assumptions, then the per-type instructions. */
     return `<p>The questions in this section address a number of important math skills.</p>
-            <p>For multiple-choice questions, solve each problem and choose the correct answer from the choices provided. Each multiple-choice question has a single correct answer.</p>
-            <p>For student-produced response questions, solve each problem and enter your answer. If you find more than one correct answer, enter only one answer. You can enter fractions (such as 7/2) or decimals (such as 3.5).</p>`;
+            <p>Use of a calculator is permitted for all questions. A reference sheet, calculator, and these directions can be accessed throughout the test.</p>
+            <p>Unless otherwise indicated:</p>
+            <ul>
+              <li>All variables and expressions represent real numbers.</li>
+              <li>Figures provided are drawn to scale.</li>
+              <li>All figures lie in a plane.</li>
+              <li>The domain of a given function <i>f</i> is the set of all real numbers <i>x</i> for which <i>f</i>(<i>x</i>) is a real number.</li>
+            </ul>
+            <p>For <b>multiple-choice questions</b>, solve each problem and choose the correct answer from the choices provided. Each multiple-choice question has a single correct answer.</p>
+            <p>For <b>student-produced response questions</b>, solve each problem and enter your answer as described below.</p>
+            <ul>
+              <li>If you find <b>more than one correct answer</b>, enter only one answer.</li>
+              <li>You can enter up to 5 characters for a <b>positive</b> answer and up to 6 characters (including the negative sign) for a <b>negative</b> answer.</li>
+              <li>If your answer is a <b>fraction</b> that doesn't fit in the provided space, enter the decimal equivalent.</li>
+              <li>If your answer is a <b>decimal</b> that doesn't fit in the provided space, enter it by truncating or rounding at the fourth digit.</li>
+              <li>If your answer is a <b>mixed number</b> (such as 3½), enter it as an improper fraction (7/2) or its decimal equivalent (3.5).</li>
+              <li>Don't enter <b>symbols</b> such as a percent sign, comma, or dollar sign.</li>
+            </ul>`;
   }
 
   el("dirToggle").addEventListener("click", ()=>{
@@ -836,6 +865,7 @@
     return !!q.figure && mod.section === "Reading and Writing";
   }
 
+  let lastRenderedQKey = null;   // which question the divider width belongs to
   function renderQuestionView(){
     const mod = currentModule();
     const q = currentQuestion();
@@ -853,16 +883,33 @@
     const isMath = mod.section === "Math";
     // an RW figure opens the stimulus pane even with no passage
     const figLeft = figureGoesLeft(mod, q);
-    const hasLeft = !isMath && (!!q.passage || isSpr || figLeft);
+    /* Math splits only for student-produced response, where the left column
+       carries the directions document (reference 35). Math multiple-choice
+       stays in the single centred column with any stimulus stacked above the
+       stem (reference 22/23). A Math SPR that also has a set-up (s2m1 q4)
+       keeps the directions on the left and stacks its set-up on the right. */
+    const hasLeft = isMath ? isSpr : (!!q.passage || isSpr || figLeft);
     const tBody = el("tBody");
     tBody.classList.toggle("single", !hasLeft);
     tBody.classList.toggle("math", isMath);
+    /* Predictable over clever: the divider recentres on every question change,
+       including coming back to the one it was dragged on — no per-question
+       memory. Keyed on the question, not on the render, because this function
+       also re-runs for in-place updates (flagging, crossing out a choice,
+       adding a note) where yanking the divider back would be maddening. */
+    const qKey = mod.moduleId + "/" + q.id;
+    if(lastRenderedQKey !== qKey){
+      lastRenderedQKey = qKey;
+      el("paneLeft").style.width = "";
+    }
 
     const left = el("paneLeft");
     const right = el("paneRight");
 
     if(!hasLeft){
       left.innerHTML = "";
+    } else if(isMath && isSpr){
+      left.innerHTML = sprDirectionsHtml();
     } else if(q.passage || figLeft){
       const saved = ms.passageHtml[q.id];
       left.innerHTML = (figLeft ? figureFrameHtml(q) : "") +
@@ -896,16 +943,15 @@
     const mod = currentModule();
     // RW figures render in the stimulus pane instead (reference 33)
     const figHtml = figureGoesLeft(mod, q) ? "" : figureFrameHtml(q);
-    /* Math has no second pane, so anything that would have gone there stacks
-       here, above the stem: the set-up text first, then the SPR directions. */
+    /* A Math set-up stacks above the stem, since Math multiple-choice has no
+       second pane and Math SPR gives its left column to the directions
+       document (reference 35). */
     const isMath = mod.section === "Math";
-    const stackedHtml = !isMath ? "" :
-      (q.passage
-        ? '<div class="q-stimulus"><div class="passage-text" id="passageText">' +
-          (ms.passageHtml[q.id] !== undefined
-            ? sanitizeSavedHtml(ms.passageHtml[q.id]) : fmt(q.passage)) + '</div></div>'
-        : "") +
-      (isSpr ? '<div class="q-stimulus spr-dir-stacked">' + sprDirectionsHtml() + '</div>' : "");
+    const stackedHtml = (isMath && q.passage)
+      ? '<div class="q-stimulus"><div class="passage-text" id="passageText">' +
+        (ms.passageHtml[q.id] !== undefined
+          ? sanitizeSavedHtml(ms.passageHtml[q.id]) : fmt(q.passage)) + '</div></div>'
+      : "";
 
     let body;
     if(isSpr){
@@ -1911,7 +1957,14 @@
     divider.addEventListener("pointermove", e=>{
       if(!dragging) return;
       const bodyRect = el("tBody").getBoundingClientRect();
-      let pct = ((e.clientX - bodyRect.left) / bodyRect.width) * 100;
+      /* The notes rail sits BETWEEN the left pane and the divider, so the
+         divider's position is paneLeft + rail. Measuring the cursor from the
+         body's left edge and assigning that straight to paneLeft ignored the
+         rail and pushed the divider a full rail-width (290px) right of the
+         cursor the moment a note existed. Subtract it. */
+      const rail = el("notesRail");
+      const railW = rail.classList.contains("hidden") ? 0 : rail.offsetWidth;
+      let pct = ((e.clientX - bodyRect.left - railW) / bodyRect.width) * 100;
       pct = Math.max(25, Math.min(70, pct));
       el("paneLeft").style.width = pct + "%";
     });
