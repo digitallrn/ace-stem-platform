@@ -360,7 +360,9 @@ window.Dashboard = (function(){
     return keys.map(k => {
       const list = byStudent[k].slice().sort((a,b) => (a.startedAt||"").localeCompare(b.startedAt||""));
       return `<div class="dcard">
-        <h3>${esc(k)} <span class="dcard-sub">${list.length} attempt(s)</span></h3>
+        <h3>${studentCell(k)} <span class="dcard-sub">${list.length} attempt(s)</span>
+          <button class="dash-rel copy-link" data-code="${escAttr(k)}"
+            title="Copy a link that signs this student in">Copy sign-in link</button></h3>
         <table class="dtable slim"><thead><tr><th>Date</th><th>Test</th><th>Score</th><th>RW</th><th>Math</th><th>Status</th><th>Conditions</th></tr></thead><tbody>` +
         list.map(r => {
           const bs = (r.score && r.score.bySection) || {};
@@ -555,7 +557,7 @@ window.Dashboard = (function(){
       const st = assignRowStatus(r.code, a);
       const deletable = st === "pending" || st === "expired";
       return `<tr>
-        <td>${studentCell(r.code)}</td>
+        <td>${studentCell(r.code)} <button class="dash-rel copy-link" data-code="${escAttr(r.code)}" title="Copy a link that signs this student in">Link</button></td>
         <td>${esc((testsById[a.testId] && testsById[a.testId].testName) || a.testId)}</td>
         <td>${esc(a.category || "?")}</td>
         <td>${esc(timingLabel(a.timing) || "Standard")}</td>
@@ -574,7 +576,11 @@ window.Dashboard = (function(){
             <label>Student codes (seen in storage)
               <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></label>
             <label>More codes (comma-separated)
-              <input id="afFree" placeholder="AS-7K4M9PXR, AS-3TQV8BND" autocomplete="off"></label>
+              <span class="af-codegen">
+                <input id="afFree" placeholder="AS-7K4M9PXR, AS-3TQV8BND" autocomplete="off">
+                <button type="button" class="pill ghost" id="afGenBtn"
+                  title="Generate a new unused code (unambiguous alphabet, no O/0/I/1)">Generate</button>
+              </span></label>
             <label>Student name (display)
               <input id="afName" placeholder="Erin K" autocomplete="off"
                 title="Shown to the student and in this dashboard. Stored in its own profile row — never inside an attempt record."></label>
@@ -620,6 +626,58 @@ window.Dashboard = (function(){
             </div>
           </div>` : ""}
       </div>`;
+  }
+
+  /* Every code this dashboard has seen — attempts, assignments and profiles.
+     Used to guarantee a generated code is unused. */
+  function knownCodeSet(){
+    const s = Object.create(null);
+    recs.forEach(r => { const k = r.student && r.student.key; if(k) s[String(k).toUpperCase()] = true; });
+    assigns.forEach(a => { if(a.code) s[String(a.code).toUpperCase()] = true; });
+    Object.keys(profiles).forEach(c => { s[c.toUpperCase()] = true; });
+    return s;
+  }
+
+  /* Generate an unused code. 32^8 ≈ 1.1e12, so a collision is vanishingly
+     unlikely, but checking is free and the failure it prevents — two students
+     sharing a code, and therefore each other's records — is severe. */
+  function generateUnusedCode(){
+    const taken = knownCodeSet();
+    for(let i = 0; i < 50; i++){
+      const c = StudentCode.generate();
+      if(!taken[c]) return c;
+    }
+    return null;
+  }
+
+  function appendGeneratedCode(){
+    const c = generateUnusedCode();
+    if(!c){ $("afMsg").textContent = "Couldn't find an unused code — try again."; return; }
+    const cur = $("afFree").value.trim();
+    $("afFree").value = cur ? cur.replace(/[\s,;]+$/, "") + ", " + c : c;
+    $("afMsg").textContent = "Generated " + c + " — give this to the student.";
+  }
+
+  /* Magic sign-in link. The code goes in the FRAGMENT, never a query string,
+     so it is not sent to the server and stays out of access logs. */
+  function signInLink(code){
+    const base = location.origin + location.pathname.replace(/[^/]*$/, "");
+    return base + "#" + code;
+  }
+  async function copySignInLink(code){
+    const url = signInLink(code);
+    let ok = false;
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(url); ok = true;
+      }
+    }catch(e){}
+    if(!ok){                                   // clipboard blocked: show it to copy by hand
+      window.prompt("Copy this sign-in link for " + code + ":", url);
+    }
+    $("dashStatus").textContent = ok
+      ? "Sign-in link for " + code + " copied — it signs them in and clears itself from the address bar."
+      : "Clipboard unavailable — the link is in the dialog.";
   }
 
   /* Codes chosen in the form: multi-select plus free entry. */
@@ -879,6 +937,13 @@ window.Dashboard = (function(){
       }));
     const cb = $("afCreateBtn");
     if(cb) cb.addEventListener("click", createAssignment);
+    const gb = $("afGenBtn");
+    if(gb) gb.addEventListener("click", appendGeneratedCode);
+    document.querySelectorAll("#dashBody .copy-link").forEach(btn =>
+      btn.addEventListener("click", e => {
+        e.stopPropagation();                   // don't open the row's detail view
+        copySignInLink(btn.dataset.code);
+      }));
     const nb = $("afNameBtn");
     if(nb) nb.addEventListener("click", saveNameOnly);
     const rb = $("afResetBtn");

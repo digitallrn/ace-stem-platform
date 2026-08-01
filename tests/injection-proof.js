@@ -176,6 +176,35 @@
       results.push(audit("Dashboard attempt detail", $("dashDetailBody")));
     }
 
+    /* Magic-link fragment (…/#AS-XXXXXXXX). The fragment is user-controlled
+       input that reaches sign-in, so it is a genuine untrusted surface. The
+       gate is AppMagicLink.parse: anything that is not a well-formed code must
+       be rejected outright and never reach sign-in or the DOM. (Boot also
+       strips the fragment from the address bar; that needs a real page load,
+       so it is verified by navigation rather than here.) */
+    if(window.AppMagicLink){
+      const hostileFragments = [
+        '#' + PAYLOAD,
+        '#AS-7K4M9PXR"><img src=x onerror="window.__XSS_FIRED=true">',
+        "#AS-7K4M9PXR' or '1'='1",
+        '#javascript:alert(1)',
+        '#AS-1234',                       // old short code
+        '#AS-7K4M9PX0',                   // ambiguous 0
+        '#AS-7K4M9PXO',                   // ambiguous O
+        '#../../etc/passwd',
+        '#%3Cscript%3Ealert(1)%3C/script%3E'
+      ];
+      const accepted = hostileFragments.filter(f => window.AppMagicLink.parse(f) !== null);
+      results.push({ surface: "Magic-link fragment rejects hostile input",
+        pass: accepted.length === 0 && !window.__XSS_FIRED,
+        note: accepted.length ? "ACCEPTED: " + accepted.join(" | ")
+                              : hostileFragments.length + " hostile fragments all rejected" });
+      results.push({ surface: "Magic-link fragment still accepts a real code",
+        pass: window.AppMagicLink.parse('#AS-7K4M9PXR') === 'AS-7K4M9PXR' &&
+              window.AppMagicLink.parse('#as-7k4m9pxr') === 'AS-7K4M9PXR',
+        note: "valid codes accepted, lowercase normalised" });
+    }
+
     /* attribute-context regression: escapeHtml must escape quotes, or a
        hostile value planted in value="..." can add its own event handler */
     const probe = document.createElement("div");

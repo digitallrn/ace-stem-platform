@@ -313,6 +313,7 @@
     text-decoration:underline; padding:4px;
   }
   .home-footer{ margin-top:48px; display:flex; justify-content:center; }
+  .home-signout{ margin-left:12px; font-size:12.5px; }
 
   /* device-check rows */
   .devrow{
@@ -888,6 +889,10 @@
     border-radius:10px; font-size:13px; font-weight:700; color:#1E7A43;
   }
   .af-code-big{ font-size:44px; letter-spacing:10px; color:var(--ink); margin-top:4px; }
+  .af-codegen{ display:flex; gap:8px; align-items:center; }
+  .af-codegen input{ flex:1; min-width:0; }
+  .af-codegen .pill{ padding:8px 14px; font-size:12.5px; white-space:nowrap; }
+  .dcard h3 .copy-link{ margin-left:10px; }
   .assign-reset{ margin-top:22px; padding-top:18px; border-top:1px solid var(--line); }
   .assign-reset h3{ margin:0 0 4px; font-size:15px; }
   .assign-reset select{ font-size:13.5px; padding:8px 10px; border:1.5px solid #9AA0AE; border-radius:8px; font-family:var(--sans); }

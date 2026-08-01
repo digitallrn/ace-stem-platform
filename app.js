@@ -53,6 +53,38 @@
      code when no profile exists. */
   function displayLabel(){ return state.displayName || state.userName; }
 
+  /* ---- device session (stay signed in) ----
+     Device-local UI state, not a record, so it lives under its own key rather
+     than going through AttemptStore. Storing the code means anyone with the
+     unlocked device is signed in — the same exposure as a magic link sitting
+     in browser history, and the documented bearer-secret model. Sign out
+     clears it; a student's saved work is never touched. */
+  const SESSION_KEY = "acestem:code";
+  function rememberSession(code){ try{ localStorage.setItem(SESSION_KEY, code); }catch(e){} }
+  function forgetSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+  function storedSession(){
+    try{
+      const c = localStorage.getItem(SESSION_KEY);
+      return StudentCode.valid(c || "") ? StudentCode.normalize(c) : null;
+    }catch(e){ return null; }
+  }
+
+  /* ---- magic link ----
+     A code in the URL FRAGMENT (…/#AS-XXXXXXXX). Fragments are never sent to
+     the server, so codes stay out of access logs, referrers and CDN records —
+     a query string would leak them into all three. The fragment is
+     user-controlled input reaching sign-in, so it is validated against the
+     strict code pattern and otherwise ignored; it is never echoed into the
+     DOM. Exposed for tests. */
+  function parseFragmentCode(raw){
+    const s = StudentCode.normalize(String(raw || "").replace(/^#/, ""));
+    return StudentCode.valid(s) ? s : null;
+  }
+  /* `seen`/`accepted` record what boot observed, so a link that doesn't work
+     can be diagnosed without guessing. The raw value is kept as an inert
+     string and is never rendered. */
+  window.AppMagicLink = { parse: parseFragmentCode, seen: null, accepted: null };
+
   /* ================= SIGN IN / HOME ================= */
   el("signinBtn").addEventListener("click", doSignin);
   el("nameInput").addEventListener("keydown", e => { if(e.key === "Enter") doSignin(); });
@@ -85,8 +117,16 @@
       el("nameInput").focus();
       return;
     }
-    el("signinError").classList.add("hidden");
     el("nameInput").value = code;
+    await signInWithCode(code);
+  }
+
+  /* Shared by all three entry points: typing a code, a magic-link fragment,
+     and restoring a saved device session. Returns false when sign-in could
+     not complete, leaving the student on the sign-in screen with a reason. */
+  async function signInWithCode(code){
+    if(!StudentCode.valid(code)) return false;
+    el("signinError").classList.add("hidden");
     state.userName = code;
     // display name is a separate profile row, fetched by code; absent is fine
     let prof = null;
@@ -112,14 +152,31 @@
       // test) — keep the student at sign-in with a retry rather than guessing
       el("signinError").textContent = "Couldn't reach your assignments. Check your connection and try again.";
       el("signinError").classList.remove("hidden");
-      return;
+      showOnly("screen-signin");
+      return false;
     }
     state.assignments = assigns;
     state.pastAttempts = await Attempts.pastAttempts(code);
     state.practiceTab = "active";
+    rememberSession(code);            // stay signed in on this device
     renderHome();
     showOnly("screen-home");
+    return true;
   }
+
+  /* Student sign-out: forgets the device session only. Their recorded work is
+     untouched — in local mode it is the only copy. */
+  el("homeSignoutBtn").addEventListener("click", ()=>{
+    forgetSession();
+    state.userName = "Student";
+    state.displayName = null;
+    state.assignments = null;
+    state.pastAttempts = [];
+    state.resumeRecords = {};
+    el("nameInput").value = "";
+    el("signinError").classList.add("hidden");
+    showOnly("screen-signin");
+  });
 
   /* ---- Test Your Device pre-flight (Phase F §5) ---- */
   el("tydBtn").addEventListener("click", ()=>{ show("deviceModal"); runDeviceChecks(); });
@@ -2168,5 +2225,25 @@
       return true;
     }
   };
-  showOnly("screen-signin");
+  /* Entry: magic-link fragment beats a saved session, which beats the form.
+     The fragment is stripped from the address bar FIRST — synchronously,
+     before any await — so the code never lingers where it can be shoulder-
+     surfed, bookmarked or pasted onward, and so a reload doesn't re-consume
+     it. Stripping happens whether or not the fragment was a valid code. */
+  (function boot(){
+    const raw = location.hash || "";
+    if(raw){
+      try{ history.replaceState(null, "", location.pathname + location.search); }
+      catch(e){ try{ location.hash = ""; }catch(e2){} }
+    }
+    const fromLink = parseFragmentCode(raw);
+    window.AppMagicLink.seen = raw || null;
+    window.AppMagicLink.accepted = fromLink;
+    const code = fromLink || storedSession();
+    showOnly("screen-signin");
+    if(code){
+      signInWithCode(code).then(ok => { if(!ok) showOnly("screen-signin"); })
+                          .catch(()=> showOnly("screen-signin"));
+    }
+  })();
 })();
