@@ -79,7 +79,12 @@
       conditions: "proctored", startedAt: "2026-07-30T14:00:00.000Z",
       lastSavedAt: "2026-07-30T15:00:00.000Z", submittedAt: "2026-07-30T15:00:00.000Z",
       status: "completed", released: true, modules: [], answers,
-      score: { correct: 0, graded: 98, noKey: 0 }, client: {}
+      /* counts are record-derived too: a crafted record can put markup where a
+         number belongs, and these reach markup without esc() */
+      score: { correct: PAYLOAD, graded: 98, noKey: PAYLOAD,
+        bySection: { "Reading and Writing": { correct: PAYLOAD, graded: "" },
+                     "Math": { correct: PAYLOAD, graded: PAYLOAD } } },
+      client: {}
     }, opts || {}) };
   }
 
@@ -109,6 +114,15 @@
        same records table every other value comes from, so it gets the same
        treatment as any record-derived text. */
     localStorage.setItem("as:student:AS-XSSTEST2", JSON.stringify({ displayName: PAYLOAD }));
+    /* a second hostile profile with NO attempts — renders through the
+       Students tab's zero-attempts card (profile-only union entry) */
+    localStorage.setItem("as:student:AS-PRFLXSS2", JSON.stringify({ displayName: PAYLOAD }));
+    /* hostile CODES living in storage KEY NAMES — shared storage lets anyone
+       write any key, and the Students-tab union now parses codes out of
+       student:<CODE> and assign:<CODE>:<id> keys and renders them as cards */
+    localStorage.setItem("as:student:" + PAYLOAD, JSON.stringify({ displayName: "innocent" }));
+    localStorage.setItem("as:assign:" + PAYLOAD + ":a1",
+      JSON.stringify({ assignmentId: "a1", testId: "x", timing: 1 }));
 
     $("nameInput").value = "AS-XSSTEST2";
     $("signinBtn").click();
@@ -175,6 +189,26 @@
       await wait(300);
       results.push(audit("Dashboard attempt detail", $("dashDetailBody")));
     }
+
+    /* Students tab: the profile-only card (union entry with zero attempts)
+       shows the hostile display name and a copy-link button */
+    document.querySelector('#dashTabs [data-tab="students"]').click();
+    await wait(300);
+    results.push(audit("Students tab incl. profile-only card (hostile name)", $("dashBody")));
+    const pCard = [...document.querySelectorAll("#dashBody .dcard")]
+      .find(c => c.textContent.indexOf("AS-PRFLXSS2") !== -1);
+    results.push({ surface: "Profile-only card renders with copy-link intact",
+      pass: !!pCard && !!pCard.querySelector('.copy-link[data-code="AS-PRFLXSS2"]') &&
+            pCard.textContent.indexOf("0 attempt") !== -1,
+      note: pCard ? "zero-attempts card present, link button targets the code" : "card missing" });
+    /* hostile key-name codes: rendered inert by the dashBody audit above, and
+       an invalid code must never get a sign-in-link button */
+    const hostileLinks = [...document.querySelectorAll("#dashBody .copy-link")]
+      .filter(b => !window.StudentCode.valid(b.dataset.code));
+    results.push({ surface: "No sign-in link for non-code card keys",
+      pass: hostileLinks.length === 0,
+      note: hostileLinks.length ? hostileLinks.length + " link(s) on invalid codes"
+                                : "copy-link only appears on valid AS- codes" });
 
     /* Magic-link fragment (…/#AS-XXXXXXXX). The fragment is user-controlled
        input that reaches sign-in, so it is a genuine untrusted surface. The

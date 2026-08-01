@@ -56,11 +56,21 @@ window.Dashboard = (function(){
     const mid = Math.floor(s.length/2);
     return s.length % 2 ? s[mid] : (s[mid-1]+s[mid])/2;
   }
+  /* Counts read back out of a record are untrusted like any other record value
+     (ATTEMPTS-SPEC §7): a crafted record can put markup where a number belongs,
+     and these reach markup without esc(). Coerce rather than escape — they are
+     numbers or they are nothing. */
+  function num(v){ return typeof v === "number" && isFinite(v) ? v : null; }
+  function countPair(o){
+    const c = num(o && o.correct), g = num(o && o.graded);
+    return (c === null || g === null) ? "—" : c + "/" + g;
+  }
   function scoreStr(r){
-    return (r.score && r.score.graded) ? r.score.correct + "/" + r.score.graded : "—";
+    return num(r.score && r.score.graded) ? countPair(r.score) : "—";
   }
   function scorePct(r){
-    return (r.score && r.score.graded) ? r.score.correct / r.score.graded : -1;
+    const c = num(r.score && r.score.correct), g = num(r.score && r.score.graded);
+    return g ? c / g : -1;
   }
   function statusBadge(r){
     const cls = { "completed":"ok", "in-progress":"warn", "timed-out":"to" }[r.status] || "";
@@ -355,25 +365,58 @@ window.Dashboard = (function(){
       const k = (r.student && r.student.key) || "?";
       (byStudent[k] = byStudent[k] || []).push(r);
     });
+    /* Union in codes known only from assignments or profile rows. A student
+       onboarded as generate code → save name → copy link has neither an
+       attempt nor an assignment yet, and used to be invisible here until
+       their first attempt — a dead end right after "Save name only". The
+       student filter still applies; the test filter only narrows the attempt
+       lists, so a filtered-out student shows an empty card, not no card. */
+    const fs = $("dashFilterStudent").value;
+    const addCode = c => { if(c && (!fs || c === fs)) byStudent[c] = byStudent[c] || []; };
+    recs.forEach(r => addCode(r.student && r.student.key));   // attempts hidden by the test filter
+    /* live-roster students only in the live view — an archive file is a
+       self-contained snapshot, and assigns/profiles still hold live storage */
+    if(source === "storage"){
+      assigns.forEach(a => addCode(a.code));
+      Object.keys(profiles).forEach(addCode);
+    }
     const keys = Object.keys(byStudent).sort();
-    if(!keys.length) return '<p class="dash-empty">No attempts match.</p>';
+    if(!keys.length) return '<p class="dash-empty">No students yet — add codes in the Assign tab.</p>';
     return keys.map(k => {
       const list = byStudent[k].slice().sort((a,b) => (a.startedAt||"").localeCompare(b.startedAt||""));
-      return `<div class="dcard">
-        <h3>${studentCell(k)} <span class="dcard-sub">${list.length} attempt(s)</span>
-          <button class="dash-rel copy-link" data-code="${escAttr(k)}"
-            title="Copy a link that signs this student in">Copy sign-in link</button></h3>
-        <table class="dtable slim"><thead><tr><th>Date</th><th>Test</th><th>Score</th><th>RW</th><th>Math</th><th>Status</th><th>Conditions</th></tr></thead><tbody>` +
+      /* No sign-in link for keys that aren't real codes ("?" grouping, or a
+         hand-written storage key) — parseFragmentCode would reject the link
+         anyway. valid() normalizes before testing, so the link carries the
+         canonical form rather than whatever casing the key happened to use. */
+      const linkBtn = StudentCode.valid(k)
+        ? `<button class="dash-rel copy-link" data-code="${escAttr(StudentCode.normalize(k))}"
+            title="Copy a link that signs this student in">Copy sign-in link</button>` : "";
+      let body;
+      if(list.length){
+        body = `<table class="dtable slim"><thead><tr><th>Date</th><th>Test</th><th>Score</th><th>RW</th><th>Math</th><th>Status</th><th>Conditions</th></tr></thead><tbody>` +
         list.map(r => {
           const bs = (r.score && r.score.bySection) || {};
           const rw = bs["Reading and Writing"], ma = bs["Math"];
           return `<tr data-att="${escAttr(r.attemptId)}">
             <td>${fmtDate(r.startedAt)}</td><td>${esc(r.testName || r.testId)}</td>
             <td><b>${scoreStr(r)}</b></td>
-            <td>${rw ? rw.correct + "/" + rw.graded : "—"}</td>
-            <td>${ma ? ma.correct + "/" + ma.graded : "—"}</td>
+            <td>${countPair(rw)}</td>
+            <td>${countPair(ma)}</td>
             <td>${statusBadge(r)}</td><td>${esc(r.conditions || "unknown")}</td></tr>`;
-        }).join("") + `</tbody></table></div>`;
+        }).join("") + `</tbody></table>`;
+      } else {
+        const hasAny = recs.some(r => r.student && r.student.key === k);
+        const ae = source === "storage" ? assigns.find(a => a.code === k) : null;
+        const assigned = ae ? ae.list.length : 0;
+        body = `<p class="dash-hint">${
+          hasAny ? "No attempts match the current filter."
+          : assigned ? "No attempts yet — " + assigned + " test(s) assigned."
+          : ae && ae.sentinel ? "No attempts yet — assigned nothing, so their home screen is empty."
+          : "No attempts yet — copy the sign-in link to get them started."}</p>`;
+      }
+      return `<div class="dcard">
+        <h3>${studentCell(k)} <span class="dcard-sub">${list.length} attempt(s)</span>
+          ${linkBtn}</h3>` + body + `</div>`;
     }).join("");
   }
 
@@ -911,7 +954,7 @@ window.Dashboard = (function(){
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
       <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
-        ${r.score && r.score.noKey ? " · " + r.score.noKey + " keyless" : ""} · version ${esc(r.testVersion||"?")}</p>
+        ${num(r.score && r.score.noKey) ? " · " + num(r.score.noKey) + " keyless" : ""} · version ${esc(r.testVersion||"?")}</p>
       ${canOpen ? '<p><button class="dash-rel" id="dashStudentView">Open student view →</button></p>' : ""}
       ${versionNote}
       ${(r.modules||[]).map(m => `<span class="dmod">${esc(m.section)} ${esc(m.moduleLabel)}: ${mmss(m.timeSpentSeconds)} (${esc(m.endedBy||"?")})</span>`).join(" ")}
