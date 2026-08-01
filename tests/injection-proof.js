@@ -67,8 +67,12 @@
         else if(i % 4 === 0) given = null;
         else given = q.correctAnswer;
       }
-      answers[q.id] = { given, firstGiven: given, correct: false, markedForReview: false,
-        eliminated: [], timeSpentSeconds: 10, visitCount: 1, changeCount: 0,
+      /* visitCount/changeCount are counts read straight off the record and
+         reach the dashboard detail pane — same class as the score counts, so
+         they carry the payload too. firstGiven differs from given so the
+         "changed ×N" branch (which prints changeCount) actually renders. */
+      answers[q.id] = { given, firstGiven: given === null ? "X" : null, correct: false, markedForReview: false,
+        eliminated: [], timeSpentSeconds: 10, visitCount: PAYLOAD, changeCount: PAYLOAD,
         blankReason: given === null ? "never-answered" : null };
     }));
     return { sprCount, rec: Object.assign({
@@ -248,6 +252,59 @@
               window.AppMagicLink.parse('#as-7k4m9pxr') === 'AS-7K4M9PXR',
         note: "valid codes accepted, lowercase normalised" });
     }
+
+    /* Resume annotations. A highlighted passage is stored AS HTML and put back
+       with innerHTML on resume, so it is the one record-derived value that
+       cannot be escaped — escaping would destroy every highlight. It is
+       sanitized instead. Exercised directly: driving a real resume needs a
+       running module, but the sanitizer is the whole gate. */
+    if(window.AppSanitize){
+      const hostileHtml = [
+        PAYLOAD,
+        '<script>window.__XSS_FIRED=true<\/script>',
+        '<svg onload="window.__XSS_FIRED=true"></svg>',
+        '<span class="hl" onmouseover="window.__XSS_FIRED=true">text</span>',
+        '<iframe src="javascript:window.__XSS_FIRED=true"></iframe>',
+        '<img src=x onerror=window.__XSS_FIRED=true>',
+        '<b style="background:url(javascript:alert(1))">x</b>'
+      ];
+      const probe = document.createElement("div");
+      probe.innerHTML = hostileHtml.map(h => window.AppSanitize.html(h)).join("");
+      document.body.appendChild(probe);
+      await wait(150);                       // let any surviving handler fire
+      /* audit() is not the right assertion here: it treats any surviving <b>
+         as injection, but preserving <b>/<i> is exactly what a passage
+         sanitizer must do. What matters is that nothing can execute or fetch:
+         no executable/embedding element, no event handler, no URL attribute. */
+      const els = [...probe.querySelectorAll("*")];
+      const executable = els.filter(e => /^(SCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
+      const handlers = els.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
+      const urlAttrs = els.filter(e => [...e.attributes].some(a => /^(src|href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name)));
+      results.push({ surface: "Resume annotations: stored passage HTML sanitized",
+        pass: !executable.length && !handlers.length && !urlAttrs.length && !window.__XSS_FIRED,
+        note: executable.length || handlers.length || urlAttrs.length
+          ? `survived: ${executable.length} executable, ${handlers.length} handler(s), ${urlAttrs.length} url attr(s)`
+          : hostileHtml.length + " hostile fragments defused; nothing can execute or fetch" });
+      /* the sanitizer must not be so blunt it eats real highlights or math —
+         a restored passage silently losing them is the failure mode that
+         would go unnoticed */
+      const keep = document.createElement("div");
+      keep.innerHTML = window.AppSanitize.html(
+        '<span class="hl" data-note-id="n1">kept</span> <span class="katex"><span class="mord">x</span></span>');
+      results.push({ surface: "Sanitizer preserves highlights and KaTeX markup",
+        pass: !!keep.querySelector('span.hl[data-note-id="n1"]') && !!keep.querySelector("span.katex .mord") &&
+              keep.textContent.indexOf("kept") !== -1,
+        note: "highlight span, data-note-id and KaTeX spans survive" });
+      probe.remove();
+    }
+
+    /* note ids come back from the same resume blob and land in an ATTRIBUTE */
+    const nprobe = document.createElement("div");
+    nprobe.innerHTML = `<div class="note-card" data-note="${escapeHtml(ATTR_PAY)}"></div>`;
+    const ncard = nprobe.querySelector(".note-card");
+    results.push({ surface: "Resume note id inert in attribute context",
+      pass: !ncard.hasAttribute("onfocus") && ncard.dataset.note === ATTR_PAY,
+      note: "hostile note id stays a data value, round-trips for lookup" });
 
     /* attribute-context regression: escapeHtml must escape quotes, or a
        hostile value planted in value="..." can add its own event handler */

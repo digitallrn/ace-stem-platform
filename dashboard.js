@@ -61,6 +61,8 @@ window.Dashboard = (function(){
      and these reach markup without esc(). Coerce rather than escape — they are
      numbers or they are nothing. */
   function num(v){ return typeof v === "number" && isFinite(v) ? v : null; }
+  /* a single count straight off a record, rendered inertly */
+  function cnt(v){ const n = num(v); return n === null ? "?" : n; }
   function countPair(o){
     const c = num(o && o.correct), g = num(o && o.graded);
     return (c === null || g === null) ? "—" : c + "/" + g;
@@ -938,9 +940,9 @@ window.Dashboard = (function(){
         ${q ? `<div class="qri-qtext">${fmt(q.questionText)}</div>` : ""}
         <div class="qri-meta">
           <b>Answer:</b> ${esc(givenLabel(a, q))}
-          ${a.firstGiven !== null && a.firstGiven !== a.given ? ` <span class="dash-hint">(first: ${esc(givenLabel({given:a.firstGiven}, q))}, changed ×${a.changeCount})</span>` : ""}
+          ${a.firstGiven !== null && a.firstGiven !== a.given ? ` <span class="dash-hint">(first: ${esc(givenLabel({given:a.firstGiven}, q))}, changed ×${cnt(a.changeCount)})</span>` : ""}
           &nbsp;·&nbsp; <b>Key:</b> ${esc(correctLbl)}
-          &nbsp;·&nbsp; ${mmss(a.timeSpentSeconds)} · ${a.visitCount} visit(s)
+          &nbsp;·&nbsp; ${mmss(a.timeSpentSeconds)} · ${cnt(a.visitCount)} visit(s)
           ${a.eliminated && a.eliminated.length ? " · crossed out " + a.eliminated.map(i=>String.fromCharCode(65+i)).join(",") : ""}
           ${a.blankReason ? " · " + esc(a.blankReason) : ""}
         </div>

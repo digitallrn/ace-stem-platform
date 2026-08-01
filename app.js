@@ -91,6 +91,40 @@
      string and is never rendered. */
   window.AppMagicLink = { parse: parseFragmentCode, seen: null, accepted: null };
 
+  /* A highlighted passage is stored AS HTML — the passage element's innerHTML,
+     carrying highlight spans and whatever fmt()/KaTeX rendered — and is put
+     back with innerHTML on resume. It therefore cannot be escaped on the way
+     in: escaping would print the markup as text and destroy every highlight.
+     But a resume blob is read out of a record, and records are untrusted
+     (ATTEMPTS-SPEC §7), so the fragment is sanitized instead.
+     This filters ATTRIBUTES rather than allowlisting tags on purpose: KaTeX
+     emits a wide, version-dependent set of elements (spans, svg, path, MathML)
+     and a tight tag allowlist would silently drop math from a restored
+     passage — the quiet kind of breakage this codebase is most exposed to.
+     Execution and fetching live in the attributes, so those are what go. */
+  /* IMG is dropped rather than merely defanged: figures render in the QUESTION
+     pane (buildQuestionHtml), and fmt() emits no <img> at all, so an image can
+     never legitimately appear in a saved passage — one there came from a
+     crafted record. */
+  const DROP_ELEMENTS = /^(SCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL)$/;
+  const DROP_ATTRS = /^(src|href|xlink:href|srcdoc|srcset|action|formaction|data|background|ping|dynsrc|lowsrc)$/;
+  function sanitizeSavedHtml(html){
+    // a <template>'s content is inert: parsing here runs no script and fetches
+    // nothing, so the payload is defused before it is ever examined
+    const tpl = document.createElement("template");
+    tpl.innerHTML = String(html == null ? "" : html);
+    tpl.content.querySelectorAll("*").forEach(node => {
+      if(DROP_ELEMENTS.test(String(node.tagName).toUpperCase())){ node.remove(); return; }
+      Array.prototype.slice.call(node.attributes).forEach(at => {
+        const n = at.name.toLowerCase();
+        if(n.indexOf("on") === 0 || DROP_ATTRS.test(n)){ node.removeAttribute(at.name); return; }
+        if(n === "style" && /url\s*\(|expression\s*\(|javascript:/i.test(at.value)) node.removeAttribute(at.name);
+      });
+    });
+    return tpl.innerHTML;
+  }
+  window.AppSanitize = { html: sanitizeSavedHtml };
+
   /* ================= SIGN IN / HOME ================= */
   el("signinBtn").addEventListener("click", doSignin);
   el("nameInput").addEventListener("keydown", e => { if(e.key === "Enter") doSignin(); });
@@ -816,7 +850,7 @@
     if(q.passage){
       const saved = ms.passageHtml[q.id];
       left.innerHTML = '<div class="passage-text" id="passageText">' +
-        (saved !== undefined ? saved : fmt(q.passage)) + '</div>';
+        (saved !== undefined ? sanitizeSavedHtml(saved) : fmt(q.passage)) + '</div>';
     } else if(isSpr){
       left.innerHTML = sprDirectionsHtml();
     } else {
@@ -1794,7 +1828,7 @@
 
     const trashSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6"/><path d="M19 6l-1 13.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5L5 6"/><path d="M10 10.5v6M14 10.5v6"/></svg>';
     el("notesCards").innerHTML = notes.map(n => `
-      <div class="note-card" data-note="${n.id}">
+      <div class="note-card" data-note="${escapeHtml(n.id)}">
         <div class="note-head">
           <span class="note-title">${escapeHtml(n.snippet)}</span>
           <button class="note-trash" title="Delete note">${trashSvg}</button>
