@@ -52,10 +52,25 @@ function escapeHtml(str){
     return parts;
   }
 
+  /* Fill-in blanks. Source data writes them as a run of underscores, and how
+     many varies question to question, so the printed blank used to be a
+     different length on every item. Any run of 3+ becomes one fixed-width
+     rule (52px, measured from reference/bluebook-screenshots/33), which is
+     what the real app shows regardless of the underlying text.
+     Escape FIRST, substitute after: the input is already-escaped text, and
+     "_" is not an HTML metacharacter, so no payload can reach the markup
+     through this path. Two underscores or fewer are left alone — those are
+     ordinary text (snake_case in a formula, say), not a blank.
+     Never applied inside {{m}}/{{mm}}: math text is collected by
+     fmtRenderMath and handed to KaTeX raw, where "_" means a subscript. */
+  const BLANK_RE = /_{3,}/g;
+  const BLANK_HTML = '<span class="fmt-blank" aria-label="blank"></span>';
+  function fmtText(s){ return escapeHtml(s).replace(BLANK_RE, BLANK_HTML); }
+
   function fmt(text){
     if(text == null) return "";
     text = String(text);
-    if(text.indexOf("{{") === -1) return escapeHtml(text);   // fast path, incl. all v1.0 data
+    if(text.indexOf("{{") === -1) return fmtText(text);      // fast path, incl. all v1.0 data
     return fmtRenderParts(fmtTokenize(text), { i:0 }, null);
   }
 
@@ -69,7 +84,7 @@ function escapeHtml(str){
         continue;                                            // stray close: ignore
       }
       ptr.i++;
-      if(p.t === "text"){ out += escapeHtml(p.s); }
+      if(p.t === "text"){ out += fmtText(p.s); }
       else if(p.t === "void"){ if(p.n === "br") out += "<br>"; }  // {{row}} outside a table: drop
       else if(p.n === "u"){ out += "<u>" + fmtRenderParts(parts, ptr, "u") + "</u>"; }
       else if(p.n === "i"){ out += "<i>" + fmtRenderParts(parts, ptr, "i") + "</i>"; }

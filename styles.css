@@ -450,6 +450,15 @@
     border-radius:8px; padding:12px 16px; font-family:var(--serif); font-size:16.5px; line-height:1.45;
     background:#fff; cursor:pointer; position:relative;
   }
+  /* Math choices read at the stem's size. They were a point smaller, which is
+     barely visible in prose but obvious in KaTeX — a fraction or exponent in a
+     choice came out noticeably smaller than the same expression in the stem
+     (reference 22/23 sets them equal). Scoped to Math so RW is untouched. */
+  .t-body.math .choice{ font-size:17.5px; }
+  /* Stimulus stacked above the stem in the single Math column. */
+  .q-stimulus{ margin-bottom:22px; }
+  .q-stimulus .passage-text{ max-width:none; }
+  .q-stimulus .spr-dir{ max-width:none; }
   .choice:hover{ background:#FAFAFA; }
   .choice .clabel{
     width:27px; height:27px; border-radius:50%; border:1.5px solid var(--ink); flex-shrink:0;
@@ -798,6 +807,12 @@
   .fmt-bullets{ margin:10px 0; padding-left:40px; list-style:disc; }
   .fmt-bullets li{ margin:6px 0; padding-left:3px; }
   .fmt-quote{ margin:10px 0 10px 40px; }
+  /* Fill-in blank: one fixed width test-wide, however many underscores the
+     source data happens to carry (52px, measured from reference 33). */
+  .fmt-blank{
+    display:inline-block; width:52px; border-bottom:2px solid currentColor;
+    margin:0 2px; vertical-align:baseline;
+  }
   .fmt-credit{ margin-top:16px; text-align:right; font-size:14.5px; }
 
   .fig-frame{ border:1px solid #9a9a9a; border-radius:6px; max-width:520px; margin:0 auto 26px; background:#fff; }
@@ -808,7 +823,12 @@
   .fig-toolbar button{ background:none; border:none; font-size:14px; font-weight:700; }
   .fig-toolbar .sep{ width:1px; height:16px; background:#ccc; }
   .fig-imgwrap{ overflow:auto; max-height:380px; padding:14px; text-align:center; }
-  .fig-imgwrap img{ width:100%; }
+  /* Fit on first view: at 100% the whole diagram is visible inside the frame,
+     no scrolling. width:auto with both caps keeps the aspect ratio rather than
+     letterboxing. Zooming past 100% sets an explicit width and clears the
+     height cap (attachFigureHandlers), so the frame scrolls only once the
+     student has asked for a closer look. */
+  .fig-imgwrap img{ width:auto; max-width:100%; max-height:340px; }
   .fig-caption{ font-family:var(--serif); text-align:center; padding:0 12px 14px; font-size:15.5px; }
   .fig-overlay{
     position:fixed; inset:0; background:rgba(40,40,40,.55); z-index:120;

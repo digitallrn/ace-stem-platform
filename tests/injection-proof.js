@@ -254,6 +254,41 @@
                             : tokenCases.length + " token surfaces render payload as inert text" });
     tokenProbe.remove();
 
+    /* Fill-in blanks: fmt() now rewrites runs of 3+ underscores into markup,
+       which puts a substitution AFTER escaping on every text path including
+       the no-token fast path. Escaping must still win. */
+    const blankProbe = document.createElement("div");
+    document.body.appendChild(blankProbe);
+    const blankCases = [
+      PAYLOAD + " ___",                       // payload beside a blank, fast path
+      "___" + PAYLOAD,                        // payload immediately after one
+      "{{i}}" + PAYLOAD + "{{/i}} ____",      // and on the tokenized path
+      "___<img src=x onerror=window.__XSS_FIRED=true>___"
+    ];
+    const blankBad = [];
+    blankCases.forEach(src => {
+      blankProbe.innerHTML = fmt(src);
+      const inert = !blankProbe.querySelector('img[src="x"]') &&
+                    ![...blankProbe.querySelectorAll("*")].some(e =>
+                      [...e.attributes].some(a => /^on/i.test(a.name))) &&
+                    !!blankProbe.querySelector("span.fmt-blank");
+      if(!inert) blankBad.push(src.slice(0, 24));
+    });
+    await wait(120);
+    results.push({ surface: "fmt() blank substitution stays escape-first",
+      pass: blankBad.length === 0 && !window.__XSS_FIRED,
+      note: blankBad.length ? "leaked: " + blankBad.join(" | ")
+                            : blankCases.length + " payload+blank combinations inert, blank still rendered" });
+    /* a blank must be uniform regardless of underscore count — the whole point */
+    const widths = ["___", "_____", "____________"].map(u => {
+      blankProbe.innerHTML = fmt("x " + u + " y");
+      return blankProbe.querySelector("span.fmt-blank").getBoundingClientRect().width;
+    });
+    results.push({ surface: "Blank width is uniform across underscore counts",
+      pass: widths.every(w => Math.abs(w - widths[0]) < 0.5 && w > 0),
+      note: "widths: " + widths.map(w => Math.round(w)).join(", ") });
+    blankProbe.remove();
+
     /* Magic-link fragment (…/#AS-XXXXXXXX). The fragment is user-controlled
        input that reaches sign-in, so it is a genuine untrusted surface. The
        gate is AppMagicLink.parse: anything that is not a well-formed code must

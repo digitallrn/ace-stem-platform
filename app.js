@@ -846,16 +846,24 @@
     updateHeaderTools(mod);
 
     const isSpr = q.type === "spr";
+    /* Math never splits the pane (reference 22/23): whatever a Math question
+       carries — a table, a figure, a text set-up, the SPR directions — stacks
+       above the stem in the one centred column. Only Reading and Writing puts
+       a stimulus beside the question. */
+    const isMath = mod.section === "Math";
     // an RW figure opens the stimulus pane even with no passage
     const figLeft = figureGoesLeft(mod, q);
-    const hasLeft = !!q.passage || isSpr || figLeft;
+    const hasLeft = !isMath && (!!q.passage || isSpr || figLeft);
     const tBody = el("tBody");
     tBody.classList.toggle("single", !hasLeft);
+    tBody.classList.toggle("math", isMath);
 
     const left = el("paneLeft");
     const right = el("paneRight");
 
-    if(q.passage || figLeft){
+    if(!hasLeft){
+      left.innerHTML = "";
+    } else if(q.passage || figLeft){
       const saved = ms.passageHtml[q.id];
       left.innerHTML = (figLeft ? figureFrameHtml(q) : "") +
         (q.passage
@@ -885,8 +893,19 @@
     const flagged = ms.flags.has(q.id);
     const abcOn = state.elimMode && !isSpr;
 
+    const mod = currentModule();
     // RW figures render in the stimulus pane instead (reference 33)
-    const figHtml = figureGoesLeft(currentModule(), q) ? "" : figureFrameHtml(q);
+    const figHtml = figureGoesLeft(mod, q) ? "" : figureFrameHtml(q);
+    /* Math has no second pane, so anything that would have gone there stacks
+       here, above the stem: the set-up text first, then the SPR directions. */
+    const isMath = mod.section === "Math";
+    const stackedHtml = !isMath ? "" :
+      (q.passage
+        ? '<div class="q-stimulus"><div class="passage-text" id="passageText">' +
+          (ms.passageHtml[q.id] !== undefined
+            ? sanitizeSavedHtml(ms.passageHtml[q.id]) : fmt(q.passage)) + '</div></div>'
+        : "") +
+      (isSpr ? '<div class="q-stimulus spr-dir-stacked">' + sprDirectionsHtml() + '</div>' : "");
 
     let body;
     if(isSpr){
@@ -932,6 +951,7 @@
         ${isSpr ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
       </div>
       ${figHtml}
+      ${stackedHtml}
       <div class="q-text">${fmt(q.questionText)}</div>
       ${body}`;
   }
@@ -1578,7 +1598,15 @@
     if(!q.figure) return;
     let pct = 100;
     const img = el("figImg");
-    const apply = ()=>{ img.style.width = pct + "%"; el("figPct").textContent = pct + "%"; };
+    /* At 100% the CSS fit rules own the size, so the whole diagram is visible
+       without scrolling. Any other zoom level is an explicit request for a
+       different size, so the width is set and the height cap released — that
+       is the only point at which the frame is allowed to scroll. */
+    const apply = ()=>{
+      if(pct === 100){ img.style.width = ""; img.style.maxHeight = ""; }
+      else { img.style.width = pct + "%"; img.style.maxHeight = "none"; }
+      el("figPct").textContent = pct + "%";
+    };
     el("figZin").addEventListener("click", ()=>{ pct = Math.min(300, pct + 25); apply(); });
     el("figZout").addEventListener("click", ()=>{ pct = Math.max(50, pct - 25); apply(); });
     el("figReset").addEventListener("click", ()=>{ pct = 100; apply(); });
