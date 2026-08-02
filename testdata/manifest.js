@@ -31,7 +31,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202606asiav2",
   "testName": "2026 June Asia v2",
-  "testVersion": "2026-08-02-a",
+  "testVersion": "2026-08-02-b",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
