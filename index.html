@@ -94,7 +94,10 @@
      Details show the same one element — showOnly() decides when it appears.
      In-test chrome keeps its own header and is deliberately not sticky. -->
 <div class="home-top hidden" id="appTopBar">
-  <div class="bb-logo-sm" id="appTopLogo"><span>✦</span>Bluebook<sup style="font-size:9px;">™</sup></div>
+  <!-- Both screens this bar appears on (home, Score Details) are ours, so the
+       wordmark is static. The simulated Bluebook wordmark lives only in the
+       in-test header. -->
+  <div class="bb-logo-sm" id="appTopLogo"><span>✦</span>Ace SAT</div>
     <!-- local mode indicator: records live on this device only, never synced -->
     <span class="local-tag hidden" id="localModeTag" title="This copy stores results in this browser. Download your results to hand them to your tutor.">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>
@@ -104,7 +107,10 @@
     <span class="local-tag sync-tag hidden" id="syncTag" title="Your work saves on this device first and syncs to your tutor in the background.">
       <span class="sync-dot" id="syncDot"></span><span id="syncTagText">Synced</span>
     </span>
-  <div class="home-user"><span id="homeUserName">Student</span><span class="avatar" id="homeAvatar">S</span>
+  <div class="home-user">
+    <!-- a real <button> so the Score Details "back" affordance is keyboard
+         reachable; showOnly() disables it on screens where it has nowhere to go -->
+    <button class="user-chip" id="userChipBtn" type="button"><span id="homeUserName">Student</span><span class="avatar" id="homeAvatar">S</span></button>
     <button class="linklike home-signout" id="homeSignoutBtn" title="Forget this code on this device">Sign out</button></div>
 </div>
 

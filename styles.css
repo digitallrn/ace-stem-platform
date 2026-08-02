@@ -110,6 +110,18 @@
     border-radius:14px; padding:5px 13px; margin:0 auto 0 18px;
   }
   .home-user{ display:flex; align-items:center; gap:10px; font-weight:700; }
+  /* The name + avatar. A button so it can carry the Score Details "back"
+     action, but styled as the plain chip it has always been — inheriting type
+     and colour, with no button chrome. */
+  .user-chip{
+    display:flex; align-items:center; gap:10px; background:none; border:none;
+    padding:0; font:inherit; font-weight:700; color:inherit; border-radius:20px;
+  }
+  .user-chip:disabled{ opacity:1; }             /* home: inert, but not greyed */
+  .home-top.on-scoredetails .user-chip{ cursor:pointer; }
+  .home-top.on-scoredetails .user-chip:hover{ text-decoration:underline; }
+  .home-top.on-scoredetails .user-chip:hover .avatar{ filter:brightness(1.12); }
+  .user-chip:focus-visible{ outline:2px solid var(--cb-blue); outline-offset:3px; }
   .home-user .avatar{
     width:36px; height:36px; border-radius:50%; background:var(--cb-blue); color:#fff;
     display:flex; align-items:center; justify-content:center; font-size:15px;

@@ -58,12 +58,19 @@
   function showOnly(id){
     SCREENS.forEach(s => s===id ? show(s) : hide(s));
     FLOATING_OVERLAYS.forEach(o => hide(o));
+    const onScoreDetails = id === "screen-scoredetails";
     el("appTopBar").classList.toggle("hidden", TOPBAR_SCREENS.indexOf(id) === -1);
-    /* Score Details is the parent-facing surface — it gets printed and handed
-       over — so it carries our wordmark rather than the simulated app's. */
-    el("appTopLogo").innerHTML = id === "screen-scoredetails"
-      ? '<span>✦</span>Ace SAT'
-      : '<span>✦</span>Bluebook<sup style="font-size:9px;">™</sup>';
+    /* The wordmark is now static markup: this bar only ever shows on home and
+       Score Details, and both carry OUR brand — the simulated app's wordmark
+       belongs to the in-test chrome, which has its own header and is
+       untouched. (It used to switch per screen, which is why it was set here.)
+       The user chip doubles as a way back from Score Details, so it is only
+       interactive there; disabled elsewhere keeps it out of the tab order
+       rather than offering a control that does nothing on home. */
+    el("appTopBar").classList.toggle("on-scoredetails", onScoreDetails);
+    const chip = el("userChipBtn");
+    chip.disabled = !onScoreDetails;
+    chip.title = onScoreDetails ? "Return to home" : "";
   }
   function firstName(n){ return n.trim().split(/\s+/)[0] || "Student"; }
 
@@ -2657,6 +2664,23 @@
     return q.type === "spr" ? String(q.correctAnswer) : String.fromCharCode(65 + q.correctAnswer);
   }
 
+  /* Leaving Score Details. Two affordances share it: the Back button inside
+     the page, and the name + avatar chip in the top bar. Both honour where
+     the student (or tutor) came from — a dashboard-origin visit returns to
+     the dashboard, so the chip can never strand a tutor in the student app.
+     Wired ONCE, because the chip lives in the persistent top bar rather than
+     inside sdRoot: attaching it in renderScoreDetails would stack a listener
+     on every re-render. */
+  function leaveScoreDetails(){
+    if(sdCtx && sdCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }
+    renderHome(); showOnly("screen-home");
+  }
+  el("userChipBtn").addEventListener("click", ()=>{
+    // showOnly disables the chip off Score Details; belt and braces
+    if(el("screen-scoredetails").classList.contains("hidden")) return;
+    leaveScoreDetails();
+  });
+
   /* Reviewing needs the questions too, so it goes through the same gate. In
      practice the content is already cached from the sitting, so this resolves
      without a fetch — but a student reviewing on a different device still gets
@@ -2796,10 +2820,7 @@
       </div>`;
 
     el("sdHomeBtn").textContent = sdCtx.origin === "dashboard" ? "Back to Dashboard" : "Return to Home";
-    el("sdHomeBtn").addEventListener("click", ()=>{
-      if(sdCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }
-      renderHome(); showOnly("screen-home");
-    });
+    el("sdHomeBtn").addEventListener("click", leaveScoreDetails);
     el("sdReviewAllBtn").addEventListener("click", ()=> openReviewMode(0, 0));
     // one delegated handler for every chip: open review at that question
     el("sdModStrips").addEventListener("click", e=>{
