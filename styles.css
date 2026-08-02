@@ -871,15 +871,42 @@
     .welcome-band h1{ font-size:28px; }
   }
   /* ---- schema v1.1 rich content ---- */
-  .fmt-table{ border-collapse:collapse; margin:10px 0; background:#fff; }
+  /* Table: lighter rules and tighter cells than the old 1.5px/#333 block, which
+     read heavier than anything in the reference set. The header is a notch
+     smaller and tighter still — a wide header label ("Estimated electricity…")
+     was forcing the whole column wider than its data needed. */
+  .fmt-table{ border-collapse:collapse; margin:12px auto; background:#fff; }
   .fmt-table th, .fmt-table td{
-    border:1.5px solid #333; padding:6px 16px; text-align:center;
-    white-space:normal; font-size:inherit;
+    border:1px solid #8a8a8a; padding:7px 14px; text-align:center;
+    white-space:normal; font-size:inherit; line-height:1.4;
   }
-  .fmt-table th{ font-weight:700; }
+  .fmt-table th{
+    font-weight:700; font-size:0.88em; line-height:1.25; padding:6px 10px;
+    vertical-align:bottom;
+  }
+  /* A note that belongs to the table above it: smaller, tucked close, and
+     centred with it. Negative top margin pulls it against the table's bottom
+     rule rather than floating a paragraph-gap away. */
+  .fmt-tnote{
+    margin:-6px auto 12px; font-size:0.82em; line-height:1.35;
+    color:var(--ink-soft); text-align:center; max-width:520px;
+  }
   .katex{ font-size:1.08em; }
   .katex-display{ margin:10px 0; }
   .ctext .katex-display{ margin:2px 0; text-align:left; }
+  /* Lead-in: display math or a table that opens a stem, set apart and centred
+     above the prose (reference 35, where the equation's midpoint matches the
+     column's to the pixel). Equations a touch larger than the stem, as there. */
+  .q-lead{
+    /* same type base as the stem, so the multiplier below is measured against
+       the stem's math rather than the pane's default 16px */
+    font-family:var(--serif); font-size:17.5px;
+    text-align:center; margin:2px 0 20px;
+  }
+  .q-lead .katex{ font-size:1.18em; }
+  .q-lead .katex-display{ margin:6px 0; }
+  .q-lead .katex-display + .katex-display{ margin-top:2px; }  /* systems stay one block */
+  .q-lead .fmt-table{ margin:0 auto; }
   .katex-fallback{ font-family:ui-monospace,Menlo,Consolas,monospace; background:#f4f4f6;
     border:1px dashed #bbb; border-radius:4px; padding:0 4px; }
   .qri-badge.nokey{ background:#e8e8ee; color:#555; }

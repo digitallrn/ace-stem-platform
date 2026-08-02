@@ -241,15 +241,21 @@
       ["{{bullets}}", "Notes:{{bullets}}" + PAYLOAD + "{{item}}second{{/bullets}}", "ul.fmt-bullets li"],
       ["{{quote}}",   "{{quote}}" + PAYLOAD + "{{/quote}}",   "div.fmt-quote"],
       ["{{credit}}",  "{{credit}}" + PAYLOAD + "{{/credit}}", "div.fmt-credit"],
+      ["{{tnote}}",   "{{tnote}}" + PAYLOAD + "{{/tnote}}",   "div.fmt-tnote"],
+      // display-style inline math is a second render path through KaTeX
+      ["bigInline math", "{{m}}\\frac{1}{2}{{/m}} " + PAYLOAD, "span.katex"],
       ["nested in bullets", "{{bullets}}{{i}}" + PAYLOAD + "{{/i}}{{item}}x{{/bullets}}", "ul.fmt-bullets li i"]
     ];
     const tokenProbe = document.createElement("div");
     document.body.appendChild(tokenProbe);
     const tokenBad = [];
     tokenCases.forEach(([label, src, sel]) => {
-      tokenProbe.innerHTML = fmt(src);
+      tokenProbe.innerHTML = fmt(src) + fmt(src, {bigInline:true});
+      /* The wrapper must render, and the payload must survive as inert TEXT
+         somewhere in the probe — not necessarily inside the wrapper: in the
+         math case the payload sits after the KaTeX span, not within it. */
       const wrapper = tokenProbe.querySelector(sel);
-      const inert = !!wrapper && wrapper.textContent.indexOf("PWN") !== -1 &&
+      const inert = !!wrapper && tokenProbe.textContent.indexOf("PWN") !== -1 &&
                     !tokenProbe.querySelector('img[src="x"]') &&
                     ![...tokenProbe.querySelectorAll("*")].some(e => [...e.attributes].some(a => /^on/i.test(a.name)));
       if(!inert) tokenBad.push(label);

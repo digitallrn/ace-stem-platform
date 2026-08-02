@@ -16,6 +16,8 @@ function escapeHtml(str){
              {{table}} cells | cells {{row}} … {{/table}}
              {{bullets}} item {{item}} item {{/bullets}}   (reference 34)
              {{quote}}…{{/quote}}  {{credit}}…{{/credit}}  (reference 31)
+             {{tnote}}…{{/tnote}}  — a source/units note that belongs to the
+             table immediately above it: smaller, tucked close, no gap.
      Escape-first design: prose is escapeHtml'd, math goes raw to KaTeX
      (KaTeX escapes its own output), tokens become markup. v1.0 data with
      no tokens takes the fast path and renders exactly as before.
@@ -23,14 +25,21 @@ function escapeHtml(str){
      a paired container with a void separator, so the tokenizer and the
      converter's validation rules need no new shape. A name this table does
      not list stays literal text and is escaped — old data is unaffected. */
-  const FMT_TOKEN_RE = /\{\{(\/?)(br|u|i|m|mm|table|row|bullets|item|quote|credit)\}\}/g;
+  const FMT_TOKEN_RE = /\{\{(\/?)(br|u|i|m|mm|table|row|bullets|item|quote|credit|tnote)\}\}/g;
 
-  function renderKatex(tex, display){
+  /* `bigInline` renders inline math in display STYLE without turning it into a
+     block: KaTeX's text style shrinks a \frac's numerator and denominator, so a
+     stacked fraction in an answer choice came out visibly squashed next to the
+     same fraction in the stem. \displaystyle restores full height and leaves it
+     inline. Opt-in per call site — prose keeps text style, or every fraction in
+     a sentence would blow the line height apart. */
+  function renderKatex(tex, display, bigInline){
     if(typeof katex === "undefined"){
       return '<span class="katex-fallback">' + escapeHtml(tex) + '</span>';
     }
     try{
-      return katex.renderToString(tex, { throwOnError:false, displayMode:!!display });
+      const src = (!display && bigInline) ? "\\displaystyle " + tex : tex;
+      return katex.renderToString(src, { throwOnError:false, displayMode:!!display });
     }catch(e){
       return '<span class="katex-fallback">' + escapeHtml(tex) + '</span>';
     }
@@ -67,14 +76,17 @@ function escapeHtml(str){
   const BLANK_HTML = '<span class="fmt-blank" aria-label="blank"></span>';
   function fmtText(s){ return escapeHtml(s).replace(BLANK_RE, BLANK_HTML); }
 
-  function fmt(text){
+  /* opts.bigInline — render inline {{m}} in display style. Callers that show
+     math on its own line (answer choices) pass it; prose does not. */
+  function fmt(text, opts){
     if(text == null) return "";
     text = String(text);
     if(text.indexOf("{{") === -1) return fmtText(text);      // fast path, incl. all v1.0 data
-    return fmtRenderParts(fmtTokenize(text), { i:0 }, null);
+    return fmtRenderParts(fmtTokenize(text), { i:0 }, null, opts || {});
   }
 
-  function fmtRenderParts(parts, ptr, stopName){
+  function fmtRenderParts(parts, ptr, stopName, opts){
+    opts = opts || {};
     let out = "";
     while(ptr.i < parts.length){
       const p = parts[ptr.i];
@@ -86,18 +98,19 @@ function escapeHtml(str){
       ptr.i++;
       if(p.t === "text"){ out += fmtText(p.s); }
       else if(p.t === "void"){ if(p.n === "br") out += "<br>"; }  // {{row}} outside a table: drop
-      else if(p.n === "u"){ out += "<u>" + fmtRenderParts(parts, ptr, "u") + "</u>"; }
-      else if(p.n === "i"){ out += "<i>" + fmtRenderParts(parts, ptr, "i") + "</i>"; }
-      else if(p.n === "m" || p.n === "mm"){ out += fmtRenderMath(parts, ptr, p.n); }
-      else if(p.n === "table"){ out += fmtRenderTable(parts, ptr); }
-      else if(p.n === "bullets"){ out += fmtRenderBullets(parts, ptr); }
-      else if(p.n === "quote"){ out += '<div class="fmt-quote">' + fmtRenderParts(parts, ptr, "quote") + "</div>"; }
-      else if(p.n === "credit"){ out += '<div class="fmt-credit">' + fmtRenderParts(parts, ptr, "credit") + "</div>"; }
+      else if(p.n === "u"){ out += "<u>" + fmtRenderParts(parts, ptr, "u", opts) + "</u>"; }
+      else if(p.n === "i"){ out += "<i>" + fmtRenderParts(parts, ptr, "i", opts) + "</i>"; }
+      else if(p.n === "m" || p.n === "mm"){ out += fmtRenderMath(parts, ptr, p.n, opts); }
+      else if(p.n === "table"){ out += fmtRenderTable(parts, ptr, opts); }
+      else if(p.n === "bullets"){ out += fmtRenderBullets(parts, ptr, opts); }
+      else if(p.n === "quote"){ out += '<div class="fmt-quote">' + fmtRenderParts(parts, ptr, "quote", opts) + "</div>"; }
+      else if(p.n === "credit"){ out += '<div class="fmt-credit">' + fmtRenderParts(parts, ptr, "credit", opts) + "</div>"; }
+      else if(p.n === "tnote"){ out += '<div class="fmt-tnote">' + fmtRenderParts(parts, ptr, "tnote", opts) + "</div>"; }
     }
     return out;
   }
 
-  function fmtRenderMath(parts, ptr, name){
+  function fmtRenderMath(parts, ptr, name, opts){
     let buf = "";
     while(ptr.i < parts.length){
       const p = parts[ptr.i++];
@@ -105,7 +118,7 @@ function escapeHtml(str){
       if(p.t === "text") buf += p.s;
       else buf += "{{" + (p.t === "close" ? "/" : "") + p.n + "}}";  // defensive: keep strays literal
     }
-    return renderKatex(buf, name === "mm");
+    return renderKatex(buf, name === "mm", !!(opts && opts.bigInline));
   }
 
   /* {{bullets}} a {{item}} b {{/bullets}} — same shape as fmtRenderTable, one
@@ -113,7 +126,7 @@ function escapeHtml(str){
      render inside a bullet. Unlike the table there is no '|' cell delimiter,
      so math needs no special-casing here. Empty items are dropped, which is
      what makes a trailing "{{item}}{{/bullets}}" harmless. */
-  function fmtRenderBullets(parts, ptr){
+  function fmtRenderBullets(parts, ptr, opts){
     const items = [[]];
     while(ptr.i < parts.length){
       const p = parts[ptr.i];
@@ -123,13 +136,13 @@ function escapeHtml(str){
       items[items.length - 1].push(p);
     }
     const lis = items
-      .map(ip => fmtRenderParts(ip, { i:0 }, null).trim())
+      .map(ip => fmtRenderParts(ip, { i:0 }, null, opts).trim())
       .filter(s => s !== "");
     if(!lis.length) return "";
     return '<ul class="fmt-bullets"><li>' + lis.join("</li><li>") + "</li></ul>";
   }
 
-  function fmtRenderTable(parts, ptr){
+  function fmtRenderTable(parts, ptr, opts){
     const rows = [[[]]];                                     // rows → cells → part arrays
     const curRow = () => rows[rows.length - 1];
     const curCell = () => { const r = curRow(); return r[r.length - 1]; };
@@ -160,7 +173,7 @@ function escapeHtml(str){
     for(let r = 0; r < rows.length; r++){
       const tag = r === 0 ? "th" : "td";
       html += "<tr>" + rows[r].map(cellParts =>
-        "<" + tag + ">" + fmtRenderParts(cellParts, { i:0 }, null).trim() + "</" + tag + ">"
+        "<" + tag + ">" + fmtRenderParts(cellParts, { i:0 }, null, opts).trim() + "</" + tag + ">"
       ).join("") + "</tr>";
     }
     return html + "</table>";

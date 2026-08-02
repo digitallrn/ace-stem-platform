@@ -1245,6 +1245,23 @@
     Attempts.questionShown(q.id);      // no-op on re-renders of the same question
   }
 
+  /* A stem that OPENS with display math or a table is a lead-in: the real app
+     sets it apart as its own centred block above the prose, rather than
+     letting it sit inside the sentence flow (reference 35). A run of them
+     stays one block, which is what keeps a two-line system together.
+     Only leading {{mm}}/{{table}} qualify — inline {{m}} opening a sentence
+     ("{{m}}f{{/m}} is defined by…") is prose and must not be hoisted. */
+  const LEAD_IN_RE = /^(?:\s*(?:\{\{mm\}\}[\s\S]*?\{\{\/mm\}\}|\{\{table\}\}[\s\S]*?\{\{\/table\}\})\s*(?:\{\{br\}\})*)+/;
+  function stemHtml(questionText){
+    const qt = String(questionText == null ? "" : questionText);
+    const m = LEAD_IN_RE.exec(qt);
+    if(!m || !m[0].trim()) return '<div class="q-text">' + fmt(qt) + '</div>';
+    const rest = qt.slice(m[0].length);
+    if(!rest.trim()) return '<div class="q-text">' + fmt(qt) + '</div>';  // math IS the stem
+    return '<div class="q-lead">' + fmt(m[0]) + '</div>' +
+           '<div class="q-text">' + fmt(rest) + '</div>';
+  }
+
   function buildQuestionHtml(q, ms){
     const isSpr = q.type === "spr";
     const flagged = ms.flags.has(q.id);
@@ -1292,7 +1309,7 @@
             <div class="choice-row${elim ? " is-elim" : ""}">
               <div class="choice ${sel?"selected":""} ${elim?"eliminated":""}" data-idx="${idx}">
                 <span class="clabel">${letter}</span>
-                <span class="ctext">${fmt(c)}</span>
+                <span class="ctext">${fmt(c, {bigInline:true})}</span>
               </div>
               <button class="elim-btn" data-elim="${idx}" title="Cross out choice ${letter}">${letter}</button>
               <button class="elim-undo" data-undo="${idx}">Undo</button>
@@ -1308,7 +1325,7 @@
       </div>
       ${figHtml}
       ${stackedHtml}
-      <div class="q-text">${fmt(q.questionText)}</div>
+      ${stemHtml(q.questionText)}
       ${body}`;
   }
 
@@ -1832,18 +1849,63 @@
     let sx, sy, ox, oy, dragging = false;
     handle.addEventListener("pointerdown", e=>{
       if(e.target.closest("button")) return;
-      dragging = true;
-      handle.setPointerCapture(e.pointerId);
+      /* Record the grab BEFORE attempting capture. setPointerCapture throws if
+         the pointer id isn't active, and it used to do so between `dragging =
+         true` and the coordinates being read — leaving a drag armed with
+         undefined origins, so every move computed NaN and the panel silently
+         refused to move at all. */
       const r = panel.getBoundingClientRect();
       ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY;
+      dragging = true;
+      try{ handle.setPointerCapture(e.pointerId); }catch(err){ /* capture is an optimisation */ }
     });
     handle.addEventListener("pointermove", e=>{
       if(!dragging) return;
-      panel.style.left = (ox + e.clientX - sx) + "px";
-      panel.style.top  = (oy + e.clientY - sy) + "px";
+      const p = clampToViewport(panel, handle, ox + e.clientX - sx, oy + e.clientY - sy);
+      panel.style.left = p.left + "px";
+      panel.style.top  = p.top + "px";
       panel.style.right = "auto"; panel.style.bottom = "auto";
     });
     handle.addEventListener("pointerup", ()=>{ dragging = false; });
+    /* A panel dragged off-screen takes its drag handle with it, and the handle
+       is the only way to move it back — so it becomes permanently stranded and
+       the student loses the calculator for the rest of the module. Re-clamp on
+       resize too: shrinking the window must not orphan a panel that was legally
+       placed a moment ago. */
+    window.addEventListener("resize", ()=>{
+      if(panel.classList.contains("hidden")) return;
+      const r = panel.getBoundingClientRect();
+      const p = clampToViewport(panel, handle, r.left, r.top);
+      if(p.left !== Math.round(r.left) || p.top !== Math.round(r.top)){
+        panel.style.left = p.left + "px";
+        panel.style.top  = p.top + "px";
+        panel.style.right = "auto"; panel.style.bottom = "auto";
+      }
+    });
+  }
+
+  /* Keep the HANDLE reachable, not merely some pixel of the panel: the handle
+     is what the student has to grab. A generous slice of it must stay inside
+     the viewport on every edge. */
+  const HANDLE_KEEP_PX = 48;
+  function clampToViewport(panel, handle, left, top){
+    const pr = panel.getBoundingClientRect();
+    const hr = handle.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    // where the handle sits relative to the panel's own box
+    const hOffX = hr.left - pr.left, hOffY = hr.top - pr.top;
+    const keepX = Math.min(HANDLE_KEEP_PX, hr.width || HANDLE_KEEP_PX);
+    const keepY = Math.min(HANDLE_KEEP_PX, hr.height || HANDLE_KEEP_PX);
+    // handle's left edge must not pass the right edge minus a grabbable strip,
+    // nor go further left than a grabbable strip remaining on screen
+    const minLeft = -hOffX - (hr.width - keepX);
+    const maxLeft = vw - hOffX - keepX;
+    const minTop  = -hOffY;                       // never above the top edge
+    const maxTop  = vh - hOffY - keepY;
+    return {
+      left: Math.round(Math.max(minLeft, Math.min(maxLeft, left))),
+      top:  Math.round(Math.max(minTop,  Math.min(maxTop,  top)))
+    };
   }
 
   /* ---- Desmos calculator ---- */
@@ -2569,7 +2631,7 @@
     html += `<div class="qr-qtext">${fmt(q.questionText)}</div>`;
     if(q.type !== "spr"){
       html += `<ol class="qr-choices">` +
-        q.choices.map((c,i)=> `<li><span class="qr-cl">${String.fromCharCode(65+i)}.</span> ${fmt(c)}</li>`).join("") + `</ol>`;
+        q.choices.map((c,i)=> `<li><span class="qr-cl">${String.fromCharCode(65+i)}.</span> ${fmt(c, {bigInline:true})}</li>`).join("") + `</ol>`;
     }
     return html;
   }
