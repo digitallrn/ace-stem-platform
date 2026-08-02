@@ -511,6 +511,9 @@
   .spr-table{ border-collapse:collapse; margin:0 auto; font-size:15px; font-family:var(--serif); }
   .spr-table th, .spr-table td{ border:1px solid #444; padding:10px 16px; text-align:center; vertical-align:middle; }
   .spr-table code{ background:#eee; padding:2px 7px; display:inline-block; margin:2px 0; font-size:13.5px; font-family:var(--mono, monospace); }
+  /* One block that flows in the pane's centred content column; everything
+     inside stays left-aligned, like the stem and the choices. */
+  .spr-answer{ text-align:left; }
   .spr-input{
     width:150px; font-size:22px; font-family:var(--sans); padding:12px 14px;
     border:1.5px solid var(--ink); border-radius:10px;

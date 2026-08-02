@@ -19,8 +19,18 @@ USAGE:
 """
 
 import re
+import sys
 import argparse
 from pathlib import Path
+
+# Windows consoles default to cp1252, which cannot encode the ✓/⚠ in the status
+# lines below — so a SUCCESSFUL build died at its own success message and exited
+# nonzero, which reads as a failed build. Force UTF-8 on the streams instead.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
 
 LOCAL_CSS_RE = re.compile(r'<link rel="stylesheet" href="(?!https?://)([^"]+)">')
 LOCAL_JS_RE = re.compile(r'<script src="(?!https?://)([^"]+)"></script>')

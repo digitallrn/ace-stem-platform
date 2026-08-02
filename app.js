@@ -1283,11 +1283,20 @@
     let body;
     if(isSpr){
       const cur = ms.answers.hasOwnProperty(q.id) ? ms.answers[q.id] : "";
+      /* The answer area is ONE block child of the pane so it sits in the same
+         capped, centred column as the stem and choices. Loose children did not:
+         the input is inline-level, where auto margins cannot centre anything,
+         and .ap-label's margin shorthand overrode the auto side margins — so
+         both hugged the pane's left padding and appeared to travel with the
+         divider while everything else re-centred. The keypad stays OUTSIDE the
+         wrapper: it is position:fixed and dragged, and has its own margin rule. */
       body = `
-        <input type="text" class="spr-input" id="sprInput" value="${escapeHtml(cur)}" autocomplete="off" spellcheck="false">
-        <div class="ap-label">Answer Preview:</div>
-        <div id="sprPreview">${sprPreviewHtml(cur)}</div>
-        <div><button class="keypad-toggle" id="kpToggle">⌨&nbsp; Show Keypad</button></div>
+        <div class="spr-answer">
+          <input type="text" class="spr-input" id="sprInput" value="${escapeHtml(cur)}" autocomplete="off" spellcheck="false">
+          <div class="ap-label">Answer Preview:</div>
+          <div id="sprPreview">${sprPreviewHtml(cur)}</div>
+          <div><button class="keypad-toggle" id="kpToggle">⌨&nbsp; Show Keypad</button></div>
+        </div>
         <div class="keypad hidden" id="keypad">
           <div class="keypad-head" id="keypadHead">Keypad
             <span class="calc-drag" style="margin-left:auto;margin-right:10px;">⠿</span>

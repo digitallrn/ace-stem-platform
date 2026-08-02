@@ -289,8 +289,7 @@ record-derived value.
   since the tutor dashboard and future score-report generation both read
   the same results data.
 - `testdata/202606asiav1.js` holds "2026 June Asia v1" (98 questions) at
-  testVersion 2026-08-01-c. `testdata/202512usav1.js` is a deliberate STUB —
-  a placeholder proving the multi-test path; replace it wholesale when a real
-  conversion lands. Regenerate from the test-bank repo's JSON — never
-  hand-edit — and bump `testVersion` on any content change after students have
-  taken it (ATTEMPTS-SPEC §9).
+  testVersion 2026-08-01-c; `testdata/202606asiav2.js` holds "2026 June Asia
+  v2". Regenerate from the test-bank repo's JSON — never hand-edit — and bump
+  `testVersion` on any content change after students have taken it
+  (ATTEMPTS-SPEC §9).

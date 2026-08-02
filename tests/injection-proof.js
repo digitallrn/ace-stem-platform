@@ -434,5 +434,13 @@
     return { pass: failed.length === 0, results };
   }
 
-  return run();
+  /* run() is async, so a throw inside it becomes a rejected promise. Pasted
+     into a console that shows no output, that is indistinguishable from "the
+     proof printed nothing because I did not look" — a check whose failure mode
+     is silence. Make it always say something. */
+  return run().catch(e => {
+    console.error("PROOF DID NOT COMPLETE — no surface was verified: " +
+      ((e && (e.stack || e.message)) || e));
+    throw e;
+  });
 })();

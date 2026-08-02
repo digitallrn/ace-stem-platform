@@ -7,7 +7,7 @@ hand-written.
 ```
 testdata/manifest.js       loaded at startup; one entry per test
 testdata/202606asiav1.js   the full test, fetched only when a sitting
-testdata/202512usav1.js    starts or resumes (202512usav1 is a STUB)
+testdata/202606asiav2.js   starts or resumes
 ```
 
 1. Run the app: serve the folder over HTTP (`python3 -m http.server`) and
