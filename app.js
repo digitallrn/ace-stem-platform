@@ -120,7 +120,15 @@
      pane (buildQuestionHtml), and fmt() emits no <img> at all, so an image can
      never legitimately appear in a saved passage — one there came from a
      crafted record. */
-  const DROP_ELEMENTS = /^(SCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL)$/;
+  /* STYLE is dropped for the same reason SCRIPT is: this filters ATTRIBUTES,
+     and a <style> element carries its payload in its TEXT, which no attribute
+     check can see. Injected via innerHTML its sheet applies to the WHOLE
+     document — enough to fetch an outbound URL through @import (there is no
+     CSP) and to restyle the app's own controls, e.g. blowing an invisible
+     element up to cover the viewport. fmt() never emits <style>, so one in a
+     saved passage came from a crafted record. NOSCRIPT joins it because its
+     content is parsed as markup when scripting is disabled. */
+  const DROP_ELEMENTS = /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL)$/;
   const DROP_ATTRS = /^(src|href|xlink:href|srcdoc|srcset|action|formaction|data|background|ping|dynsrc|lowsrc)$/;
   function sanitizeSavedHtml(html){
     // a <template>'s content is inert: parsing here runs no script and fetches
@@ -138,6 +146,48 @@
     return tpl.innerHTML;
   }
   window.AppSanitize = { html: sanitizeSavedHtml };
+
+  /* An annotations blob is record-derived, so its SHAPE is untrusted too, not
+     just its strings. Escaping every value is no help if `notes[qid]` is a
+     string or holds nulls: renderNotesRail's notes.map(n => n.id) throws, and
+     a throw mid-restore is worse on the review path than on resume (resume
+     catches it and lands the student home; review had already half-applied
+     its state). Coerce to the exact expected shape and drop anything else —
+     a malformed blob costs its annotations, never the surface.
+     Applied by BOTH consumers, so they cannot drift apart. */
+  /* exposed for tests/injection-proof.js — the proof must exercise THIS
+     function, not a copy of it */
+  function restoreAnnotations(moduleState, ann){
+    if(!ann || typeof ann !== "object") return;
+    Object.keys(ann).forEach(mid => {
+      const ms = moduleState[mid], src = ann[mid];
+      if(!ms || !src || typeof src !== "object") return;
+      if(src.passageHtml && typeof src.passageHtml === "object"){
+        const out = {};
+        Object.keys(src.passageHtml).forEach(qid => {
+          const h = src.passageHtml[qid];
+          if(typeof h === "string") out[qid] = h;   // sanitized at every render
+        });
+        ms.passageHtml = out;
+      }
+      if(src.notes && typeof src.notes === "object"){
+        const out = {};
+        Object.keys(src.notes).forEach(qid => {
+          const list = src.notes[qid];
+          if(!Array.isArray(list)) return;
+          const clean = list.filter(n => n && typeof n === "object").map(n => ({
+            id: String(n.id == null ? "" : n.id),
+            snippet: String(n.snippet == null ? "" : n.snippet),
+            text: String(n.text == null ? "" : n.text)
+          }));
+          if(clean.length) out[qid] = clean;
+        });
+        ms.notes = out;
+      }
+    });
+  }
+
+  window.AppSanitize.restoreAnnotations = restoreAnnotations;
 
   /* ================= SIGN IN / HOME ================= */
   el("signinBtn").addEventListener("click", doSignin);
@@ -935,13 +985,7 @@
     state.reviewMode = null;     // a live sitting must never inherit review's read-only gates
     state.currentTest = test;
     state.moduleState = buildModuleStateFromRecord(test, record);
-    const ann = resume.annotations || {};
-    Object.keys(ann).forEach(mid=>{
-      const ms = state.moduleState[mid];
-      if(!ms) return;
-      if(ann[mid].passageHtml) ms.passageHtml = ann[mid].passageHtml;
-      if(ann[mid].notes) ms.notes = ann[mid].notes;
-    });
+    restoreAnnotations(state.moduleState, resume.annotations);
     state.timing = record.timing || 1;   // Phase G §1: accommodation persists across resume
     Attempts.resume(record, state);   // adopts the record; deletes its resume blob
     // re-associate the assignment this attempt was started through, so
@@ -1554,6 +1598,12 @@
       if(mi === mods.length - 1) return;
       mi++; qi = 0;
     }
+    /* Crossing a module boundary is a section change: the section tools go
+       with it. A live sitting gets this from submitModule; review steps
+       straight across, which left the Calculator floating over a Reading and
+       Writing module whose header has no control to close it — a state the
+       real app cannot produce. */
+    if(mi !== state.moduleIndex){ closeCalc(); closeRef(); closeDirections(); hide("figOverlay"); }
     state.moduleIndex = mi;
     state.questionIndex = qi;
     renderTest();
@@ -1897,15 +1947,28 @@
     // a home-screen bug report must not carry fabricated module/question/timer
     // context (§9: "moduleId + question id if in-test")
     const inTest = !!state.currentTest && !el("screen-test").classList.contains("hidden");
+    /* Review is not a sitting. It satisfies `inTest` (currentTest set,
+       screen-test visible) but has no clock and no live attempt, so reporting
+       state.timeRemainingSec here published a number left over from whatever
+       sitting ran earlier this page-load — a report from a replay reading like
+       a mid-sitting one at 7:34 on the timer. The module/question context IS
+       real and worth keeping (it says which question rendered wrong); the
+       clock is nulled, the reviewed attempt's own id is attached instead of
+       the detached recorder's null, and the report says which surface it came
+       from so a tutor can tell replay from sitting at a glance. */
+    const inReview = !!state.reviewMode;
     const report = {
       at: new Date().toISOString(),
       studentCode: state.userName,
+      surface: inReview ? "review" : (inTest ? "test" : "home"),
       testId: inTest ? state.currentTest.testId : null,
       testVersion: inTest ? (state.currentTest.testVersion || "unversioned") : null,
-      attemptId: Attempts.currentAttemptId(),
+      attemptId: inReview
+        ? ((state.reviewMode.record && state.reviewMode.record.attemptId) || null)
+        : Attempts.currentAttemptId(),
       moduleId: inTest ? currentModule().moduleId : null,
       questionId: (inTest && state.view === "question") ? currentQuestion().id : null,
-      timerRemainingSeconds: inTest ? state.timeRemainingSec : null,
+      timerRemainingSeconds: (inTest && !inReview) ? state.timeRemainingSec : null,
       userAgent: navigator.userAgent,
       text
     };
@@ -2429,7 +2492,10 @@
     const mod = currentModule();
     const q = currentQuestion();
     const ms = currentModState();
-    const notes = (ms.notes && ms.notes[q.id]) || [];
+    // Array.isArray, not truthiness: a record-derived blob can hold a string
+    // here, and a string has .length — which used to reach notes.map() and throw
+    const raw = ms.notes && ms.notes[q.id];
+    const notes = Array.isArray(raw) ? raw : [];
     const visible = state.view === "question" &&
                     mod.section === "Reading and Writing" &&
                     !!q.passage && notes.length > 0;
@@ -2606,7 +2672,7 @@
       filter: "all", page: 0, pageSize: 10, showCorrect: false, origin: origin || "home" };
     renderScoreDetails();
     showOnly("screen-scoredetails");
-    el("sdRoot").scrollTop = 0;
+    window.scrollTo(0, 0);   // the document is the scroller, not .sd-root
   }
 
   function domainBar(correct, graded){
@@ -2825,31 +2891,35 @@
      same test would flush B's replayed answers into A's record), and every
      mutating handler and Attempts.* call in the test flow is additionally
      gated on state.reviewMode. */
-  function openReviewMode(modIdx, qIdx){
+  async function openReviewMode(modIdx, qIdx){
     if(!sdCtx) return;
     const { test, record, rows } = sdCtx;
     if(!test.modules || !test.modules.length) return;
-    Attempts.detach();
+    /* Awaited: detach drains any unpersisted write before letting go of the
+       record, so entering review can never strand a finished sitting. */
+    await Attempts.detach();
     const rowByQid = {};
     rows.forEach(r => { rowByQid[r.q.id] = r; });
-    state.reviewMode = { record, rowByQid, sdScroll: el("sdRoot").scrollTop };
+    /* Score Details scrolls with the DOCUMENT — #screen-scoredetails has no
+       overflow of its own — so the position to restore is window.scrollY.
+       Reading sdRoot.scrollTop here always returned 0, which made Back land
+       at the top of the page on every chip round-trip. */
+    state.reviewMode = { record, rowByQid, sdScroll: window.scrollY || 0 };
     state.currentTest = test;
     state.moduleState = buildModuleStateFromRecord(test, record);
     /* Annotations: finalize keeps the sitting's blob on the completed record;
        older completed records may predate that and simply review clean.
-       Restored exactly as resume restores them — raw HTML into moduleState,
+       Same restore as resume — shape-validated, raw HTML into moduleState,
        sanitized at every render. */
-    const ann = record.annotations ||
-      ((record.resume || record.checkpoint || {}).annotations) || {};
-    Object.keys(ann).forEach(mid=>{
-      const ms = state.moduleState[mid];
-      if(!ms || !ann[mid]) return;
-      if(ann[mid].passageHtml) ms.passageHtml = ann[mid].passageHtml;
-      if(ann[mid].notes) ms.notes = ann[mid].notes;
-    });
+    restoreAnnotations(state.moduleState,
+      record.annotations || ((record.resume || record.checkpoint || {}).annotations));
     state.view = "question";
     state.elimMode = false;
-    state.hlMode = false;
+    /* hlMode is deliberately NOT reset: it is a session preference that
+       survives navigation and Save-and-Exit, and review is already fully
+       gated without touching it (updateHeaderTools drops the toggle and the
+       hl-mode class, handleSelection returns early). Clearing it here silently
+       turned the mode off for a sitting the student had left it on in. */
     clearInterval(state.timerInterval);
     // "Review" where the clock was; no Hide toggle, no five-minute machinery
     el("timerDisplay").innerHTML = '<span class="timer-review">Review</span>';
@@ -2859,11 +2929,21 @@
     state.moduleIndex = Math.max(0, Math.min(modIdx || 0, test.modules.length - 1));
     const mod = test.modules[state.moduleIndex];
     state.questionIndex = Math.max(0, Math.min(qIdx || 0, mod.questions.length - 1));
-    renderTest();
-    showOnly("screen-test");
+    /* A render that throws must not leave review half-entered — the flags are
+       already set and the Back button already shown, so the student would be
+       stuck on Score Details with every chip re-throwing and a dead
+       "‹ Score Details" button leaking into their next live sitting.
+       restoreAnnotations makes a malformed record unlikely to get here; this
+       is the backstop that keeps ANY render failure recoverable. */
+    try{
+      renderTest();
+      showOnly("screen-test");
+    }catch(e){
+      exitReviewMode(true);
+    }
   }
 
-  function exitReviewMode(){
+  function exitReviewMode(failed){
     if(!state.reviewMode) return;
     const scroll = state.reviewMode.sdScroll || 0;
     closeDirections(); closeQnav(); closeCalc(); closeRef(); hide("figOverlay");
@@ -2872,15 +2952,27 @@
     // live-test chrome comes back with the next beginModule; un-hide the
     // timer toggle so nothing depends on that
     el("timerBtn").classList.remove("hidden");
+    el("tBody").classList.remove("review-mode");
     state.reviewMode = null;
     state.currentTest = null;
     state.moduleState = {};
     lastRenderedQKey = null;
     renderScoreDetails();
     showOnly("screen-scoredetails");
-    el("sdRoot").scrollTop = scroll;
+    window.scrollTo(0, scroll);
+    if(failed){
+      el("sdModStrips").insertAdjacentHTML("afterbegin",
+        '<p class="sd-muted">This attempt\'s saved highlights and notes couldn\'t be opened, so review isn\'t available for it. Your scores below are unaffected.</p>');
+    }
   }
-  el("rvBackBtn").addEventListener("click", exitReviewMode);
+  el("rvBackBtn").addEventListener("click", ()=> exitReviewMode());
+
+  /* Printing targets #screen-scoredetails, which showOnly() has hidden while
+     review is up (display:none beats the print sheet's visibility:visible),
+     so Ctrl+P from review produced entirely blank pages. Leaving review first
+     restores the pre-redesign behaviour: printing mid-review yields the score
+     report. beforeprint fires before the snapshot is taken. */
+  window.addEventListener("beforeprint", ()=>{ if(state.reviewMode) exitReviewMode(); });
 
   /* ================= INIT ================= */
   // §6: dashboard "Open student view" bridges into the Score Details page,

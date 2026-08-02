@@ -113,6 +113,18 @@ mid-test loses at most the current module, not the whole sitting. Partial
 attempts stay visible in the dashboard marked in-progress — those are real
 records too (an abandoned Module 2 tells you something).
 
+**Detaching the recorder must drain first (2026-08-02).** `Attempts.detach()`
+releases the handle on the last attempt when the app enters a read-only
+surface that reuses the live test state (Score Details review). `finalize()`
+fires its save without awaiting, and on the last module that save is queued
+behind `moduleEnd`'s still-in-flight write — so detaching immediately could
+abort the queued write AND disarm the tab-hide/close retries that are the only
+ones left once finalize stops the ticker. `detach()` is therefore async and
+awaits the drain, exactly as `suspend()` does. If the write still has not
+landed, the frozen snapshot is kept in an orphan list and retried on
+`online`/tab-hide/close — it cannot be rebuilt from app state, because that
+state is about to describe a replay of a different attempt.
+
 ## 4. Identity
 
 No accounts, so the sign-in name is the identity. Two consequences:

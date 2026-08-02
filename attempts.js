@@ -578,11 +578,41 @@ window.Attempts = (function(){
   }
   function stopTicker(){ if(ticker){ clearInterval(ticker); ticker = null; } }
 
+  /* ---- orphaned snapshots ----
+     A record whose final write never landed, detached from the live recorder.
+     Retrying it from `rec` is not possible once detach() has run (the app
+     state it would rebuild from is about to become a REPLAY of a different
+     attempt), so what is retried is the frozen snapshot itself — the exact
+     bytes that failed to persist. Without this, entering Review Mode after a
+     failed final save would silently discard the student's completed sitting:
+     the ticker is already stopped by finalize, so the tab-hide/close flushes
+     were its only remaining retries. */
+  let orphans = [];
+  async function retryOrphans(){
+    if(!orphans.length) return;
+    const left = [];
+    for(const snap of orphans){
+      let ok = false;
+      try{ ok = await AttemptStore.set(snap.attemptId, snap); }catch(e){}
+      if(!ok) left.push(snap);
+    }
+    orphans = left;
+  }
+  if(typeof window !== "undefined" && window.addEventListener){
+    window.addEventListener("online", retryOrphans);
+  }
+
   /* best-effort flush when the tab hides or closes (spec §3) */
   document.addEventListener("visibilitychange", () => {
-    if(document.visibilityState === "hidden" && rec){ closeClock(); save(); }
+    if(document.visibilityState === "hidden"){
+      if(rec){ closeClock(); save(); }
+      retryOrphans();
+    }
   });
-  window.addEventListener("beforeunload", () => { if(rec){ closeClock(); save(); } });
+  window.addEventListener("beforeunload", () => {
+    if(rec){ closeClock(); save(); }
+    retryOrphans();
+  });
 
   /* ---- per-assignment rows (spec §3) ----
      One row per assignment (assign:<CODE>:<assignmentId>) instead of one array
@@ -757,14 +787,42 @@ window.Attempts = (function(){
        `rec` exists. Left attached, a review of attempt B over the same test
        would rebuild answers from B's replayed module state and flush them
        into A's record on the next tab-hide. Detaching makes that whole class
-       impossible: no rec, no build, no write. */
-    detach(){
+       impossible: no rec, no build, no write.
+
+       DRAIN FIRST, exactly as suspend() does. finalize() fires save() without
+       awaiting it, and on the last module that save is always QUEUED behind
+       moduleEnd's still-in-flight write (submitModule calls both in one
+       synchronous stack). Nulling `rec` under that queued write made the
+       loop's next build() return null and break — silently dropping the
+       completed snapshot — and disarmed the flush retries that were the only
+       thing left after finalize stopped the ticker. Storage is documented as
+       flaky (§10), so this is the difference between a student's finished
+       sitting persisting and vanishing. Async: the caller awaits it. */
+    async detach(){
       try{
         stopTicker();
+        if(rec){
+          closeClock();
+          if(saving || pendingSave || dirty || lastSaveOk !== true){
+            try{ await save(); }catch(e){}
+          }
+          /* Still not persisted: keep the frozen bytes and retry them later.
+             It cannot be rebuilt after this point — appState is about to
+             describe a replay of some other attempt. */
+          if(lastSaveOk !== true){
+            try{
+              const snap = build();
+              if(snap) orphans.push(JSON.parse(JSON.stringify(snap)));
+            }catch(e){}
+          }
+        }
         rec = null; appState = null;
         qMeta = {}; liveSpr = {}; clock = null; curModule = null;
-      }catch(e){}
+      }catch(e){ rec = null; appState = null; }
     },
+
+    /* for tests/diagnostics: snapshots whose write never landed */
+    orphanCount(){ return orphans.length; },
 
     /* ---- Save and Exit + Resume (BLUEBOOK-PARITY Phase C; failure semantics
        Phase F §8: a refused exit keeps recording alive in place) ---- */
