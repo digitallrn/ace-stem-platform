@@ -29,21 +29,21 @@ window.TEST_MANIFEST = [
   ]
  },
  {
-  "testId": "202512usav1",
-  "testName": "2025 December US v1 (stub)",
-  "testVersion": "2025-12-01-b",
+  "testId": "202606asiav2",
+  "testName": "2026 June Asia v2",
+  "testVersion": "2026-08-01-a",
   "moduleCount": 4,
-  "questionCount": 10,
+  "questionCount": 98,
   "sections": [
    {
     "section": "Reading and Writing",
     "moduleCount": 2,
-    "questionCount": 6
+    "questionCount": 54
    },
    {
     "section": "Math",
     "moduleCount": 2,
-    "questionCount": 4
+    "questionCount": 44
    }
   ],
   "legacyIds": []
