@@ -453,6 +453,14 @@
   .q-flag .bkm svg path{ fill:none; stroke:#555; }
   .q-flag.on{ text-decoration:underline; }
   .q-flag.on .bkm svg path{ fill:var(--flag-red); stroke:var(--flag-red); }
+  /* Review only: sits where the ABC toggle does in a live sitting, so the
+     header band keeps its shape. */
+  .rv-time{
+    background:#F3F3F3; border-left:1px solid #d5d5d5; padding:0 14px;
+    display:flex; align-items:center; gap:5px; white-space:nowrap;
+    font-size:13px; font-weight:700; color:var(--ink-soft);
+  }
+  .rv-visits{ font-weight:400; font-size:12px; }
   .abc-toggle{
     background:#F3F3F3; border:none; border-left:1px solid #d5d5d5; padding:0 14px;
     font-size:11px; font-weight:800; letter-spacing:.5px; position:relative;

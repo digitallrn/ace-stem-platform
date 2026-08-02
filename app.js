@@ -517,6 +517,18 @@
   /* A count read back out of a record is untrusted like any other record value
      (ATTEMPTS-SPEC §7) — coerce, never interpolate raw. Mirrors dashboard.js. */
   function num(v){ return typeof v === "number" && isFinite(v) ? v : null; }
+  /* m:ss from a record-derived seconds value. Built on num() rather than on
+     bare arithmetic: a hostile value coerced by arithmetic alone yields
+     "NaN:NaN", which is inert but reads like a real reading — null lets the
+     caller print an em-dash and say nothing it cannot support. Its output is
+     digits and a colon, so it is safe to interpolate (contract rule 3:
+     numbers computed from a record are fine). Mirrors dashboard.js's mmss,
+     which is private to that file's IIFE and loads after this one. */
+  function mmss(sec){
+    const n = num(sec);
+    if(n === null || n < 0) return null;
+    return Math.floor(n / 60) + ":" + String(Math.floor(n % 60)).padStart(2, "0");
+  }
 
   /* ================= TEST CONTENT LOADING =================
      Only the manifest loads at startup. A test's questions arrive when a
@@ -1429,6 +1441,7 @@
       <div class="q-head">
         <div class="q-num">${state.questionIndex+1}</div>
         <button class="q-flag ${flagged?"on":""}" id="flagBtn"${review ? " disabled" : ""}><span class="bkm"><svg viewBox="0 0 24 24" width="15" height="17" aria-hidden="true"><path d="M5.5 3h13v18l-6.5-4.8L5.5 21z" stroke-width="2" stroke-linejoin="round"/></svg></span> Mark for Review</button>
+        ${review ? reviewTimeHtml(q) : ""}
         ${(isSpr || review) ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
       </div>
       ${figHtml}
@@ -1437,6 +1450,32 @@
       ${body}
       ${omittedHtml}
       ${rationaleHtml}`;
+  }
+
+  /* Per-question time, review only — it is a fact about a finished sitting,
+     and showing a running total to a student mid-test would be a new pressure
+     the real app doesn't apply. Takes the slot the ABC toggle occupies in a
+     live sitting (crossing out is gone in review), so the header band keeps
+     its shape.
+
+     `timeSpentSeconds` is the record's own total ACROSS VISITS — the recorder
+     accumulates it per visit (closeClock adds to meta.timeMs) and resume
+     rebuilds it from the stored value, so a question returned to three times
+     reports the sum. Both fields are record-derived and therefore untrusted:
+     mmss()/num() coerce them, and anything that is not a real number prints
+     an em-dash rather than a fabricated reading.
+
+     "Never visited" is decided by visitCount, not by the clock: a question
+     that was opened and left instantly has timeSpentSeconds 0, which is a
+     true 0:00 and must not read the same as one never reached. */
+  function reviewTimeHtml(q){
+    const a = ((state.reviewMode.record || {}).answers || {})[q.id] || {};
+    const visits = num(a.visitCount);
+    const t = (visits !== null && visits > 0) ? mmss(a.timeSpentSeconds) : null;
+    const visitTag = (visits !== null && visits > 1)
+      ? ` <span class="rv-visits">(${visits} visits)</span>` : "";
+    return `<span class="rv-time" title="Time spent on this question, across all visits">` +
+      `Time: ${t === null ? "&mdash;" : t}${t === null ? "" : visitTag}</span>`;
   }
 
   /* SPR verdict for review: outcome + the key (with accepted alternates).

@@ -70,12 +70,18 @@
         else if(i % 4 === 0) given = null;
         else given = q.correctAnswer;
       }
-      /* visitCount/changeCount are counts read straight off the record and
-         reach the dashboard detail pane — same class as the score counts, so
-         they carry the payload too. firstGiven differs from given so the
-         "changed ×N" branch (which prints changeCount) actually renders. */
+      /* visitCount/changeCount/timeSpentSeconds are read straight off the
+         record and reach the dashboard detail pane AND (since 2026-08-02) the
+         Review Mode question header — same class as the score counts, so they
+         carry the payload too. firstGiven differs from given so the
+         "changed ×N" branch (which prints changeCount) actually renders.
+         Question index 1 keeps REAL numbers, so the proof also covers the
+         formatted-and-rendered path rather than only the rejected one. */
       answers[q.id] = { given, firstGiven: given === null ? "X" : null, correct: false, markedForReview: false,
-        eliminated: [], timeSpentSeconds: 10, visitCount: PAYLOAD, changeCount: PAYLOAD,
+        eliminated: [],
+        timeSpentSeconds: i === 1 ? 161 : PAYLOAD,
+        visitCount: i === 1 ? 3 : PAYLOAD,
+        changeCount: PAYLOAD,
         blankReason: given === null ? "never-answered" : null };
     }));
     return { sprCount, rec: Object.assign({
@@ -215,6 +221,36 @@
       $("rvBackBtn").click();
       await wait(350);
     }
+
+    /* 1b. Per-question time in the review header (2026-08-02). Two records'
+       worth of shapes in one place: q0 carries a hostile timeSpentSeconds and
+       visitCount, q1 carries real numbers (161s, 3 visits). The hostile pair
+       must render an em-dash — NOT "NaN:NaN", which is inert but reads like a
+       genuine measurement — and the real pair must format as 2:41 with the
+       visit count. */
+    root.querySelector('.sd-chip[data-mi="0"][data-qi="1"]').click();
+    await wait(450);
+    const realTime = document.querySelector("#paneRight .rv-time");
+    const realTxt = realTime ? realTime.textContent.replace(/\s+/g, " ").trim() : "";
+    results.push(audit("Review Mode per-question time (real values)", $("paneRight")));
+    results.push({ surface: "Per-question time formats m:ss with visit count",
+      pass: /^Time:\s*2:41\b/.test(realTxt) && /\(3 visits\)/.test(realTxt),
+      note: realTime ? "rendered: " + realTxt : "no .rv-time in the header band" });
+    $("rvBackBtn").click();
+    await wait(350);
+
+    root.querySelector('.sd-chip[data-mi="0"][data-qi="0"]').click();
+    await wait(450);
+    const badTime = document.querySelector("#paneRight .rv-time");
+    const badTxt = badTime ? badTime.textContent.replace(/\s+/g, " ").trim() : "";
+    results.push(audit("Review Mode per-question time (hostile values)", $("paneRight")));
+    results.push({ surface: "Hostile time/visit values print an em-dash, never a reading",
+      pass: !!badTime && badTxt.indexOf("—") !== -1 &&
+            !/\d/.test(badTxt) && badTxt.indexOf("NaN") === -1 &&
+            badTxt.indexOf("PWN") === -1,
+      note: badTime ? "rendered: " + badTxt : "no .rv-time in the header band" });
+    $("rvBackBtn").click();
+    await wait(350);
 
     /* 2. Hostile rationale on firstQ (module 0, question 0): fmt() must
        escape the prose and still honour {{i}}/{{m}} tokens, below the
