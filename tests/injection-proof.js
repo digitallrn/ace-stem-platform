@@ -16,7 +16,10 @@
    2. Paste this whole file into the console and press Enter.
    3. Read the printed report. Every surface must show PASS.
    Covers record-derived text (SPR answers, codes, testName), test-data text
-   (rationale via fmt), and the student:<CODE> display name.
+   (rationale via fmt), the student:<CODE> display name, and the Review Mode
+   replay of a completed record's annotations (hostile passage HTML through
+   the sanitizer, hostile note id/snippet/text through escaping) driven
+   through the real Score Details -> chip -> test-UI path.
    NOTE: run this with local mode active (no config.js beside the page), since
    it uses the acestem-admin route, which a remote deployment removes.
    4. Reload the page afterwards (the script cleans its own storage keys).   */
@@ -116,7 +119,22 @@
       if(!firstSpr && q.type === "spr"){ firstSpr = q; q.correctAnswer = PAYLOAD; }
     }));
 
-    const { rec, sprCount } = poisonedRecord(test);
+    /* Hostile ANNOTATIONS on the completed record (new 2026-08-02): finalize
+       keeps the sitting's highlights/notes on the record, and Review Mode
+       replays them in the real test UI — passage HTML through the resume
+       sanitizer, note id/snippet/text through escaping. Plant them on the
+       first question that HAS a passage (the only place they render). */
+    let annQ = null, annMi = -1, annQi = -1;
+    test.modules.forEach((m, mi) => m.questions.forEach((q, qi) => {
+      if(!annQ && q.passage){ annQ = q; annMi = mi; annQi = qi; }
+    }));
+    const hostileAnnotations = annQ ? { [test.modules[annMi].moduleId]: {
+      passageHtml: { [annQ.id]: PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' +
+        '<span class="hl c-yellow" data-note-id="' + ATTR_PAY + '">kept highlight</span>' },
+      notes: { [annQ.id]: [{ id: ATTR_PAY, snippet: PAYLOAD, text: PAYLOAD }] }
+    } } : undefined;
+
+    const { rec, sprCount } = poisonedRecord(test, { annotations: hostileAnnotations });
     localStorage.setItem("as:" + rec.attemptId, JSON.stringify(rec));
 
     /* display-name profile row (student:<CODE>) — a NEW untrusted string that
@@ -163,40 +181,85 @@
     results.push(audit("Score Details hero + Knowledge and Skills", root));
     results.push(audit("Questions Overview table (SPR given + correct)", root));
 
-    /* banner check must run on a poisoned SPR row (student-typed value) */
-    const poisonRow = [...root.querySelectorAll(".sd-table tbody tr")]
-      .find(tr => tr.textContent.indexOf("PWN") !== -1);
-    if(poisonRow){
-      poisonRow.querySelector(".sd-review-link").click();
-      await wait(250);
-      $("qrShow").click();
-      await wait(250);
-      results.push(audit("Review popup banner (hostile SPR answer)", $("qrCard")));
-      $("qrClose").click();
-      await wait(150);
-    }
-
-    /* rationale check must run on the question that HAS the poisoned
-       rationale (firstQ) — the SPR rows above carry none, and their missing
-       .qr-rationale is correct spec behaviour, not a failure */
-    const firstRow = root.querySelector(".sd-table tbody tr .sd-review-link");
-    if(firstRow){
-      firstRow.click();
-      await wait(250);
-      if(!$("qrShow").checked) $("qrShow").click();
-      await wait(250);
-      const rat = $("qrCard").querySelector(".qr-rationale");
-      results.push(audit("Review popup rationale (hostile HTML via fmt)", $("qrCard")));
-      results.push({ surface: "fmt() escapes prose but keeps {{i}}/{{m}} tokens",
-        pass: !!rat && !rat.querySelector("img") && !!rat.querySelector("i"),
-        note: rat ? "rationale rendered; tokens live, payload inert" : "no .qr-rationale found" });
-      $("qrClose").click();
-      await wait(150);
-    }
-
     /* print output renders this same DOM; the print stylesheet only toggles
        visibility and adds one static ::before, so no new interpolation */
     results.push(audit("Print output (same DOM as Score Details)", root));
+
+    /* ---- Review Mode (2026-08-02): the one review surface — a read-only
+       replay of the record in the real test UI. Three drives through the
+       real chip -> review path, each against a different hostile class. ---- */
+
+    /* 1. Hostile SPR answer (record `given`) + hostile SPR key (test
+       `correctAnswer`): input value attribute, answer preview, verdict line.
+       Everything here is escaped, so plain audit() is the right assertion. */
+    let sprMi = -1, sprQi = -1;
+    test.modules.forEach((m, mi) => m.questions.forEach((q, qi) => {
+      if(sprMi === -1 && q.type === "spr"){ sprMi = mi; sprQi = qi; }
+    }));
+    if(sprMi !== -1){
+      root.querySelector(`.sd-chip[data-mi="${sprMi}"][data-qi="${sprQi}"]`).click();
+      await wait(450);
+      results.push(audit("Review Mode SPR (hostile given + hostile key)", $("paneRight")));
+      const inp = $("sprInput");
+      results.push({ surface: "Review Mode SPR input round-trips hostile value inert",
+        pass: !!inp && inp.readOnly && inp.value === PAYLOAD && !inp.hasAttribute("onerror"),
+        note: inp ? "readonly input holds the payload as a plain value" : "no sprInput rendered" });
+      $("rvBackBtn").click();
+      await wait(350);
+    }
+
+    /* 2. Hostile rationale on firstQ (module 0, question 0): fmt() must
+       escape the prose and still honour {{i}}/{{m}} tokens, below the
+       choices in the real pane. */
+    root.querySelector('.sd-chip[data-mi="0"][data-qi="0"]').click();
+    await wait(450);
+    const rat = document.querySelector("#paneRight .rv-rationale");
+    results.push(audit("Review Mode rationale (hostile HTML via fmt)", $("paneRight")));
+    results.push({ surface: "fmt() escapes prose but keeps {{i}}/{{m}} tokens",
+      pass: !!rat && !rat.querySelector("img") && !!rat.querySelector("i"),
+      note: rat ? "rationale rendered below choices; tokens live, payload inert" : "no .rv-rationale found" });
+    $("rvBackBtn").click();
+    await wait(350);
+
+    /* 3. Hostile ANNOTATIONS replayed from the completed record — the exact
+       surface the redesign added. The passage pane is sanitized HTML, not
+       escaped text, so audit() would miscount the payload's surviving <b> as
+       injection; the correct assertion is the sanitizer's: nothing can
+       execute or fetch, while the planted highlight span (real annotation
+       markup) must SURVIVE. The notes rail is escaped text — audit() there. */
+    if(annQ){
+      root.querySelector(`.sd-chip[data-mi="${annMi}"][data-qi="${annQi}"]`).click();
+      await wait(450);
+      const pane = $("paneLeft").querySelector("#passageText") ||
+                   document.querySelector("#paneRight .passage-text");
+      const els = pane ? [...pane.querySelectorAll("*")] : [];
+      const exec = els.filter(e => /^(SCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
+      const handlers = els.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
+      const urlAttrs = els.filter(e => [...e.attributes].some(a => /^(src|href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name)));
+      const hlKept = pane && pane.querySelector("span.hl");
+      results.push({ surface: "Review Mode replayed passage annotations sanitized",
+        pass: !!pane && !exec.length && !handlers.length && !urlAttrs.length &&
+              !!hlKept && !window.__XSS_FIRED,
+        note: !pane ? "passage pane missing"
+          : exec.length || handlers.length || urlAttrs.length
+            ? `survived: ${exec.length} executable, ${handlers.length} handler(s), ${urlAttrs.length} url attr(s)`
+            : "hostile markup defused, real highlight span survived the replay" });
+      const rail = $("notesCards");
+      results.push(audit("Review Mode notes rail (hostile note id/snippet/text)", rail));
+      const card = rail.querySelector(".note-card");
+      const ta = rail.querySelector(".note-body-ta");
+      results.push({ surface: "Review Mode notes are read-only and round-trip",
+        pass: !!card && card.dataset.note === ATTR_PAY && !!ta && ta.readOnly &&
+              !rail.querySelector(".note-trash"),
+        note: card ? "hostile id inert in attribute, textarea locked, no delete control"
+                   : "no note card rendered" });
+      $("rvBackBtn").click();
+      await wait(350);
+    }
+    /* review must leave the recorder detached — nothing it did may write */
+    results.push({ surface: "Review Mode leaves no live recorder",
+      pass: window.Attempts.currentAttemptId() === null,
+      note: "currentAttemptId is null after review drives" });
 
     $("nameInput") && ([...document.querySelectorAll('[id^=screen-]')].forEach(s => s.classList.add("hidden")),
       $("screen-signin").classList.remove("hidden"), $("signinError").classList.add("hidden"));

@@ -736,7 +736,33 @@ window.Attempts = (function(){
         delete rec.resume;                        // a completed attempt is not resumable
         deliberateExit = true;                    // and build() must not re-add a checkpoint
         delete rec.checkpoint;
+        /* Keep the sitting's annotations (highlight HTML + notes) on the
+           completed record — the resume/checkpoint blobs that carried them die
+           with finalize, and Score Details review replays them. Same shape the
+           resume blob used, restored through the same sanitizer path, and like
+           everything else in a record it is UNTRUSTED on the way back out
+           (spec §2/§7). Omitted when empty so old-style records and new
+           unannotated ones look identical. */
+        const ann = positionBlob().annotations;
+        if(ann && Object.keys(ann).length) rec.annotations = ann;
         save();
+      }catch(e){}
+    },
+
+    /* Stop recording and drop the handle on the last attempt entirely.
+       Called when the app enters a read-only surface (Score Details review)
+       that reuses the LIVE test state: after finalize `rec` still points at
+       the completed attempt so the submitted screen can offer the JSON
+       download, and the visibilitychange/beforeunload flushes fire whenever
+       `rec` exists. Left attached, a review of attempt B over the same test
+       would rebuild answers from B's replayed module state and flush them
+       into A's record on the next tab-hide. Detaching makes that whole class
+       impossible: no rec, no build, no write. */
+    detach(){
+      try{
+        stopTicker();
+        rec = null; appState = null;
+        qMeta = {}; liveSpr = {}; clock = null; curModule = null;
       }catch(e){}
     },
 

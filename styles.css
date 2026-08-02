@@ -714,30 +714,6 @@
   }
   .review-box .qnav-title{ margin-bottom:14px; }
 
-  /* ================= RESULTS ================= */
-  #screen-results{ max-width:820px; margin:0 auto; padding:52px 24px 90px; }
-  #screen-results h1{ font-size:30px; font-weight:400; margin:0 0 4px; }
-  #screen-results p.sub{ color:var(--ink-soft); margin:0 0 30px; font-size:15px; }
-  .score-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:36px; }
-  .score-card{ border:1px solid var(--line); border-radius:12px; padding:20px; }
-  .score-card .sc-lbl{ font-size:12px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.4px; margin-bottom:8px; font-weight:700; }
-  .score-card .sc-val{ font-size:30px; font-weight:700; }
-  .score-card.total{ background:var(--cb-navy); color:#fff; }
-  .score-card.total .sc-lbl{ color:#B9C3EA; }
-  .mb-row{ display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--line); font-size:14.5px; }
-  .mb-row:last-child{ border-bottom:none; }
-  .mb-bar{ flex:1; height:6px; background:#EEF1F9; border-radius:3px; margin:0 16px; overflow:hidden; }
-  .mb-bar-fill{ height:100%; background:var(--cb-blue); }
-  .qreview-item{ border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:12px; }
-  .qri-head{ display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
-  .qri-badge{ font-size:11px; font-weight:800; padding:3px 10px; border-radius:20px; text-transform:uppercase; letter-spacing:.3px; }
-  .qri-badge.correct{ background:#E3F3E8; color:#1E7A43; }
-  .qri-badge.wrong{ background:#FBE9EB; color:var(--cb-red); }
-  .qri-badge.skipped{ background:#F0F0F0; color:var(--ink-soft); }
-  .qri-skill{ font-size:12.5px; color:var(--ink-soft); }
-  .qri-qtext{ font-family:var(--serif); font-size:14.5px; margin-bottom:10px; color:#3d3d3d; }
-  .results-actions{ display:flex; gap:12px; margin-top:24px; }
-
   /* ================= MODULE OVER / BREAK ================= */
   #screen-moduleover{
     min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -870,7 +846,6 @@
     .pane-left{ width:100% !important; max-height:45vh; border-bottom:1px solid var(--line); }
     #divider{ display:none; }
     .qnav-grid{ grid-template-columns:repeat(6,1fr); }
-    .score-grid{ grid-template-columns:1fr; }
     .welcome-band h1{ font-size:28px; }
   }
   /* ---- schema v1.1 rich content ---- */
@@ -912,13 +887,12 @@
   .q-lead .fmt-table{ margin:0 auto; }
   .katex-fallback{ font-family:ui-monospace,Menlo,Consolas,monospace; background:#f4f4f6;
     border:1px dashed #bbb; border-radius:4px; padding:0 4px; }
-  .qri-badge.nokey{ background:#e8e8ee; color:#555; }
 
   /* ================= SIGN-IN: conditions toggle (ATTEMPTS-SPEC §10) ================= */
   /* (conditions toggle removed in Phase F §2 — the start-code ceremony sets
      proctored/self-administered now) */
 
-  /* ================= RESULTS: save note ================= */
+  /* ================= SUBMITTED: save note ================= */
   .res-save-note{ margin-top:14px; font-size:13px; color:var(--ink-soft); }
 
   /* ================= TUTOR DASHBOARD ================= */
@@ -1097,36 +1071,64 @@
   .sd-page-btn{ background:#fff; border:1.5px solid var(--cb-blue); color:var(--cb-blue); border-radius:8px; padding:7px 18px; font-weight:700; }
   .sd-page-btn:disabled{ opacity:.4; border-color:var(--line); color:var(--ink-soft); }
 
-  /* Question Review popup (§5) */
-  .qr-card{ background:#fff; border-radius:14px; width:min(1080px, 96vw); max-height:92vh;
-    display:flex; flex-direction:column; box-shadow:0 12px 40px rgba(0,0,0,.4); }
-  .qr-head{ display:flex; justify-content:flex-end; align-items:flex-start; padding:16px 20px 6px; position:relative; }
-  .qr-domain{ position:absolute; top:18px; right:56px; font-size:15px; font-weight:700; }
-  .qr-body{ display:flex; flex:1; overflow:hidden; }
-  .qr-left, .qr-right{ flex:1; padding:12px 28px 24px; overflow-y:auto; }
-  .qr-left{ border-right:1px solid var(--line); font-family:var(--serif); }
-  .qr-qnum{ font-family:var(--sans); font-weight:700; font-size:15px; margin-bottom:14px; }
-  .qr-passage{ font-size:16px; line-height:1.6; margin-bottom:16px; white-space:pre-wrap; }
-  .qr-qtext{ font-size:16.5px; line-height:1.55; margin-bottom:14px; }
-  .qr-choices{ list-style:none; padding:0; margin:0; font-size:16px; line-height:1.5; }
-  .qr-choices li{ margin-bottom:8px; }
-  .qr-cl{ font-weight:700; }
-  .qr-fig{ margin-bottom:14px; }
-  .qr-fig img{ max-width:100%; }
-  .qr-fig-cap{ font-size:13px; color:var(--ink-soft); margin-top:4px; }
-  .qr-ans-h, .qr-rat-h{ font-size:16px; margin:0 0 10px; }
-  .qr-rat-h{ margin-top:22px; }
-  .qr-banner{ border-radius:8px; padding:14px 16px; font-size:15px; font-weight:700; color:#fff; }
-  .qr-banner.bad{ background:var(--cb-red); }
-  .qr-banner.ok{ background:#1E7A43; }
-  .qr-banner.neutral{ background:#5F5E5A; }
-  .qr-rationale{ font-family:var(--serif); font-size:15.5px; line-height:1.6; }
-  .qr-foot{ display:flex; justify-content:space-between; align-items:center; padding:14px 24px;
-    border-top:1px solid var(--line); flex-wrap:wrap; gap:12px; }
-  .qr-toggle{ font-size:15px; font-weight:600; display:flex; align-items:center; gap:9px; }
-  .qr-nav{ display:flex; gap:12px; }
-  .qr-nav .pill{ padding:9px 24px; }
-  .qr-nav .pill:disabled{ opacity:.4; }
+  /* ---- Module summary strips (2026-08-02): one row per module under the
+     hero — label, raw score, and a numbered chip per question colored by
+     outcome. Chips are buttons; each opens Review Mode at its question. ---- */
+  .sd-modstrips{ margin:0 0 40px; }
+  .sd-strip{ padding:14px 0 12px; border-bottom:1px solid var(--line); }
+  .sd-strip:last-child{ border-bottom:none; }
+  .sd-strip-head{ display:flex; align-items:baseline; gap:14px; margin-bottom:10px; }
+  .sd-strip-label{ font-size:15px; font-weight:700; }
+  .sd-strip-raw{ font-size:14px; color:var(--ink-soft); font-weight:700; }
+  .sd-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .sd-chip{
+    min-width:34px; height:30px; padding:0 6px; border-radius:7px; border:1.5px solid transparent;
+    font-size:13.5px; font-weight:700; color:#fff; cursor:pointer;
+  }
+  .sd-chip.ok{ background:#1E7A43; }
+  .sd-chip.bad{ background:var(--cb-red); }
+  .sd-chip.omit{ background:#fff; color:var(--ink-soft); border-color:#B9BECD; }
+  .sd-chip.nokey{ background:#E8E8EE; color:#555; }
+  .sd-chip:hover{ filter:brightness(1.12); box-shadow:0 1px 5px rgba(0,0,0,.25); }
+  .sd-chip.omit:hover{ filter:none; background:#F2F5FD; }
+
+  /* ---- Review Mode (read-only replay in the real test UI) ---- */
+  .rv-back{
+    background:none; border:none; color:var(--cb-blue); font-weight:700; font-size:14.5px;
+    padding:4px 10px 4px 0; cursor:pointer; white-space:nowrap;
+  }
+  .rv-back:hover{ text-decoration:underline; }
+  .timer-review{ font-weight:700; font-size:19px; letter-spacing:.4px; }
+  /* answers are frozen: the choice tiles stop advertising clickability */
+  .review-mode .choice{ cursor:default; }
+  .review-mode .choice:hover{ background:#fff; }
+  .choice.rv-key{ border-color:#1E7A43; box-shadow:inset 0 0 0 1px #1E7A43; }
+  .choice.rv-wrong{ border-color:var(--cb-red); box-shadow:inset 0 0 0 1px var(--cb-red); }
+  .rv-mark{ margin-left:auto; padding-left:12px; font-size:12.5px; font-weight:800; white-space:nowrap; align-self:center; }
+  .rv-mark.ok{ color:#1E7A43; }
+  .rv-mark.you{ color:var(--cb-red); }
+  .rv-omitted{
+    margin:6px 0 0; font-size:14.5px; font-weight:700; color:var(--ink-soft);
+    border:1.5px dashed #B9BECD; border-radius:8px; padding:10px 14px; display:inline-block;
+  }
+  .rv-banner{ margin-top:16px; border-radius:8px; padding:12px 16px; font-size:15px; font-weight:700; color:#fff; display:inline-block; }
+  .rv-banner.bad{ background:var(--cb-red); }
+  .rv-banner.ok{ background:#1E7A43; }
+  .rv-banner.neutral{ background:#5F5E5A; }
+  .rv-spr-key{ margin-top:12px; font-size:15px; }
+  .rv-spr-alt{ color:var(--ink-soft); }
+  .rv-rationale{ margin-top:26px; border-top:1px solid var(--line); padding-top:16px; }
+  .rv-rationale h3{ font-size:16px; margin:0 0 8px; font-family:var(--sans); }
+  .rv-rat-body{ font-family:var(--serif); font-size:15.5px; line-height:1.6; }
+  /* navigator cells as an outcome map, echoing the chips */
+  .qcell.rv-ok{ background:#1E7A43; border:1.5px solid #1E7A43; color:#fff; }
+  .qcell.rv-bad{ background:var(--cb-red); border:1.5px solid var(--cb-red); color:#fff; }
+  .qcell.rv-omit{ background:#fff; color:var(--ink-soft); }   /* keeps the dashed border */
+  .qcell.rv-nokey{ background:#E8E8EE; border:1.5px solid #E8E8EE; color:#555; }
+  .lg-sq{ display:inline-block; width:13px; height:13px; border-radius:3px; vertical-align:-2px; margin-right:5px; border:1px solid transparent; }
+  .lg-sq.rv-ok{ background:#1E7A43; }
+  .lg-sq.rv-bad{ background:var(--cb-red); }
+  .lg-sq.rv-omit{ background:#fff; border-color:#B9BECD; }
 
   /* Past card score line (§6) */
   .pcard-badge{ display:inline-block; background:#EDE7FB; color:#4A3A8A; border-radius:12px;
@@ -1144,7 +1146,10 @@
     #screen-scoredetails{ position:absolute; inset:0; }
     .sd-hero{ background:#fff !important; color:#000 !important; padding:0 0 12px; border-bottom:2px solid #000; }
     .sd-hero-sub, .sd-hero-range, .sd-hero-of, .sd-sec-range{ color:#333 !important; }
-    .sd-home, .sd-hero-actions, .sd-tabs, .sd-table-controls, .sd-pager, .sd-review-link{ display:none !important; }
+    /* the module strips are navigation into Review Mode — meaningless on
+       paper, so the printed report keeps its pre-redesign layout */
+    .sd-home, .sd-hero-actions, .sd-tabs, .sd-table-controls, .sd-pager, .sd-review-link,
+    .sd-modstrips{ display:none !important; }
     .sd-hero h1{ font-size:26px; }
     .sd-hero h1::before{ content:"Ace SAT — "; }
     .sd-hero-num{ font-size:44px; color:#000; }

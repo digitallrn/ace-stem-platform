@@ -220,6 +220,8 @@
 <div id="screen-test" class="hidden">
   <div class="t-header">
     <div class="th-left">
+      <!-- review mode only: the way back to Score Details (hidden in a live sitting) -->
+      <button class="rv-back hidden" id="rvBackBtn">‹ Score Details</button>
       <h1 id="thTitle">Section 1, Module 1: Reading and Writing</h1>
       <button class="dir-toggle" id="dirToggle">Directions <span class="chev">▼</span></button>
     </div>
@@ -349,13 +351,14 @@
 <div class="qnav-popup hidden" id="qnavPopup">
   <button class="qnav-close" id="qnavClose">✕</button>
   <div class="qnav-title" id="qnavTitle">Questions</div>
-  <div class="qnav-legend">
+  <!-- review mode swaps this legend for an outcome one (app.js) -->
+  <div class="qnav-legend" id="qnavLegend">
     <span><span class="lg-pin"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#1E1E1E" stroke-width="2" aria-hidden="true"><path d="M12 21.5S5 14.9 5 10.3a7 7 0 0 1 14 0c0 4.6-7 11.2-7 11.2z"/><circle cx="12" cy="10" r="2.6"/></svg></span> Current</span>
     <span><span class="lg-dash"></span> Unanswered</span>
     <span><span class="lg-flag"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 2.5h14V21l-7-5.1L5 21z" fill="#C23349"/></svg></span> For Review</span>
   </div>
   <div class="qnav-grid" id="qnavGrid"></div>
-  <div class="qnav-gotoreview"><button class="pill ghost" id="gotoReviewBtn" style="padding:10px 24px;">Go to Review Page</button></div>
+  <div class="qnav-gotoreview" id="gotoReviewWrap"><button class="pill ghost" id="gotoReviewBtn" style="padding:10px 24px;">Go to Review Page</button></div>
 </div>
 
 <!-- ============ RESULTS ============ -->
@@ -366,8 +369,8 @@
     <div class="sub-check">✓</div>
     <h1>Your answers have been submitted!</h1>
     <p>Nice work. Your tutor will review this attempt and release your scores —
-       once released, they'll appear under <b>Past</b> on your home screen as
-       <b>View My Responses</b>.</p>
+       once released, <b>View Score Details</b> appears on this test's card
+       under <b>Past</b> on your home screen.</p>
     <p class="res-save-note" id="subSaveNote"></p>
     <div class="submitted-actions">
       <button class="pill ghost hidden" id="subDownloadBtn">Download Results JSON</button>
@@ -376,31 +379,11 @@
   </div>
 </div>
 
-<div id="screen-results" class="hidden">
-  <h1 id="resTitle">Results</h1>
-  <p class="sub" id="resSub"></p>
-  <div class="score-grid" id="scoreGrid"></div>
-  <div style="margin-bottom:36px;">
-    <h3 style="font-size:16px;margin:0 0 4px;">Section breakdown</h3>
-    <div id="breakdownList"></div>
-  </div>
-  <h3 style="font-size:16px;margin:0 0 12px;">Question-by-question review</h3>
-  <div id="qReviewList"></div>
-  <div class="results-actions">
-    <button class="pill ghost" id="resRestartBtn">Back to home</button>
-    <button class="pill" id="resDownloadBtn">Download Results JSON</button>
-  </div>
-  <p class="res-save-note" id="resSaveNote"></p>
-</div>
-
-<!-- ============ STUDENT SCORE DETAILS (Phase G §4, screenshots 25-28) ============ -->
+<!-- ============ STUDENT SCORE DETAILS (Phase G §4, screenshots 25-28;
+     redesigned 2026-08-02: module strips + Review Mode replace the results
+     screen and the question-review popup that used to live here) ============ -->
 <div id="screen-scoredetails" class="hidden">
   <div class="sd-root" id="sdRoot"></div>
-</div>
-
-<!-- Question Review popup (Phase G §5, screenshots 25-26) -->
-<div class="modal-overlay hidden" id="qrModal">
-  <div class="qr-card" id="qrCard"></div>
 </div>
 
 <!-- ============ TUTOR DASHBOARD (admin sign-in only) ============ -->

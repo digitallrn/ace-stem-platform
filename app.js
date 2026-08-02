@@ -36,17 +36,22 @@
     pastAttempts: [],            // completed/timed-out records for this code (Phase D)
     practiceTab: "active",       // home Practice toggle: "active" | "past"
     testsTab: "active",          // home Your Tests toggle: "active" | "past"
-    lastWasProctored: false      // which section the just-finished attempt lands in
+    lastWasProctored: false,     // which section the just-finished attempt lands in
+    /* Score Details review (read-only replay of a released attempt in the real
+       test UI). Null during live testing. When set: { record, rowByQid,
+       sdScroll }. Every mutating surface and every Attempts.* call in the test
+       flow is gated on this being null — review must never write. */
+    reviewMode: null
   };
 
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-results","screen-scoredetails","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-scoredetails","screen-dashboard"];
   // body-level overlays that live outside the SCREENS set — a screen change
   // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
   // them floating as a full-screen click blocker over the next screen
-  const FLOATING_OVERLAYS = ["saveFailModal","bugModal","deviceModal","qrModal"];
+  const FLOATING_OVERLAYS = ["saveFailModal","bugModal","deviceModal"];
   /* The persistent bar belongs to the signed-in non-test screens. In-test
      screens keep their own header, and sign-in has its own branding. */
   const TOPBAR_SCREENS = ["screen-home", "screen-scoredetails"];
@@ -812,6 +817,7 @@
     withTestContent(entry, full => startTestFlowLoaded(full, assignment));
   }
   function startTestFlowLoaded(test, assignment){
+    state.reviewMode = null;     // a live sitting must never inherit review's read-only gates
     state.currentTest = test;
     state.activeAssignment = assignment || null;
     state.timing = (assignment && assignment.timing) || 1;    // Phase G §1: default standard
@@ -926,6 +932,7 @@
   function resumeTestFlowLoaded(test, record){
     const resume = record.resume || record.checkpoint || {};
     if(!test || !test.modules || !test.modules.length) return false;
+    state.reviewMode = null;     // a live sitting must never inherit review's read-only gates
     state.currentTest = test;
     state.moduleState = buildModuleStateFromRecord(test, record);
     const ann = resume.annotations || {};
@@ -1240,9 +1247,18 @@
     const total = mod.questions.length;
     el("qnavBtnLabel").textContent = `Question ${state.questionIndex+1} of ${total}`;
     el("qnavBtn").style.visibility = "visible";
-    el("btnBack").classList.toggle("hidden", state.questionIndex === 0);
+    const review = !!state.reviewMode;
+    el("tBody").classList.toggle("review-mode", review);
+    /* Review navigates ACROSS modules (there is no Check Your Work / submit
+       beat to cross), so Back stays visible at question 1 of a later module
+       and Next disappears only at the very last question of the test. */
+    el("btnBack").classList.toggle("hidden",
+      state.questionIndex === 0 && (!review || state.moduleIndex === 0));
     el("btnNext").textContent = "Next";
-    Attempts.questionShown(q.id);      // no-op on re-renders of the same question
+    el("btnNext").classList.toggle("hidden",
+      review && state.moduleIndex === state.currentTest.modules.length - 1 &&
+      state.questionIndex === total - 1);
+    if(!review) Attempts.questionShown(q.id);   // no-op on re-renders; never records in review
   }
 
   /* A stem that OPENS with display math or a table is a lead-in: the real app
@@ -1264,8 +1280,9 @@
 
   function buildQuestionHtml(q, ms){
     const isSpr = q.type === "spr";
+    const review = !!state.reviewMode;
     const flagged = ms.flags.has(q.id);
-    const abcOn = state.elimMode && !isSpr;
+    const abcOn = state.elimMode && !isSpr && !review;
 
     const mod = currentModule();
     // RW figures render in the stimulus pane instead (reference 33)
@@ -1290,13 +1307,16 @@
          both hugged the pane's left padding and appeared to travel with the
          divider while everything else re-centred. The keypad stays OUTSIDE the
          wrapper: it is position:fixed and dragged, and has its own margin rule. */
+      /* Review: the input shows the recorded answer read-only, the keypad is
+         gone (nothing to type), and the verdict banner below carries the
+         correct answer — the SPR analogue of marking the choices. */
       body = `
         <div class="spr-answer">
-          <input type="text" class="spr-input" id="sprInput" value="${escapeHtml(cur)}" autocomplete="off" spellcheck="false">
+          <input type="text" class="spr-input" id="sprInput" value="${escapeHtml(cur)}" autocomplete="off" spellcheck="false"${review ? " readonly" : ""}>
           <div class="ap-label">Answer Preview:</div>
           <div id="sprPreview">${sprPreviewHtml(cur)}</div>
-          <div><button class="keypad-toggle" id="kpToggle">⌨&nbsp; Show Keypad</button></div>
-        </div>
+          ${review ? sprReviewHtml(q) : '<div><button class="keypad-toggle" id="kpToggle">⌨&nbsp; Show Keypad</button></div>'}
+        </div>` + (review ? "" : `
         <div class="keypad hidden" id="keypad">
           <div class="keypad-head" id="keypadHead">Keypad
             <span class="calc-drag" style="margin-left:auto;margin-right:10px;">⠿</span>
@@ -1306,7 +1326,7 @@
           <div class="kp-row5">
             <button data-k="-">−</button><button data-k=".">.</button><button data-k="0">0</button><button data-k="/">/</button><button data-k="⌫">⌫</button>
           </div>
-        </div>`;
+        </div>`);
     } else {
       const elimSet = ms.eliminated[q.id] || new Set();
       body = '<div class="choices' + (abcOn ? ' elim-mode' : '') + '" id="choicesWrap">' +
@@ -1314,6 +1334,25 @@
           const letter = String.fromCharCode(65+idx);
           const sel = ms.answers[q.id] === idx;
           const elim = elimSet.has(idx);
+          /* Review marks: the key and the student's pick, on the choices
+             themselves. A crossed-out choice keeps its strikethrough (that is
+             their work), but the cross-out buttons don't render — nothing on
+             this surface mutates. `sel` styling is replaced by the marks. */
+          if(review){
+            const isKey = hasKey(q) && q.correctAnswer === idx;
+            const mark = isKey && sel ? '<span class="rv-mark ok">✓ Your answer</span>'
+                       : isKey        ? '<span class="rv-mark ok">✓ Correct answer</span>'
+                       : sel          ? '<span class="rv-mark you">✕ Your answer</span>'
+                       : "";
+            return `
+              <div class="choice-row${elim ? " is-elim" : ""}">
+                <div class="choice rv ${isKey ? "rv-key" : ""} ${sel && !isKey ? "rv-wrong" : ""} ${elim ? "eliminated" : ""}" data-idx="${idx}">
+                  <span class="clabel">${letter}</span>
+                  <span class="ctext">${fmt(c, {bigInline:true})}</span>
+                  ${mark}
+                </div>
+              </div>`;
+          }
           return `
             <div class="choice-row${elim ? " is-elim" : ""}">
               <div class="choice ${sel?"selected":""} ${elim?"eliminated":""}" data-idx="${idx}">
@@ -1326,28 +1365,66 @@
         }).join("") + '</div>';
     }
 
+    /* Review-only extras: an omitted-MCQ banner (an unanswered SPR already
+       reads as omitted in its verdict), and the rationale below the choices
+       when the question carries one. Rationale is test data, so fmt() — it
+       may hold tokens and math. */
+    const omittedHtml = (review && !isSpr && !ms.answers.hasOwnProperty(q.id))
+      ? '<div class="rv-omitted">You omitted this question.</div>' : "";
+    const rationaleHtml = (review && q.rationale)
+      ? `<div class="rv-rationale"><h3>Rationale</h3><div class="rv-rat-body">${fmt(q.rationale)}</div></div>` : "";
+
     return `
       <div class="q-head">
         <div class="q-num">${state.questionIndex+1}</div>
-        <button class="q-flag ${flagged?"on":""}" id="flagBtn"><span class="bkm"><svg viewBox="0 0 24 24" width="15" height="17" aria-hidden="true"><path d="M5.5 3h13v18l-6.5-4.8L5.5 21z" stroke-width="2" stroke-linejoin="round"/></svg></span> Mark for Review</button>
-        ${isSpr ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
+        <button class="q-flag ${flagged?"on":""}" id="flagBtn"${review ? " disabled" : ""}><span class="bkm"><svg viewBox="0 0 24 24" width="15" height="17" aria-hidden="true"><path d="M5.5 3h13v18l-6.5-4.8L5.5 21z" stroke-width="2" stroke-linejoin="round"/></svg></span> Mark for Review</button>
+        ${(isSpr || review) ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
       </div>
       ${figHtml}
       ${stackedHtml}
       ${stemHtml(q.questionText)}
-      ${body}`;
+      ${body}
+      ${omittedHtml}
+      ${rationaleHtml}`;
+  }
+
+  /* SPR verdict for review: outcome + the key (with accepted alternates).
+     The recorded answer is untrusted record data — escaped; the key comes
+     from test data — escaped all the same (it renders as plain text). */
+  function sprReviewHtml(q){
+    const row = state.reviewMode.rowByQid[q.id];
+    let cls, verdict;
+    if(!row || row.noKey){ cls = "neutral"; verdict = "No key yet for this question."; }
+    else if(row.given === null){ cls = "bad"; verdict = "You omitted this question."; }
+    else if(row.correct){ cls = "ok"; verdict = "Your answer is correct."; }
+    else { cls = "bad"; verdict = "Your answer is incorrect."; }
+    let key = "";
+    if(row && !row.noKey){
+      key = `<div class="rv-spr-key"><b>Correct answer:</b> ${escapeHtml(String(q.correctAnswer))}` +
+        ((q.altAnswers && q.altAnswers.length)
+          ? ` <span class="rv-spr-alt">(also accepted: ${q.altAnswers.map(a=>escapeHtml(String(a))).join(", ")})</span>` : "") +
+        `</div>`;
+    }
+    return `<div class="rv-banner ${cls}">${verdict}</div>${key}`;
   }
 
   function attachQuestionHandlers(){
     const q = currentQuestion();
     const ms = currentModState();
 
+    attachFigureHandlers(q);   // zoom/expand is read-only — wired in review too
+
+    /* Review renders the student's work but attaches none of the mutating
+       handlers: no answer clicks, no flagging, no cross-outs, no SPR typing.
+       The markup side already dropped those controls; this is the second
+       layer, so a style regression that re-shows a control still can't make
+       it do anything. */
+    if(state.reviewMode) return;
+
     el("flagBtn").addEventListener("click", ()=>{
       if(ms.flags.has(q.id)) ms.flags.delete(q.id); else ms.flags.add(q.id);
       renderQuestionView();
     });
-
-    attachFigureHandlers(q);
 
     if(q.type === "spr"){
       const input = el("sprInput");
@@ -1452,21 +1529,42 @@
   window.AppNav = { locked: ()=> navLocked, lockMs: NAV_LOCK_MS };
 
   el("btnBack").addEventListener("click", ()=> navigate(()=>{
+    if(state.reviewMode){ reviewStep(-1); return; }
     if(state.view === "review"){ state.view = "question"; renderTest(); return; }
     if(state.questionIndex > 0){ state.questionIndex--; renderTest(); }
   }));
   el("btnNext").addEventListener("click", ()=> navigate(()=>{
+    if(state.reviewMode){ reviewStep(1); return; }
     if(state.view === "review"){ submitModule(); return; }
     const total = currentModule().questions.length;
     if(state.questionIndex < total-1){ state.questionIndex++; renderTest(); }
     else { state.view = "review"; renderTest(); }
   }));
 
+  /* Review navigation: module structure is preserved, so stepping off either
+     end of a module crosses into the neighbouring one — there is no Check
+     Your Work page and no submit beat to run into. Ends are simply ends. */
+  function reviewStep(dir){
+    const mods = state.currentTest.modules;
+    let mi = state.moduleIndex, qi = state.questionIndex + dir;
+    if(qi < 0){
+      if(mi === 0) return;
+      mi--; qi = mods[mi].questions.length - 1;
+    } else if(qi >= mods[mi].questions.length){
+      if(mi === mods.length - 1) return;
+      mi++; qi = 0;
+    }
+    state.moduleIndex = mi;
+    state.questionIndex = qi;
+    renderTest();
+  }
+
   /* ================= QUESTION NAVIGATOR POPUP ================= */
   el("qnavBtn").addEventListener("click", openQnav);
   el("qnavClose").addEventListener("click", closeQnav);
   el("qnavOverlay").addEventListener("click", closeQnav);
   el("gotoReviewBtn").addEventListener("click", ()=>{
+    if(state.reviewMode) return;   // hidden in review; Check Your Work is a live-test surface
     closeQnav();
     state.view = "review";
     renderTest();
@@ -1481,8 +1579,18 @@
     container.innerHTML = "";
     mod.questions.forEach((q,idx)=>{
       const cell = document.createElement("div");
-      const answered = ms.answers.hasOwnProperty(q.id);
-      cell.className = "qcell" + (answered ? " answered" : "");
+      if(state.reviewMode){
+        /* Review: the navigator is an outcome map — correct / incorrect /
+           omitted per question, module-local numbering, flags kept. */
+        const row = state.reviewMode.rowByQid[q.id];
+        const outcome = !row || row.noKey ? "rv-nokey"
+          : row.given === null ? "rv-omit"
+          : row.correct ? "rv-ok" : "rv-bad";
+        cell.className = "qcell " + outcome;
+      } else {
+        const answered = ms.answers.hasOwnProperty(q.id);
+        cell.className = "qcell" + (answered ? " answered" : "");
+      }
       cell.textContent = idx+1;
       if(state.view === "question" && idx === state.questionIndex){
         cell.classList.add("current");
@@ -1496,8 +1604,20 @@
     });
   }
 
+  /* The static legend markup is the live-test one; review swaps in an
+     outcome legend and swaps the original back on the way out. */
+  const QNAV_LEGEND_LIVE = el("qnavLegend").innerHTML;
+  const QNAV_LEGEND_REVIEW =
+    '<span><span class="lg-sq rv-ok"></span> Correct</span>' +
+    '<span><span class="lg-sq rv-bad"></span> Incorrect</span>' +
+    '<span><span class="lg-sq rv-omit"></span> Omitted</span>' +
+    '<span><span class="lg-flag">' + QNAV_FLAG + '</span> For Review</span>';
+
   function openQnav(){
     el("qnavTitle").textContent = sectionTitle(currentModule()) + " Questions";
+    el("qnavLegend").innerHTML = state.reviewMode ? QNAV_LEGEND_REVIEW : QNAV_LEGEND_LIVE;
+    // Check Your Work is a live-test destination; review has no such page
+    el("gotoReviewWrap").classList.toggle("hidden", !!state.reviewMode);
     buildQnavGrid(el("qnavGrid"), idx=>{
       closeQnav();
       state.view = "question";
@@ -1544,6 +1664,7 @@
   }
 
   function submitModule(endedBy){
+    if(state.reviewMode) return;   // review has no submit path, by construction and by guard
     clearInterval(state.timerInterval);
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
@@ -1714,6 +1835,7 @@
   });
 
   async function saveAndExit(){
+    if(state.reviewMode) return;   // menu item is hidden in review; nothing to save either way
     clearInterval(state.timerInterval);           // timer pauses while exited
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
@@ -1808,7 +1930,9 @@
 
   function updateHeaderTools(mod){
     const tools = el("thTools");
+    const review = !!state.reviewMode;
     if(mod.section === "Math"){
+      // calculator + reference are read-only tools — they stay in review
       tools.innerHTML = `
         <button class="th-tool" id="toolCalc"><span class="ticon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="2.2"/><rect x="7.5" y="5" width="9" height="3.6" rx="0.8"/><path d="M8.5 12.5h0M12 12.5h0M15.5 12.5h0M8.5 15.5h0M12 15.5h0M15.5 15.5h0M8.5 18.5h0M12 18.5h0"/><path d="M15.5 17.5v2" stroke-width="1.7"/></svg></span>Calculator</button>
         <button class="th-tool" id="toolRef"><span class="ticon" style="font-family:var(--serif);font-style:italic;">x²</span>Reference</button>` +
@@ -1817,16 +1941,21 @@
       el("toolRef").addEventListener("click", toggleRef);
       wireMoreMenu();
     } else {
-      tools.innerHTML = `
+      // the Highlights & Notes toggle exists to CREATE annotations — in
+      // review they replay read-only, so the toggle doesn't render at all
+      tools.innerHTML = (review ? "" : `
         <span class="hl-mode-wrap">
           <button class="th-tool" id="hlModeBtn" title="Toggle highlight mode"><span class="ticon">✎</span><span class="tlabel">Highlights &amp; Notes</span></button>
           <div class="hl-tip hidden" id="hlTip"><b>Highlight mode on:</b> Select text to create a highlight automatically.</div>
-        </span>` +
+        </span>`) +
         MORE_MENU_HTML;
-      wireHlModeBtn();
+      if(!review) wireHlModeBtn();
       wireMoreMenu();
     }
-    el("tBody").classList.toggle("hl-mode", state.hlMode && mod.section !== "Math");
+    // review has nothing to save and no exit-to-home — Back goes to Score
+    // Details instead. Line Reader and the bug report stay useful.
+    if(review) el("miSaveExit").classList.add("hidden");
+    el("tBody").classList.toggle("hl-mode", state.hlMode && mod.section !== "Math" && !review);
   }
 
   /* Highlights & Notes as a real mode toggle (screenshots 16-18): when on,
@@ -2099,6 +2228,7 @@
 
   function handleSelection(){
     if(el("screen-test").classList.contains("hidden")) return;
+    if(state.reviewMode) return;   // annotations replay read-only in review — no new highlights
     if(currentModule().section === "Math") return;   // annotation is R&W-only: no toolbar in Math
     const sel = window.getSelection();
     const pt = document.getElementById("passageText");
@@ -2125,6 +2255,7 @@
   }
 
   passagePane.addEventListener("click", e=>{
+    if(state.reviewMode) return;   // a restored highlight is display-only in review
     const span = e.target.closest(".hl");
     if(!span) return;
     const sel = window.getSelection();
@@ -2308,16 +2439,21 @@
     el("notesChev").title = state.notesCollapsed ? "Expand notes" : "Collapse notes";
     if(!visible){ el("notesCards").innerHTML = ""; return; }
 
+    /* Review: the note cards render exactly as the student left them, but
+       read-only — no trash button, textarea locked. Note text/snippet/id come
+       out of a record and are escaped like every other record value. */
+    const review = !!state.reviewMode;
     const trashSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6"/><path d="M19 6l-1 13.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5L5 6"/><path d="M10 10.5v6M14 10.5v6"/></svg>';
     el("notesCards").innerHTML = notes.map(n => `
       <div class="note-card" data-note="${escapeHtml(n.id)}">
         <div class="note-head">
           <span class="note-title">${escapeHtml(n.snippet)}</span>
-          <button class="note-trash" title="Delete note">${trashSvg}</button>
+          ${review ? "" : `<button class="note-trash" title="Delete note">${trashSvg}</button>`}
         </div>
-        <textarea class="note-body-ta" placeholder="Notes are saved automatically.">${escapeHtml(n.text)}</textarea>
+        <textarea class="note-body-ta" ${review ? "readonly" : 'placeholder="Notes are saved automatically."'}>${escapeHtml(n.text)}</textarea>
       </div>`).join("");
 
+    if(review) return;
     el("notesCards").querySelectorAll(".note-card").forEach(card => {
       const note = notes.find(n => n.id === card.dataset.note);
       card.querySelector(".note-trash").addEventListener("click", ()=> deleteNote(card.dataset.note));
@@ -2405,7 +2541,6 @@
   function buildScoreRows(test, record){
     const ms = buildModuleStateFromRecord(test, record);
     const rows = [];
-    const secCount = {};   // per-section running question number
     const tally = { "Reading and Writing": {correct:0, graded:0}, "Math": {correct:0, graded:0} };
     const domains = {};    // section -> domain -> {correct, graded}
     /* per-module raw correct, in document order within each section — feeds
@@ -2413,16 +2548,15 @@
     const SEC_KEY = { "Reading and Writing": "rw", "Math": "math" };
     const moduleRaw = { rw: [0, 0], math: [0, 0] };
     const modOrd = {};     // section -> how many of its modules seen so far
-    test.modules.forEach(mod => {
+    test.modules.forEach((mod, modIndex) => {
       const mKey = SEC_KEY[mod.section];
       const mIdx = (modOrd[mod.section] = (modOrd[mod.section] || 0) + 1) - 1;
       const st = ms[mod.moduleId];
-      mod.questions.forEach(q => {
+      mod.questions.forEach((q, qIndex) => {
         const noKey = !hasKey(q);
         const given = st.answers.hasOwnProperty(q.id) ? st.answers[q.id] : null;
         const correct = !noKey && given !== null && answerMatches(q, given);
         const domain = mapDomain(mod.section, q.skill);
-        secCount[mod.section] = (secCount[mod.section] || 0) + 1;
         if(!noKey && tally[mod.section]){
           tally[mod.section].graded++;
           if(correct){
@@ -2435,7 +2569,13 @@
           const de = (dd[domain] = dd[domain] || {correct:0, graded:0});
           de.graded++; if(correct) de.correct++;
         }
-        rows.push({ q, mod, section: mod.section, num: secCount[mod.section],
+        /* Numbering is MODULE-LOCAL on every student-facing surface (RW M1
+           1-27, RW M2 1-27, Math M1 1-22, Math M2 1-22) — matching what the
+           student saw while testing. Never a running 1-98 or per-section
+           1-54; `mnum` + `modShort` together are the question's name. */
+        rows.push({ q, mod, modIndex, qIndex, section: mod.section,
+          mnum: qIndex + 1,
+          modShort: (mod.section === "Reading and Writing" ? "RW" : "Math") + " M" + moduleNumber(mod),
           given, noKey, correct, domain });
       });
     });
@@ -2464,7 +2604,6 @@
     sdCtx = { test, record, rows: built.rows, tally: built.tally, domains: built.domains,
       moduleRaw: built.moduleRaw,
       filter: "all", page: 0, pageSize: 10, showCorrect: false, origin: origin || "home" };
-    qrShowAnswer = false;   // §5: the popup toggle is sticky per session, fresh per visit
     renderScoreDetails();
     showOnly("screen-scoredetails");
     el("sdRoot").scrollTop = 0;
@@ -2514,23 +2653,54 @@
         </div>`;
     }
 
-    // knowledge & skills
+    /* Module summary strips: one row per module — label, raw score, and a
+       numbered chip per question colored by outcome. Chips open Review Mode
+       at that question. Numbers are module-local (the only numbering any
+       student surface uses). Counts are computed, never record-interpolated. */
+    const rows = sdCtx.rows;
+    const strips = '<section class="sd-modstrips" id="sdModStrips">' +
+      test.modules.map((mod, mi) => {
+        const mrows = rows.filter(r => r.modIndex === mi);
+        const graded = mrows.filter(r => !r.noKey).length;
+        const correct = mrows.filter(r => r.correct).length;
+        return `<div class="sd-strip">
+          <div class="sd-strip-head">
+            <span class="sd-strip-label">${escapeHtml(mod.section)} · ${escapeHtml(mod.moduleLabel)}</span>
+            <span class="sd-strip-raw">${correct}/${graded}</span>
+          </div>
+          <div class="sd-chips">` +
+          mrows.map(r => {
+            const cls = r.noKey ? "nokey" : r.given === null ? "omit" : r.correct ? "ok" : "bad";
+            const word = r.noKey ? "no key yet" : r.given === null ? "omitted" : r.correct ? "correct" : "incorrect";
+            return `<button class="sd-chip ${cls}" data-mi="${mi}" data-qi="${r.qIndex}"
+              title="Question ${r.mnum} — ${word}. Open in review.">${r.mnum}</button>`;
+          }).join("") +
+          `</div></div>`;
+      }).join("") + '</section>';
+
+    /* Knowledge & Skills. A test with no tagged questions maps everything to
+       "Other", and a grid reading "Other n/54" is noise dressed as data — so
+       a fully-untagged test collapses to one line. The grid comes back by
+       itself the moment any question carries a tag. */
+    const allUntagged = rows.length > 0 && rows.every(r => r.domain === "Other");
     let ks = "";
-    ["Reading and Writing", "Math"].forEach(section => {
-      const dd = domains[section];
-      if(!dd) return;
-      const order = CB_DOMAINS[section].concat(["Other"]).filter(d => dd[d]);
-      if(!order.length) return;
-      ks += `<div class="sd-ks-section"><h3>${escapeHtml(section)}</h3><div class="sd-ks-grid">` +
-        order.map(d => {
-          const e = dd[d];
-          return `<div class="sd-ks-item">
-            <div class="sd-ks-name">${escapeHtml(d)}</div>
-            <div class="sd-ks-count">${e.correct}/${e.graded} correct</div>
-            ${domainBar(e.correct, e.graded)}
-          </div>`;
-        }).join("") + "</div></div>";
-    });
+    if(!allUntagged){
+      ["Reading and Writing", "Math"].forEach(section => {
+        const dd = domains[section];
+        if(!dd) return;
+        const order = CB_DOMAINS[section].concat(["Other"]).filter(d => dd[d]);
+        if(!order.length) return;
+        ks += `<div class="sd-ks-section"><h3>${escapeHtml(section)}</h3><div class="sd-ks-grid">` +
+          order.map(d => {
+            const e = dd[d];
+            return `<div class="sd-ks-item">
+              <div class="sd-ks-name">${escapeHtml(d)}</div>
+              <div class="sd-ks-count">${e.correct}/${e.graded} correct</div>
+              ${domainBar(e.correct, e.graded)}
+            </div>`;
+          }).join("") + "</div></div>";
+      });
+    }
 
     el("sdRoot").innerHTML = `
       <div class="sd-hero">
@@ -2548,10 +2718,13 @@
         </div>
       </div>
       <div class="sd-body">
+        ${strips}
         <section class="sd-ks">
           <h2>Knowledge and Skills</h2>
-          <p class="sd-muted">Your performance across the content domains measured on the SAT.</p>
-          ${ks || '<p class="sd-muted">Domain breakdown is not available for this test yet.</p>'}
+          ${allUntagged
+            ? '<p class="sd-muted">Skill tags aren\'t available for this test, so there\'s no domain breakdown — every question is in the review below.</p>'
+            : '<p class="sd-muted">Your performance across the content domains measured on the SAT.</p>' +
+              (ks || '<p class="sd-muted">Domain breakdown is not available for this test yet.</p>')}
         </section>
         <section class="sd-questions" id="sdQuestions"></section>
       </div>`;
@@ -2561,8 +2734,12 @@
       if(sdCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }
       renderHome(); showOnly("screen-home");
     });
-    el("sdReviewAllBtn").addEventListener("click", ()=>{
-      el("sdQuestions").scrollIntoView({ behavior: "smooth" });
+    el("sdReviewAllBtn").addEventListener("click", ()=> openReviewMode(0, 0));
+    // one delegated handler for every chip: open review at that question
+    el("sdModStrips").addEventListener("click", e=>{
+      const chip = e.target.closest(".sd-chip");
+      if(!chip) return;
+      openReviewMode(parseInt(chip.dataset.mi, 10), parseInt(chip.dataset.qi, 10));
     });
     el("sdDownloadBtn").addEventListener("click", ()=> window.print());
     renderQuestionsOverview();
@@ -2584,9 +2761,12 @@
     const body = shown.map(r => {
       const yours = answerLetter(r.q, r.given);
       const stateCls = r.noKey ? "nokey" : (r.given === null ? "omit" : (r.correct ? "ok" : "bad"));
+      /* module-local number + module column: "3 · RW M2" is the question's
+         name, matching the strips, the review header and what the student
+         saw while testing — never a running index */
       return `<tr>
-        <td>${r.num}</td>
-        <td>${escapeHtml(r.section === "Reading and Writing" ? "RW" : "Math")}</td>
+        <td>${r.mnum}</td>
+        <td>${escapeHtml(r.modShort)}</td>
         <td class="sd-correct-col">${showCorrect ? escapeHtml(correctLabel(r.q)) : '<span class="sd-hidden">•</span>'}</td>
         <td class="sd-${stateCls}">${yours === null ? "Omitted" : escapeHtml(yours)}</td>
         <td><button class="sd-review-link" data-rid="${rows.indexOf(r)}">Review</button></td>
@@ -2605,7 +2785,7 @@
       </div>
       <div class="sd-table-wrap">
         <table class="sd-table">
-          <thead><tr><th>Question #</th><th>Section</th><th>Correct Answer</th><th>Your Answer</th><th>Review</th><th>Domain</th></tr></thead>
+          <thead><tr><th>Question #</th><th>Module</th><th>Correct Answer</th><th>Your Answer</th><th>Review</th><th>Domain</th></tr></thead>
           <tbody>${body || '<tr><td colspan="6" class="sd-muted">No questions.</td></tr>'}</tbody>
         </table>
       </div>
@@ -2623,188 +2803,84 @@
     if(el("sdPrev")) el("sdPrev").addEventListener("click", ()=>{ sdCtx.page = pg - 1; renderQuestionsOverview(); });
     if(el("sdNext")) el("sdNext").addEventListener("click", ()=>{ sdCtx.page = pg + 1; renderQuestionsOverview(); });
     document.querySelectorAll("#sdQuestions .sd-review-link").forEach(b =>
-      b.addEventListener("click", ()=> openQuestionReview(filtered, filtered.indexOf(rows[parseInt(b.dataset.rid,10)]))));
+      b.addEventListener("click", ()=>{
+        const r = rows[parseInt(b.dataset.rid, 10)];
+        if(r) openReviewMode(r.modIndex, r.qIndex);
+      }));
   }
 
-  /* ---- Question Review popup (§5) ---- */
-  let qrCtx = null;   // { list, idx }  (showAnswer is sticky per popup session)
-  let qrShowAnswer = false;
+  /* ================= REVIEW MODE =================
+     The one review surface (2026-08-02): a read-only replay of a released,
+     version-matched attempt in the REAL test UI — same renderer, panes,
+     figures and math as the sitting itself, with the student's highlights,
+     notes, eliminations and flags restored through the same sanitizer path
+     resume uses. Replaces the Phase G review popup and the Phase D
+     "View My Responses" results page, both deleted.
 
-  function qrQuestionHtml(q){
-    let html = "";
-    if(q.figure){
-      html += `<div class="qr-fig"><img src="${escapeHtml(q.figure)}" alt="Question figure">` +
-        (q.figureCaption ? `<div class="qr-fig-cap">${fmt(q.figureCaption)}</div>` : "") + `</div>`;
-    }
-    if(q.passage) html += `<div class="qr-passage">${fmt(q.passage)}</div>`;
-    html += `<div class="qr-qtext">${fmt(q.questionText)}</div>`;
-    if(q.type !== "spr"){
-      html += `<ol class="qr-choices">` +
-        q.choices.map((c,i)=> `<li><span class="qr-cl">${String.fromCharCode(65+i)}.</span> ${fmt(c, {bigInline:true})}</li>`).join("") + `</ol>`;
-    }
-    return html;
-  }
-
-  function qrAnswerHtml(row){
-    const q = row.q;
-    let banner, cls;
-    if(row.noKey){
-      cls = "neutral"; banner = "No key yet for this question.";
-    } else {
-      const correct = correctLabel(q);
-      if(row.given === null){ cls = "bad"; banner = `You omitted this question. The correct answer is ${escapeHtml(correct)}.`; }
-      else if(row.correct){ cls = "ok"; banner = `You answered ${escapeHtml(answerLetter(q, row.given))}, which is correct.`; }
-      else { cls = "bad"; banner = `Your answer is ${escapeHtml(answerLetter(q, row.given))}. The correct answer is ${escapeHtml(correct)}.`; }
-    }
-    let html = `<h3 class="qr-ans-h">Answer</h3><div class="qr-banner ${cls}">${banner}</div>`;
-    if(q.rationale){   // §5: rendered only when present, no empty placeholder
-      html += `<h3 class="qr-rat-h">Rationale</h3><div class="qr-rationale">${fmt(q.rationale)}</div>`;
-    }
-    return html;
-  }
-
-  function renderQuestionReview(){
-    const row = qrCtx.list[qrCtx.idx];
-    const q = row.q;
-    el("qrCard").innerHTML = `
-      <div class="qr-head">
-        <button class="panel-x dark" id="qrClose">✕</button>
-        <div class="qr-domain">Knowledge and Skills: ${escapeHtml(row.domain)}</div>
-      </div>
-      <div class="qr-body">
-        <div class="qr-left">
-          <div class="qr-qnum">${escapeHtml(row.section)}: Question ${row.num}</div>
-          ${qrQuestionHtml(q)}
-        </div>
-        <div class="qr-right">${qrShowAnswer ? qrAnswerHtml(row) : ""}</div>
-      </div>
-      <div class="qr-foot">
-        <label class="qr-toggle"><input type="checkbox" id="qrShow" ${qrShowAnswer?"checked":""}> Show correct answer and explanation</label>
-        <div class="qr-nav">
-          <button class="pill ghost" id="qrPrev" ${qrCtx.idx===0?"disabled":""}>Previous</button>
-          <button class="pill" id="qrNext" ${qrCtx.idx>=qrCtx.list.length-1?"disabled":""}>Next</button>
-        </div>
-      </div>`;
-    el("qrClose").addEventListener("click", ()=> hide("qrModal"));
-    el("qrShow").addEventListener("change", e=>{ qrShowAnswer = e.target.checked; renderQuestionReview(); });
-    el("qrPrev").addEventListener("click", ()=>{ if(qrCtx.idx>0){ qrCtx.idx--; renderQuestionReview(); } });
-    el("qrNext").addEventListener("click", ()=>{ if(qrCtx.idx<qrCtx.list.length-1){ qrCtx.idx++; renderQuestionReview(); } });
-  }
-
-  function openQuestionReview(list, idx){
-    qrCtx = { list, idx: Math.max(0, idx) };
-    renderQuestionReview();
-    show("qrModal");
-  }
-  el("qrModal").addEventListener("click", e=>{ if(e.target.id === "qrModal") hide("qrModal"); });
-
-  /* ================= GRADING / RESULTS ================= */
-  /* Phase D: the student-facing entry point — read-only review of a stored,
-     released attempt (reuses the results renderer below). */
-  function viewResponses(test, record){
-    renderResults({ test, moduleState: buildModuleStateFromRecord(test, record), review: true });
-  }
-
-  /* No opts (live mode, post-submit results) is currently unreachable —
-     score-visibility (b) routes submits to the confirmation screen — but the
-     branch is kept intact so flipping back to instant results stays a
-     one-line change in showModuleOver. */
-  function renderResults(opts){
-    const review = !!(opts && opts.review);
-    const test = review ? opts.test : state.currentTest;
-    const modStates = review ? opts.moduleState : state.moduleState;
-    let totalQ = 0, totalGraded = 0, totalCorrect = 0, totalNoKey = 0;
-    const sectionTally = {};
-    const allReviewItems = [];
-
-    test.modules.forEach(mod=>{
-      const ms = modStates[mod.moduleId];
-      if(!sectionTally[mod.section]) sectionTally[mod.section] = {correct:0,total:0};
-      mod.questions.forEach(q=>{
-        totalQ++;
-        const noKey = !hasKey(q);                       // excluded from denominators (v1.2 §4)
-        if(noKey) totalNoKey++; else { totalGraded++; sectionTally[mod.section].total++; }
-        const given = ms.answers.hasOwnProperty(q.id) ? ms.answers[q.id] : null;
-        const isCorrect = !noKey && given !== null && answerMatches(q, given);
-        if(isCorrect){ totalCorrect++; sectionTally[mod.section].correct++; }
-        allReviewItems.push({ q, mod, given, isCorrect, noKey });
-      });
+     Reached only from Score Details, so the release/version gate is already
+     behind us. Nothing in review records: Attempts.detach() drops the
+     recorder's handle on whatever attempt it last held (after finalize, `rec`
+     still points at the completed record and the visibility/unload flushes
+     write whenever it exists — left attached, reviewing attempt B over the
+     same test would flush B's replayed answers into A's record), and every
+     mutating handler and Attempts.* call in the test flow is additionally
+     gated on state.reviewMode. */
+  function openReviewMode(modIdx, qIdx){
+    if(!sdCtx) return;
+    const { test, record, rows } = sdCtx;
+    if(!test.modules || !test.modules.length) return;
+    Attempts.detach();
+    const rowByQid = {};
+    rows.forEach(r => { rowByQid[r.q.id] = r; });
+    state.reviewMode = { record, rowByQid, sdScroll: el("sdRoot").scrollTop };
+    state.currentTest = test;
+    state.moduleState = buildModuleStateFromRecord(test, record);
+    /* Annotations: finalize keeps the sitting's blob on the completed record;
+       older completed records may predate that and simply review clean.
+       Restored exactly as resume restores them — raw HTML into moduleState,
+       sanitized at every render. */
+    const ann = record.annotations ||
+      ((record.resume || record.checkpoint || {}).annotations) || {};
+    Object.keys(ann).forEach(mid=>{
+      const ms = state.moduleState[mid];
+      if(!ms || !ann[mid]) return;
+      if(ann[mid].passageHtml) ms.passageHtml = ann[mid].passageHtml;
+      if(ann[mid].notes) ms.notes = ann[mid].notes;
     });
-
-    el("resTitle").textContent = (review ? "Your Responses — " : "Results — ") + test.testName;
-    el("resSub").textContent = `${state.userName}, you answered ${totalCorrect} of ${totalGraded} questions correctly.` +
-      (totalNoKey ? ` (${totalNoKey} question${totalNoKey===1?"":"s"} not yet graded — no answer key.)` : "");
-
-    el("scoreGrid").innerHTML = `
-      <div class="score-card total"><div class="sc-lbl">Overall</div><div class="sc-val">${totalCorrect}/${totalGraded}</div></div>
-      ${Object.entries(sectionTally).map(([sec,t])=>`
-        <div class="score-card"><div class="sc-lbl">${escapeHtml(sec)}</div><div class="sc-val">${t.correct}/${t.total}</div></div>
-      `).join("")}`;
-
-    el("breakdownList").innerHTML = test.modules.map(mod=>{
-      const ms = modStates[mod.moduleId];
-      let correct = 0, graded = 0;
-      mod.questions.forEach(q=>{
-        if(!hasKey(q)) return;
-        graded++;
-        const given = ms.answers.hasOwnProperty(q.id) ? ms.answers[q.id] : null;
-        if(given !== null && answerMatches(q, given)) correct++;
-      });
-      const pct = graded ? Math.round((correct/graded)*100) : 0;
-      return `
-        <div class="mb-row">
-          <span>${escapeHtml(mod.section)} — ${escapeHtml(mod.moduleLabel)}</span>
-          <div class="mb-bar"><div class="mb-bar-fill" style="width:${pct}%;"></div></div>
-          <span>${correct}/${graded}</span>
-        </div>`;
-    }).join("");
-
-    el("qReviewList").innerHTML = allReviewItems.map((item,i)=>{
-      const status = item.noKey ? "nokey" : (item.given === null ? "skipped" : (item.isCorrect ? "correct" : "wrong"));
-      const statusLabel = { nokey:"No key yet", skipped:"Skipped", correct:"Correct", wrong:"Incorrect" }[status];
-      let yourAnswerHtml, correctAnswerHtml;
-      if(item.q.type === "spr"){
-        yourAnswerHtml = item.given === null ? "—" : escapeHtml(String(item.given));
-        if(item.noKey){
-          correctAnswerHtml = "No key yet";
-        } else {
-          correctAnswerHtml = escapeHtml(String(item.q.correctAnswer)) +
-            ((item.q.altAnswers && item.q.altAnswers.length)
-              ? ` <span style="color:#666;">(also accepted: ${item.q.altAnswers.map(a=>escapeHtml(String(a))).join(", ")})</span>` : "");
-        }
-      } else {
-        yourAnswerHtml = item.given === null ? "—"
-          : String.fromCharCode(65+item.given) + ". " + fmt(item.q.choices[item.given]);
-        correctAnswerHtml = item.noKey ? "No key yet"
-          : String.fromCharCode(65+item.q.correctAnswer) + ". " + fmt(item.q.choices[item.q.correctAnswer]);
-      }
-      return `
-        <div class="qreview-item">
-          <div class="qri-head">
-            <span class="qri-badge ${status}">${statusLabel}</span>
-            <span class="qri-skill">${escapeHtml(item.mod.section)} · ${escapeHtml(item.mod.moduleLabel)} · Q${i+1}${item.q.skill ? " · " + escapeHtml(item.q.skill) : ""}</span>
-          </div>
-          <div class="qri-qtext">${fmt(item.q.questionText)}</div>
-          <div style="font-size:13.5px;">
-            <div style="margin-bottom:4px;"><b>Your answer:</b> ${yourAnswerHtml}</div>
-            <div><b>Correct answer:</b> ${correctAnswerHtml}</div>
-          </div>
-        </div>`;
-    }).join("");
-
-    el("resRestartBtn").onclick = ()=>{ renderHome(); showOnly("screen-home"); };
-    el("resDownloadBtn").onclick = ()=> Attempts.downloadJson();
-    el("resDownloadBtn").classList.toggle("hidden", review);
-    el("resSaveNote").classList.toggle("hidden", review);
-    if(!review){
-      /* spec §6: the JSON download is the fallback archive when shared storage
-         is absent (local copy) or the final write failed. */
-      el("resSaveNote").textContent = Attempts.storageWorking()
-        ? "Your attempt was recorded automatically."
-        : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
-    }
-    showOnly("screen-results");
+    state.view = "question";
+    state.elimMode = false;
+    state.hlMode = false;
+    clearInterval(state.timerInterval);
+    // "Review" where the clock was; no Hide toggle, no five-minute machinery
+    el("timerDisplay").innerHTML = '<span class="timer-review">Review</span>';
+    el("timerBtn").classList.add("hidden");
+    hide("fiveMinPopup");
+    show("rvBackBtn");
+    state.moduleIndex = Math.max(0, Math.min(modIdx || 0, test.modules.length - 1));
+    const mod = test.modules[state.moduleIndex];
+    state.questionIndex = Math.max(0, Math.min(qIdx || 0, mod.questions.length - 1));
+    renderTest();
+    showOnly("screen-test");
   }
+
+  function exitReviewMode(){
+    if(!state.reviewMode) return;
+    const scroll = state.reviewMode.sdScroll || 0;
+    closeDirections(); closeQnav(); closeCalc(); closeRef(); hide("figOverlay");
+    setLineReader(false);
+    hide("rvBackBtn");
+    // live-test chrome comes back with the next beginModule; un-hide the
+    // timer toggle so nothing depends on that
+    el("timerBtn").classList.remove("hidden");
+    state.reviewMode = null;
+    state.currentTest = null;
+    state.moduleState = {};
+    lastRenderedQKey = null;
+    renderScoreDetails();
+    showOnly("screen-scoredetails");
+    el("sdRoot").scrollTop = scroll;
+  }
+  el("rvBackBtn").addEventListener("click", exitReviewMode);
 
   /* ================= INIT ================= */
   // §6: dashboard "Open student view" bridges into the Score Details page,

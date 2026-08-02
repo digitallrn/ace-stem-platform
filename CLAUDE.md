@@ -284,10 +284,14 @@ record-derived value.
   ATTEMPTS-SPEC.md (students sign in with a CODE, records are
   pseudonymous; dashboard has export + archive-then-delete). Read that
   spec before touching attempts.js/dashboard.js.
-- David wants changes to the Results page; scope not yet defined — ask
-  before restructuring `renderResults()` in `app.js` beyond small tweaks,
-  since the tutor dashboard and future score-report generation both read
-  the same results data.
+- ✅ 2026-08-02: the Results-page rework landed as the Score Details
+  redesign + Review Mode. `renderResults()`, `screen-results` and the Phase G
+  question-review popup are DELETED — the one review surface is Review Mode
+  (read-only replay in the real test UI, entered from Score Details).
+  Numbering is module-local on every student-facing surface. `finalize()` now
+  keeps the sitting's annotations on the completed record (ATTEMPTS-SPEC §2)
+  so review can replay highlights/notes; `Attempts.detach()` is called on
+  entering review so the recorder can never write from a replay.
 - `testdata/202606asiav1.js` holds "2026 June Asia v1" (98 questions) at
   testVersion 2026-08-01-c; `testdata/202606asiav2.js` holds "2026 June Asia
   v2". Regenerate from the test-bank repo's JSON — never hand-edit — and bump

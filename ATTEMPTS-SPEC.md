@@ -82,6 +82,16 @@ limited, hence the checkpoint schedule in §3 rather than a write per click.
     "byModule":  { "2024-march-c-rw1": { "correct": 21, "graded": 27 } }
   },
 
+  // 2026-08-02: written by finalize() when the sitting made any highlights or
+  // notes; omitted otherwise. Same shape the resume/checkpoint blobs carry
+  // (moduleId -> { passageHtml: {qid: html}, notes: {qid: [{id, snippet,
+  // text}]} }), kept because those blobs are deleted at finalize and Score
+  // Details review replays the student's annotations in the test UI. The
+  // passage HTML is raw markup: it is UNTRUSTED on read-back like every other
+  // record field (§7) and must only ever re-enter the DOM through the resume
+  // sanitizer (AppSanitize.html), never innerHTML directly.
+  "annotations": { "2024-march-c-rw1": { "passageHtml": {}, "notes": {} } },
+
   "client": { "userAgent": "...", "screen": "1512x982" }
 }
 ```
