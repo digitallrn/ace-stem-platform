@@ -124,7 +124,18 @@ moduleLabel, timeLimitMinutes 32 RW / 35 Math, questions[]).
 
 - MCQ: index equality.
 - SPR: correct if the student's entry matches `correctAnswer` **or any entry
-  in `altAnswers`**, using the existing fraction/decimal equivalence (±0.01).
+  in `altAnswers`**. Matching follows the real Bluebook rule (2026-08-02),
+  **not a tolerance**: the exact value, or the value truncated *or* rounded at
+  each precision that FILLS the 5-character field (6 with a minus sign) in a
+  writable form. For 2/3 that accepts `2/3 .6666 .6667 0.666 0.667` and
+  rejects `.66 0.66 .67 0.67`, exactly as the on-screen directions' table
+  prints. The old fixed ±0.01 was wrong in both directions and worst for small
+  answers — with the key `.0138` it was larger than the answer itself.
+  **A key that is itself a truncation must carry its other forms in
+  `alt_answers`**: `.0138` cannot know it came from 1/72, so
+  `1/72|.0139|0.0139` belongs in the alts column. This is why `alt_answers`
+  exists and why the converter should populate it whenever the printed key is
+  a shortened decimal.
 - True range answers ("any value between 1/3 and 1/2") are **not** modeled in
   v1.1 — they're rare; the extractor must flag them `needs_review: range
   answer` for manual handling.

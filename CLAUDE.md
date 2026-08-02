@@ -199,6 +199,13 @@ run it against `dist/index-live.html` after touching any render surface.
 `tests/local-mode.test.js` (`node tests/local-mode.test.js`) covers the
 storage-adapter mode resolution; the preview pane strips query strings, so
 the `?devstorage=1` cases can only be checked there.
+`tests/spr-grading.test.js` (`node tests/spr-grading.test.js`) covers SPR
+answer matching: the directions' Acceptable/Unacceptable table, and an
+EXHAUSTIVE old-rule-vs-new comparison over every enterable string for every
+shipped SPR key. Pass a dashboard export as an argument
+(`node tests/spr-grading.test.js export.json`) to audit real stored attempts
+— that is the only way to check live records, since they live in the backend
+and never in this repo.
 
 ## Student names vs. records (ATTEMPTS-SPEC §7a)
 Students see a display name, but **records stay pseudonymous**. The name is a
