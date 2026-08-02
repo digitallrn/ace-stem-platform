@@ -52,25 +52,75 @@ function toFraction(str){
 
   /* The field: 5 characters, or 6 when a minus sign is present. */
   const SPR_MAX_CHARS = 5;
+  /* Nothing legitimate — no converter key, no alt, and certainly no entry the
+     5/6-character field can hold — comes near this. Bounding here is what
+     keeps every product below Number.MAX_SAFE_INTEGER: with |n| and d both
+     under 1e7, ratEq's cross-products stay under 1e14 and truncAt's n*p under
+     1e11. Without the bound a long value read out of a RECORD (which
+     ATTEMPTS-SPEC §7 says anyone can write) overflowed to Infinity, and
+     Infinity === Infinity made it grade correct against almost every key. */
+  const SPR_MAX_TERM = 1e7;
 
   /* Exact rational parse — no floats, so .1 + .2 style error can never decide
-     a student's score. Accepts "7", "-189", ".5", "5.", "9.96", "-1/3". */
+     a student's score. Accepts "7", "-189", ".5", "5.", "9.96", "-1/3".
+     Returns null for anything that is not a finite, in-range value. */
   function sprParseExact(s){
     const t = String(s == null ? "" : s).trim();
+    if(!t || t.length > 24) return null;          // nothing real is this long
     let m = t.match(/^(-?)(\d+)\s*\/\s*(\d+)$/);
     if(m){
-      const den = Number(m[3]);
-      if(!den) return null;                       // x/0 is not a value
-      return { n: (m[1] ? -1 : 1) * Number(m[2]), d: den };
+      const num = Number(m[2]), den = Number(m[3]);
+      if(!den || !isFinite(num) || !isFinite(den)) return null;   // x/0 is not a value
+      if(num > SPR_MAX_TERM || den > SPR_MAX_TERM) return null;
+      return { n: (m[1] ? -1 : 1) * num, d: den };
     }
     m = t.match(/^(-?)(\d*)(?:\.(\d*))?$/);
     if(!m) return null;
     const ip = m[2] || "", fp = m[3] || "";
     if(!ip && !fp) return null;                   // "", "-", "." are not values
-    return { n: (m[1] ? -1 : 1) * Number(ip + fp), d: Math.pow(10, fp.length) };
+    const n = Number(ip + fp), d = Math.pow(10, fp.length);
+    if(!isFinite(n) || !isFinite(d) || n > SPR_MAX_TERM || d > SPR_MAX_TERM) return null;
+    return { n: (m[1] ? -1 : 1) * n, d };
   }
 
   function ratEq(a, b){ return a.n * b.d === b.n * a.d; }
+  function ratIsZero(a){ return a.n === 0; }
+
+  function sprGcd(a, b){
+    a = Math.abs(a); b = Math.abs(b);
+    while(b){ const t = a % b; a = b; b = t; }
+    return a;
+  }
+  /* How many decimal places the value needs to be written EXACTLY, or null if
+     it never terminates (1/3). A denominator of only 2s and 5s terminates. */
+  function sprExactPlaces(a){
+    const g = sprGcd(a.n, a.d) || 1;
+    let d = a.d / g, twos = 0, fives = 0;
+    while(d % 2 === 0){ d /= 2; twos++; }
+    while(d % 5 === 0){ d /= 5; fives++; }
+    if(d !== 1) return null;
+    return Math.max(twos, fives);
+  }
+
+  /* Can the answer be written EXACTLY inside the field? This is the
+     precondition the directions put on shortening: "If your answer is a
+     decimal that DOESN'T FIT in the provided space, enter it by truncating or
+     rounding at the fourth digit." Without this check the rule offered a
+     shortened form even when the exact value was writable, which handed out
+     credit for plainly wrong answers — .188 for 3/16 (=.1875, which fits),
+     and worse, a bare 0 for any key below .001, because truncating those to
+     three places collapses them to zero. */
+  function sprFitsExactly(a){
+    const dp = sprExactPlaces(a);
+    if(dp === null) return false;                 // never terminates
+    const mag = Math.abs(a.n) / a.d;
+    const intDigits = String(Math.floor(mag)).length;
+    const avail = SPR_MAX_CHARS;                  // the sign gets its own slot
+    if(dp === 0) return intDigits <= avail;       // an integer needs no point
+    if(intDigits + 1 + dp <= avail) return true;  // "I.ddd"
+    if(mag < 1 && 1 + dp <= avail) return true;   // ".dddd"
+    return false;
+  }
 
   /* Truncate / round a rational to k decimal places, exactly.
      `a.n * p` and `a.d` are both safe integers here (keys are short), and a
@@ -98,11 +148,27 @@ function toFraction(str){
   function sprCapacities(a){
     const avail = SPR_MAX_CHARS;                  // the sign gets its own slot
     const mag = Math.abs(a.n) / a.d;
-    const intDigits = String(Math.floor(mag)).length;
     const out = [];
-    if(mag < 1 && avail - 1 >= 1) out.push(avail - 1);          // ".dddd"
-    const withInt = avail - intDigits - 1;                       // "I.ddd"
-    if(withInt >= 1 && out.indexOf(withInt) === -1) out.push(withInt);
+    if(mag < 1){
+      /* Both writable forms, which is what makes .6666 AND 0.666 acceptable
+         for 2/3 while .66 is not. Never zero places: "0" is not a shortening
+         of a sub-1 answer, it is a different (wrong) answer. */
+      if(avail - 1 >= 1) out.push(avail - 1);                    // ".dddd"
+      if(avail - 2 >= 1) out.push(avail - 2);                    // "0.ddd"
+    } else {
+      const intDigits = String(Math.floor(mag)).length;
+      const withInt = avail - intDigits - 1;                     // "II.dd"
+      if(withInt >= 1) out.push(withInt);
+      else if(intDigits <= avail) out.push(0);
+      /* Zero places ONLY when no decimal form is writable at all. 1562.5 and
+         62951.5 cannot be written in five characters, so 1562/1563 and
+         62951/62952 are the only entries that fit — without this such a key
+         accepted nothing and the item was unanswerable. But 43/3 CAN be
+         written to two places as 14.33, so "14" is not a shortening it is
+         allowed to stop at, exactly as .66 is not for 2/3. Note the integer
+         form carries no decimal point, which is why it is not `avail - digits
+         - 1`. */
+    }
     return out;
   }
 
@@ -113,12 +179,17 @@ function toFraction(str){
     const ga = sprParseExact(a), gb = sprParseExact(b);
     if(!ga || !gb) return false;
     if(ratEq(ga, gb)) return true;                         // same exact value
-    /* Otherwise the only acceptable entries are the shortened forms the field
-       forces: truncate or round the key at each precision that fills it. */
+    /* Shortening is licensed ONLY when the exact answer cannot be written in
+       the field. If it fits, the exact value is the only acceptable entry. */
+    if(sprFitsExactly(gb)) return false;
     const caps = sprCapacities(gb);
     for(let i = 0; i < caps.length; i++){
-      if(ratEq(ga, truncAt(gb, caps[i]))) return true;
-      if(ratEq(ga, roundAt(gb, caps[i]))) return true;
+      const t = truncAt(gb, caps[i]), r = roundAt(gb, caps[i]);
+      /* A shortening that collapses a non-zero answer to zero is not an
+         answer — it is the absence of one. 1/3000 truncated to three places
+         is 0, and "0" must never be credited for it. */
+      if(!ratIsZero(t) && ratEq(ga, t)) return true;
+      if(!ratIsZero(r) && ratEq(ga, r)) return true;
     }
     return false;
   }

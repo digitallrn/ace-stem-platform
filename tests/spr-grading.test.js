@@ -128,11 +128,20 @@ const entries = [];
 for(const e of everyEntry()) entries.push(e);
 console.log(`    ${entries.length.toLocaleString()} enterable strings`);
 
-/* every SPR key shipped in the library, plus the draft that motivated this */
+/* Every SPR key shipped in the library, taken from the MANIFEST — the file
+   that defines the library and the one build-site.js ships from. Hardcoding
+   two requires here meant a test added the documented way ("drop
+   testdata/<testId>.js in, add its manifest entry, done") was silently never
+   swept, while this suite went on claiming library-wide coverage. */
 global.window = {};
-require(path.join(repo, "testdata", "202606asiav1.js"));
-require(path.join(repo, "testdata", "202606asiav2.js"));
+require(path.join(repo, "testdata", "manifest.js"));
+const manifest = global.window.TEST_MANIFEST;
+if(!Array.isArray(manifest) || !manifest.length) throw new Error("manifest did not load");
+manifest.forEach(entry => require(path.join(repo, "testdata", entry.testId + ".js")));
 const T = global.window.__TESTDATA__;
+const missing = manifest.filter(e => !T[e.testId]).map(e => e.testId);
+if(missing.length) throw new Error("manifest lists tests that registered nothing: " + missing.join(", "));
+console.log(`    library from manifest: ${manifest.map(e => e.testId).join(", ")}`);
 const keys = [];
 Object.keys(T).forEach(testId => T[testId].modules.forEach(m => m.questions.forEach(q => {
   if(q.type === "spr") keys.push({ testId, qid: q.id, q });
@@ -192,6 +201,39 @@ if(!totalDiffs){
 const anyNewlyCorrect = diffDetail.some(({ changed }) => changed.some(c => !c.before && c.after));
 check("no shipped key turns a previously-wrong entry into a correct one", anyNewlyCorrect, false);
 
+/* That assertion alone is satisfied whenever old and new AGREE, so it passes
+   under a full revert to the tolerance — the 11.4M comparisons above would
+   cost a great deal and prove nothing. These pin the sweep's actual content:
+   specific entries that must move, and that the two rules must not be the
+   same rule. Reverting grading.js turns these red. */
+const movedSet = new Set();
+diffDetail.forEach(({ k, changed }) => changed.forEach(c =>
+  movedSet.add(k.testId + "|" + k.qid + "|" + c.e)));
+const mustMove = [
+  ["202606asiav1", "ma2-q21", "9.955"],   // inside the old +/-0.01, not a legal shortening
+  ["202606asiav1", "ma2-q21", "9.97"],
+  ["202606asiav1", "ma1-q19", "45.99"],   // integer key, near-miss
+  ["202606asiav1", "ma1-q19", "46.01"],
+  ["202606asiav1", "ma1-q4",  ".13"],     // 4/31: stops short of the room it had
+  ["202606asiav2", "ma1-q9",  "14.32"],   // 43/3
+  ["202606asiav1", "ma1-q6",  "255/"],    // malformed; parseFloat used to read a prefix
+];
+const notMoved = mustMove.filter(m => !movedSet.has(m.join("|")));
+check("the sweep sees the specific entries the fix targets", notMoved.length, 0);
+if(notMoved.length) console.log("    missing: " + notMoved.map(m => m.join(" ")).join(", "));
+
+/* and entries that must NOT move — valid shortenings and exact values */
+const mustHold = [
+  ["202606asiav1", "ma1-q4",  ".129"], ["202606asiav1", "ma1-q4", ".1290"],
+  ["202606asiav1", "ma1-q4",  "0.129"], ["202606asiav1", "ma1-q4", "4/31"],
+  ["202606asiav1", "ma2-q21", "9.96"], ["202606asiav1", "ma1-q6", "255"],
+  ["202606asiav2", "ma1-q9",  "14.33"], ["202606asiav2", "ma1-q9", "43/3"],
+];
+const wronglyMoved = mustHold.filter(m => movedSet.has(m.join("|")));
+check("valid shortenings and exact values are untouched by the change", wronglyMoved.length, 0);
+if(wronglyMoved.length) console.log("    moved: " + wronglyMoved.map(m => m.join(" ")).join(", "));
+check("the two rules genuinely differ (guards against a silent revert)", totalDiffs > 0, true);
+
 /* ---------------------------------------------------------------------- */
 /* 5. Audit REAL stored attempts.
    Records live in the backend, not in this repo, so this cannot run itself.
@@ -209,9 +251,28 @@ if(!archivePath){
   console.log("      node tests/spr-grading.test.js path/to/attempts-export.json");
 } else {
   const raw = JSON.parse(fs.readFileSync(archivePath, "utf8"));
-  const records = Array.isArray(raw) ? raw
-    : Array.isArray(raw.attempts) ? raw.attempts
-    : Array.isArray(raw.records) ? raw.records : [raw];
+  /* FAIL CLOSED. This is the gate the deploy decision rests on, so "I could
+     not read this file" must never look like "I read it and found nothing".
+     Take the first array of plausible records found anywhere in the wrapper
+     rather than guessing at key names, and refuse outright if there is none
+     or if nothing in it is a record. */
+  const looksLikeRecord = r => r && typeof r === "object" && r.answers && r.testId;
+  let records = null;
+  if(Array.isArray(raw)) records = raw;
+  else if(looksLikeRecord(raw)) records = [raw];
+  else if(raw && typeof raw === "object"){
+    for(const k of Object.keys(raw)){
+      if(Array.isArray(raw[k]) && raw[k].some(looksLikeRecord)){ records = raw[k]; break; }
+    }
+  }
+  if(!records || !records.some(looksLikeRecord)){
+    console.log(`    CANNOT READ ${archivePath} — no array of attempt records found.`);
+    console.log("    Expected a dashboard export: an array of records, or an object");
+    console.log("    holding one. Refusing to report a pass on a file I did not parse.");
+    fail++; failures.push("archive audit: unreadable export (fails closed by design)");
+    console.log(`\nFAIL — ${pass} passed, ${fail} failed`);
+    process.exit(1);
+  }
   const qIndex = {};
   Object.keys(T).forEach(testId => T[testId].modules.forEach(m => m.questions.forEach(q => {
     qIndex[testId + "|" + q.id] = q;
@@ -258,6 +319,12 @@ if(!archivePath){
   }
   check("no stored SPR answer changes grade", moved.length, 0);
   check("stored verdicts agree with recomputed ones", storedDisagree.length, 0);
+  /* An answer whose test is not in the library was counted and printed but
+     never asserted on — so an export for a test this checkout does not carry
+     audited nothing and still passed. It cannot be graded here, so it is an
+     unaudited answer, and the gate has to say so. */
+  check("every stored answer belonged to a test in the library", unknown, 0);
+  check("the export actually contained gradable SPR answers", sprSeen > 0, true);
 }
 
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);

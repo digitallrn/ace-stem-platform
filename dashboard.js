@@ -543,10 +543,18 @@ window.Dashboard = (function(){
         }
         if(a.changeCount > 0 && a.firstGiven !== null && a.firstGiven !== undefined &&
            a.given !== null && a.given !== undefined && a.firstGiven !== a.given && idx && idx[qid]){
+          /* Both sides must come from the SAME rule. This recomputed
+             firstGiven while reading the final verdict off the record, so for
+             any attempt recorded before the SPR rule changed (2026-08-02) the
+             halves disagreed: a second-guess could be counted as
+             wrong->right when the record says it never was, and the
+             right->wrong counter — the one this panel exists to surface —
+             read zero in exactly the case it should have caught. */
           const firstCorrect = answerMatches(idx[qid].q, a.firstGiven);
-          if(firstCorrect && !a.correct) changes.rw++;
-          else if(!firstCorrect && a.correct) changes.wr++;
-          else if(!firstCorrect && !a.correct) changes.ww++;
+          const finalCorrect = answerMatches(idx[qid].q, a.given);
+          if(firstCorrect && !finalCorrect) changes.rw++;
+          else if(!firstCorrect && finalCorrect) changes.wr++;
+          else if(!firstCorrect && !finalCorrect) changes.ww++;
         }
       });
       (r.modules || []).forEach(m => {

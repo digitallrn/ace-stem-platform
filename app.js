@@ -799,6 +799,30 @@
     cards.forEach(c => wrap.appendChild(c));
   }
 
+  /* Per-module raw correct read STRAIGHT OFF the record, in the shape
+     scaledScores wants. The record already carries score.byModule keyed by
+     moduleId, so the home card can show a scaled total without re-grading a
+     single answer. Returns null if the record predates byModule or is missing
+     a module, in which case the caller falls back to the raw line. */
+  function storedModuleRaw(test, record){
+    const byModule = record && record.score && record.score.byModule;
+    if(!byModule) return null;
+    const SEC_KEY = { "Reading and Writing": "rw", "Math": "math" };
+    const out = { rw: [0, 0], math: [0, 0] };
+    const seen = { rw: 0, math: 0 };
+    let ok = true;
+    test.modules.forEach(mod => {
+      const key = SEC_KEY[mod.section];
+      if(!key) return;
+      const entry = byModule[mod.moduleId];
+      const n = entry ? num(entry.correct) : null;
+      if(n === null){ ok = false; return; }
+      if(seen[key] < 2) out[key][seen[key]] = n;
+      seen[key]++;
+    });
+    return ok ? out : null;
+  }
+
   function fmtCardDate(isoStr){
     if(!isoStr) return "";
     const d = new Date(isoStr);
@@ -825,23 +849,30 @@
          the student just took it, so it is cached), and otherwise fall back to
          the raw correct/graded the record already carries. Opening Score
          Details loads the content and shows the scaled score either way. */
+      /* The card reads the RECORD, never a re-grade. It used to branch on
+         whether the test content happened to be in memory — recomputing when
+         it was, reading the record when it wasn't — so the same card showed
+         two different totals in one session (open Score Details, which loads
+         the content, press Back, and the number moved), and the inlined
+         single-file build disagreed with the lazy-loading site. The scaled
+         figure still needs the test for its scoring table, but its INPUTS now
+         come from record.score.byModule, so both branches describe the stored
+         attempt. Score Details remains the one surface that re-grades. */
       const loadedTest = canView ? (window.__TESTDATA__ || {})[test.testId] : null;
       let scoreLine = "";
-      if(canView && loadedTest){
-        const built = buildScoreRows(loadedTest, record);
-        const rawRw = built.tally["Reading and Writing"].correct;
-        const rawMath = built.tally["Math"].correct;
-        const scaled = scaledScores(loadedTest, rawRw, rawMath, built.moduleRaw);
-        scoreLine = scaled
-          ? `<div class="pcard-total">${scaled.total}${scaled.estimated ? EST : ""}<span class="pcard-total-range">400–1600</span></div>`
-          : `<div class="pcard-total">${rawRw + rawMath}<span class="pcard-total-of">/ ${built.tally["Reading and Writing"].graded + built.tally["Math"].graded} correct</span></div>`;
-      } else if(canView){
-        // content not loaded: the record's own tally is enough for a raw line
-        const c = num(record.score && record.score.correct);
-        const g = num(record.score && record.score.graded);
-        if(c !== null && g !== null){
-          scoreLine = `<div class="pcard-total">${c}<span class="pcard-total-of">/ ${g} correct</span></div>`;
-        }
+      const c = num(record.score && record.score.correct);
+      const g = num(record.score && record.score.graded);
+      const scaled = (canView && loadedTest) ? scaledScores(loadedTest,
+        num(record.score && record.score.bySection &&
+            record.score.bySection["Reading and Writing"] &&
+            record.score.bySection["Reading and Writing"].correct),
+        num(record.score && record.score.bySection && record.score.bySection["Math"] &&
+            record.score.bySection["Math"].correct),
+        storedModuleRaw(loadedTest, record)) : null;
+      if(canView && scaled){
+        scoreLine = `<div class="pcard-total">${scaled.total}${scaled.estimated ? EST : ""}<span class="pcard-total-range">400–1600</span></div>`;
+      } else if(canView && c !== null && g !== null){
+        scoreLine = `<div class="pcard-total">${c}<span class="pcard-total-of">/ ${g} correct</span></div>`;
       }
       const badge = timingBadge(record.timing);
       const card = document.createElement("div");
