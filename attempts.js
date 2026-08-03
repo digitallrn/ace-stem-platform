@@ -955,17 +955,31 @@ window.Attempts = (function(){
       return merged.filter(a => a && !seen[a.assignmentId] && (seen[a.assignmentId] = 1));
     },
 
-    /* mark an assignment consumed by the attempt that just finalized */
+    /* Mark an assignment consumed by the attempt that just finalized. This
+       is now a persisted HINT, not the source of truth: the home screen
+       derives completion from attempt records (each carries its assignmentId),
+       so a student's completed assignment buckets correctly even if this write
+       never lands. What it still does is (a) let the tutor dashboard show the
+       assignment as completed without walking every attempt, and (b) carry
+       cross-device in remote mode.
+
+       It targets the PER-ASSIGNMENT ROW (assign:<CODE>:<assignmentId>), which
+       is where assignments have lived since Phase H. The old code read a
+       single array at assign:<CODE> — the pre-Phase-H shape — so against
+       current storage it found nothing and silently returned every time,
+       which is why completedAttemptId was never set. Remote mode also needs
+       the authenticated table write (adminUpsert is tutor-only; a student's
+       normal set() goes through the anon RPC), so this updates the local row
+       and lets the tutor's release/refresh reconcile the server copy. */
     async completeAssignment(code, assignmentId){
       try{
         if(!assignmentId || assignmentId.indexOf("legacy-") === 0) return;
         const key = String(code || "").trim().toUpperCase();
-        const list = await AttemptStore.get("assign:" + key);
-        if(!Array.isArray(list)) return;
-        const a = list.find(x => x && x.assignmentId === assignmentId);
-        if(!a) return;
+        const rowKey = "assign:" + key + ":" + assignmentId;
+        const a = await AttemptStore.get(rowKey);
+        if(!a || typeof a !== "object") return;
         a.completedAttemptId = (rec && rec.attemptId) || a.completedAttemptId || "unknown";
-        await AttemptStore.set("assign:" + key, list);
+        await AttemptStore.setLocal(rowKey, a);
       }catch(e){}
     },
 
@@ -981,11 +995,11 @@ window.Attempts = (function(){
       }catch(e){ return false; }
     },
 
-    /* completed/timed-out attempts for this code, newest first.
-       In remote mode this is where a tutor's `released` flip reaches the
-       student: pull their own rows, merge into local, then read locally.
-       A failed pull is non-fatal — they just see the last known state. */
-    async pastAttempts(code){
+    /* EVERY attempt record for this code, any status, newest first. One place
+       does the remote pull (a tutor's `released` flip reaches the student
+       here) and the enumeration, so the home screen can bucket attempts by
+       assignment from a single consistent read rather than several. */
+    async loadForStudent(code){
       try{
         const key = String(code || "").trim().toUpperCase();
         if(AttemptStore.isRemote()){
@@ -1004,12 +1018,17 @@ window.Attempts = (function(){
         for(const k of keys){
           const r = await AttemptStore.get(k);
           if(!r || !r.student || String(r.student.key || "") !== key) continue;
-          if(r.status !== "completed" && r.status !== "timed-out") continue;
           out.push(r);
         }
         out.sort((a,b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
         return out;
       }catch(e){ return []; }
+    },
+
+    /* completed/timed-out attempts for this code, newest first. */
+    async pastAttempts(code){
+      const all = await this.loadForStudent(code);
+      return all.filter(r => r.status === "completed" || r.status === "timed-out");
     },
 
     /* most recent in-progress, resumable attempt for this code + test build */

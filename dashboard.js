@@ -618,10 +618,42 @@ window.Dashboard = (function(){
     const ea = testsById[a], eb = testsById[b];
     return !!(ea && eb && ea.testId === eb.testId);
   }
+  /* How many assignments a code has for a given canonical test — gates the
+     untagged-attempt fallback below, exactly as the student app does, so the
+     two views agree. */
+  function assignCountFor(code, testId){
+    const canon = (testsById[testId] || {}).testId || testId;
+    let n = 0;
+    assigns.forEach(entry => {
+      if(entry.code !== code || !Array.isArray(entry.list)) return;
+      entry.list.forEach(x => {
+        if(typeof x === "string") return;       // legacy bare-testId, not a real row
+        if(((testsById[x.testId] || {}).testId || x.testId) === canon) n++;
+      });
+    });
+    return n;
+  }
+  /* Attempts belonging to THIS assignment. Prefer the explicit assignmentId
+     the record carries; fall back to same-test untagged records only when the
+     code has a single assignment for that test (otherwise the attribution is
+     ambiguous) — the migration rule the student home uses. */
+  function attemptsForAssignment(code, a){
+    const explicit = recs.filter(r => r.student && r.student.key === code &&
+      r.assignmentId && r.assignmentId === a.assignmentId);
+    if(explicit.length) return explicit;
+    if(assignCountFor(code, a.testId) === 1){
+      return recs.filter(r => r.student && r.student.key === code &&
+        !r.assignmentId && sameTest(r.testId, a.testId));
+    }
+    return [];
+  }
   function assignRowStatus(code, a){
-    if(a.completedAttemptId) return "completed";
-    if(recs.some(r => r.status === "in-progress" && sameTest(r.testId, a.testId) &&
-        r.student && r.student.key === code)) return "in-progress";
+    const mine = attemptsForAssignment(code, a);
+    // completion is DERIVED from the attempt records (the flag is a hint that
+    // was silently never written before 2026-08-02); either signal counts
+    if(a.completedAttemptId ||
+       mine.some(r => r.status === "completed" || r.status === "timed-out")) return "completed";
+    if(mine.some(r => r.status === "in-progress")) return "in-progress";
     if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
     return "pending";
   }

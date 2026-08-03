@@ -24,7 +24,8 @@
     notesCollapsed: false,       // notes rail collapse preference, survives navigation
     activeHlColor: "yellow",     // last-used swatch — what mode-drag + underline pairing apply
     hlMode: false,               // Highlights & Notes toggle: drag-select highlights instantly
-    resumeRecords: {},           // testId -> in-progress attempt record (Phase C)
+    resumeRecords: {},           // canonical testId -> best resumable record (crash-resume only)
+    assignAttempts: {},          // assignmentId -> {completed, resumable} — the home cards read THIS
     assignments: null,           // Phase F: assignment objects; [] once resolved
     activeAssignment: null,      // the assignment the running attempt started through
     pendingStart: null,          // {test, assignment} while the Start Code screen is up
@@ -249,16 +250,6 @@
     el("homeAvatar").textContent = shown.charAt(0).toUpperCase();
     el("welcomeMsg").textContent = "Welcome, " + firstName(shown) + ". Good luck on test day!";
     el("tfName").textContent = shown;
-    // Phase C: an in-progress attempt for this code + test resumes rather
-    // than starting fresh (starting over is a tutor-dashboard action)
-    /* Attempt keys embed the testId, so a test that has been renamed must be
-       searched under every id it has carried or an in-flight sitting written
-       under the old one becomes unreachable. */
-    state.resumeRecords = {};
-    for(const t of state.tests){
-      const r = await findResumableAnyId(code, t);
-      if(r) state.resumeRecords[t.testId] = r;
-    }
     /* A manifest that never loaded leaves state.tests empty, and an empty
        library renders exactly like "nothing assigned" — the conflation
        CLAUDE.md forbids, because it would tell a student with a proctored
@@ -281,7 +272,12 @@
       return false;
     }
     state.assignments = assigns;
-    state.pastAttempts = await Attempts.pastAttempts(code);
+    /* Past attempts + the per-assignment index + the crash-resume map, from
+       ONE read. buildAssignmentIndex needs state.assignments, so this runs
+       after the resolve above. Replaces the old per-test findResumableAnyId
+       loop, whose testId-keyed resumeRecords could not tell two assignments
+       of one test apart. */
+    await refreshStudentState(code);
     state.practiceTab = "active";
     state.testsTab = "active";
     rememberSession(code);            // stay signed in on this device
@@ -491,18 +487,11 @@
     return Array.isArray(window.TEST_MANIFEST) && window.TEST_MANIFEST.length > 0;
   }
 
-  /* Attempt keys embed the testId, so an attempt started before a rename lives
-     under the old prefix. Every lookup must therefore try each alias, or the
-     sitting looks absent — which shows the card as "Start" and lets a student
-     begin a SECOND attempt on top of one already in progress. One helper, used
-     everywhere, so the two call sites cannot drift apart again. */
-  async function findResumableAnyId(code, entry){
-    for(const id of testIdAliases(entry)){
-      const r = await Attempts.findInProgress(code, id, entry.testVersion);
-      if(r) return r;
-    }
-    return null;
-  }
+  /* Legacy-id resolution now lives in buildAssignmentIndex: it enumerates
+     every "attempt:" record and canonicalises each via testById (which knows
+     legacyIds), so a sitting recorded under a pre-rename prefix still resolves
+     to its assignment. The old per-alias findResumableAnyId/findInProgress
+     lookup is gone with it. */
 
   /* Counts work on a manifest entry OR a fully loaded test, so the home screen
      renders identically before and after the questions arrive. */
@@ -674,17 +663,99 @@
     showOnly("screen-loaderror");
   }
 
-  /* Phase F §2 semantics: completed wins; a resumable attempt always resumes
-     (expiry gates starting, never resuming); then window/expiry gates Start. */
+  /* ================= PER-ASSIGNMENT ATTEMPT STATE =================
+     The unit is the ASSIGNMENT, not the test. Two assignments of the same
+     test are independent; each attempt belongs to exactly one assignment
+     (rec.assignmentId, stamped at Attempts.begin and carried across resume);
+     completing one leaves the others untouched. State is DERIVED from the
+     attempt records rather than a separately-written flag, because that flag
+     (Attempts.completeAssignment) was silently failing — so a completed
+     assignment stayed in Active and a re-assignment shared one resume slot.
+
+     Rebuilt from a single read of all the student's attempts whenever the home
+     data is refreshed. */
+  function attemptCompleted(rec){
+    return !!rec && (rec.status === "completed" || rec.status === "timed-out");
+  }
+  /* A resumable attempt: in-progress with a resume/checkpoint blob, and the
+     SAME test build it was recorded under (ids/annotations only line up within
+     a version — ATTEMPTS-SPEC §9). */
+  function attemptResumable(rec){
+    if(!rec || rec.status !== "in-progress" || !(rec.resume || rec.checkpoint)) return false;
+    const entry = testById(rec.testId);
+    if(!entry) return false;
+    return (rec.testVersion || "unversioned") === (entry.testVersion || "unversioned");
+  }
+  function canonTestId(testId){ const e = testById(testId); return e ? e.testId : testId; }
+  const byStartDesc = (a, b) => (b.startedAt || "").localeCompare(a.startedAt || "");
+
+  /* Build state.assignAttempts (per assignment) and state.resumeRecords (per
+     canonical test, for crash-resume) from every attempt record this student
+     has. `all` is the full list, any status. */
+  function buildAssignmentIndex(all){
+    const resumeRecords = {};      // canonical testId -> best resumable (crash-resume)
+    const byAssignId = {};         // assignmentId -> [records]
+    const nullByTest = {};         // canonical testId -> [records with no assignmentId]
+    (all || []).forEach(rec => {
+      const canon = canonTestId(rec.testId);
+      if(attemptResumable(rec) &&
+         (!resumeRecords[canon] || (rec.startedAt || "") > (resumeRecords[canon].startedAt || ""))){
+        resumeRecords[canon] = rec;
+      }
+      if(rec.assignmentId) (byAssignId[rec.assignmentId] = byAssignId[rec.assignmentId] || []).push(rec);
+      else (nullByTest[canon] = nullByTest[canon] || []).push(rec);
+    });
+    state.resumeRecords = resumeRecords;
+
+    // how many assignments target each canonical test — the sole-assignment
+    // fallback below only fires when there is no ambiguity about which
+    // assignment an untagged attempt belongs to
+    const assignCountByTest = {};
+    (state.assignments || []).forEach(a => {
+      const c = canonTestId(a.testId);
+      assignCountByTest[c] = (assignCountByTest[c] || 0) + 1;
+    });
+
+    const idx = {};
+    (state.assignments || []).forEach(a => {
+      const canon = canonTestId(a.testId);
+      const explicit = byAssignId[a.assignmentId] || [];
+      let completed = explicit.find(attemptCompleted) || null;
+      let resumable = explicit.filter(attemptResumable).sort(byStartDesc)[0] || null;
+      /* Migration: an attempt with NO assignmentId (recorded before the
+         assignment model, or the sole live student's) cannot be tied to a
+         specific assignment — so attribute it only when the test has exactly
+         ONE assignment, where there is no ambiguity. With several assignments
+         of one test, only records that carry the explicit assignmentId count;
+         every attempt started since the model exists carries it. Handled the
+         same way as legacyIds: absent references resolve, they don't vanish. */
+      if(!completed && !resumable && assignCountByTest[canon] === 1){
+        const pool = nullByTest[canon] || [];
+        completed = pool.find(attemptCompleted) || null;
+        resumable = pool.filter(attemptResumable).sort(byStartDesc)[0] || null;
+      }
+      idx[a.assignmentId] = { completed, resumable };
+    });
+    state.assignAttempts = idx;
+  }
+
+  /* One refresh for all home data: past attempts + the per-assignment index +
+     the crash-resume map, from a single read. Used at sign-in and after any
+     flow that changes attempt state (finalize, save-and-exit). */
+  async function refreshStudentState(code){
+    const all = await Attempts.loadForStudent(code);
+    state.pastAttempts = all
+      .filter(r => r.status === "completed" || r.status === "timed-out")
+      .sort(byStartDesc);
+    buildAssignmentIndex(all);
+  }
+
+  /* Phase F §2 semantics, now derived per assignment: a completed attempt
+     wins; a resumable one resumes; then window/expiry gates Start. */
   function assignmentState(a){
-    if(a.completedAttemptId) return "completed";
-    /* resumeRecords is keyed by the CANONICAL testId, but an assignment can
-       still carry a legacy one, so compare through the manifest. Keying
-       straight off a.testId made a renamed test's in-progress sitting show
-       "Start" instead of "Resume" — which starts a second attempt over the
-       top of one already underway. */
-    const entry = testById(a.testId);
-    if(entry && state.resumeRecords[entry.testId]) return "resume";
+    const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
+    if(idx.completed) return "completed";
+    if(idx.resumable) return "resume";
     if(a.windowOpens && Date.now() < Date.parse(a.windowOpens)) return "notyet";
     if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
     return "ready";
@@ -715,6 +786,13 @@
     const test = testById(a.testId);
     if(!test) return null;                      // assignment for an unpublished test
     const st = assignmentState(a);
+    /* A completed assignment leaves Active immediately — its attempt shows in
+       Past instead (one Past card per attempt, distinguished by date). This
+       is what stops a finished assignment lingering in Active, and — with the
+       state now derived from the record rather than the flaky flag — it can
+       never again read "Start" and launch a second sitting on a done
+       assignment. */
+    if(st === "completed") return null;
     const isTest = a.category === "test";
     // counts come from the manifest — the questions are not loaded yet
     const totalQ = testQuestionCount(test);
@@ -737,7 +815,11 @@
         ${action ? '<div class="pcard-action">' + action + '</div>' : ""}
       </div>`;
     if(st === "resume"){
-      card.addEventListener("click", ()=> resumeTestFlow(test, state.resumeRecords[test.testId]));
+      // resume THIS assignment's own attempt, not whatever the test's shared
+      // slot last held — that shared slot is why two assignments used to
+      // resume into the same sitting
+      const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
+      card.addEventListener("click", ()=> resumeTestFlow(test, idx.resumable));
     } else if(st === "ready"){
       card.addEventListener("click", ()=> startAssignment(test, a));
     }
@@ -914,6 +996,16 @@
      loading screen is already the natural place for the wait, so a lazy fetch
      costs the student nothing they weren't already seeing. */
   function startTestFlow(entry, assignment){
+    /* Never start a second sitting on an assignment that already has a
+       completed attempt. The card no longer offers it, and startAssignment
+       re-checks state, but this is the last gate before a record is written —
+       it covers the proctored path (start-code screen -> startTestFlow) and
+       any stale click, so the data-integrity guarantee does not depend on the
+       UI being fresh. */
+    if(assignment){
+      const idx = (state.assignAttempts && state.assignAttempts[assignment.assignmentId]) || {};
+      if(idx.completed){ renderHome(); showOnly("screen-home"); return; }
+    }
     withTestContent(entry, full => startTestFlowLoaded(full, assignment));
   }
   function startTestFlowLoaded(test, assignment){
@@ -1849,7 +1941,9 @@
   }
   el("subDownloadBtn").addEventListener("click", ()=> Attempts.downloadJson());
   el("subHomeBtn").addEventListener("click", async ()=>{
-    state.pastAttempts = await Attempts.pastAttempts(state.userName);
+    // reload everything so the just-finished assignment leaves Active and its
+    // attempt appears in Past — the completion is now read from the record
+    await refreshStudentState(state.userName);
     /* land them where the new attempt now shows — a proctored sitting lands
        under Your Tests, everything else under Practice */
     if(state.lastWasProctored){ state.testsTab = "past"; state.practiceTab = "active"; }
@@ -1992,12 +2086,9 @@
       show("saveFailModal");
       return;
     }
-    /* Re-read from storage so the home card reflects what actually persisted.
-       Through the alias helper: `test` here is the loaded test carrying the
-       canonical id, but the attempt may live under a pre-rename prefix. */
-    const entry = testById(test.testId) || test;
-    const r = await findResumableAnyId(state.userName, entry);
-    if(r) state.resumeRecords[entry.testId] = r;
+    // re-read from storage so the home cards reflect what actually persisted:
+    // the suspended assignment should now show Resume against ITS own attempt
+    await refreshStudentState(state.userName);
     state.currentTest = null;
     renderHome();
     showOnly("screen-home");
