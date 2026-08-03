@@ -276,8 +276,16 @@
        ONE read. buildAssignmentIndex needs state.assignments, so this runs
        after the resolve above. Replaces the old per-test findResumableAnyId
        loop, whose testId-keyed resumeRecords could not tell two assignments
-       of one test apart. */
-    await refreshStudentState(code);
+       of one test apart. A FAILED read halts sign-in with a retry (same as an
+       unavailable assignment read) — proceeding with an empty index would show
+       a completed assignment as startable, the retake hole this whole change
+       closes. */
+    if(!(await refreshStudentState(code))){
+      el("signinError").textContent = "Couldn't reach your test history. Check your connection and try again.";
+      el("signinError").classList.remove("hidden");
+      showOnly("screen-signin");
+      return false;
+    }
     state.practiceTab = "active";
     state.testsTab = "active";
     rememberSession(code);            // stay signed in on this device
@@ -688,30 +696,38 @@
   }
   function canonTestId(testId){ const e = testById(testId); return e ? e.testId : testId; }
   const byStartDesc = (a, b) => (b.startedAt || "").localeCompare(a.startedAt || "");
+  /* A normalized legacy bare-testId assignment (Attempts.assignments turns each
+     old array entry into {assignmentId:"legacy-<testId>",…}). It is a card, but
+     it must NOT count toward the sole-assignment ambiguity gate — the dashboard
+     skips these too, and counting them made the two views disagree. */
+  function isLegacyAssign(a){ return !!a && typeof a.assignmentId === "string" && a.assignmentId.indexOf("legacy-") === 0; }
+  /* An untagged attempt may only be attributed to an assignment whose CATEGORY
+     matches how the attempt was administered. Pre-model attempts predate the
+     start-code ceremony, so they are self-administered; without this check the
+     sole-assignment fallback marked a freshly-scheduled PROCTORED sitting
+     "completed" from an old practice run and hid it, so the student could never
+     take it. category "test" ⇒ proctored; anything else ⇒ self-administered. */
+  function categoryMatchesConditions(category, conditions){
+    return category === "test" ? conditions === "proctored" : conditions !== "proctored";
+  }
 
   /* Build state.assignAttempts (per assignment) and state.resumeRecords (per
      canonical test, for crash-resume) from every attempt record this student
      has. `all` is the full list, any status. */
   function buildAssignmentIndex(all){
-    const resumeRecords = {};      // canonical testId -> best resumable (crash-resume)
     const byAssignId = {};         // assignmentId -> [records]
     const nullByTest = {};         // canonical testId -> [records with no assignmentId]
     (all || []).forEach(rec => {
       const canon = canonTestId(rec.testId);
-      if(attemptResumable(rec) &&
-         (!resumeRecords[canon] || (rec.startedAt || "") > (resumeRecords[canon].startedAt || ""))){
-        resumeRecords[canon] = rec;
-      }
       if(rec.assignmentId) (byAssignId[rec.assignmentId] = byAssignId[rec.assignmentId] || []).push(rec);
       else (nullByTest[canon] = nullByTest[canon] || []).push(rec);
     });
-    state.resumeRecords = resumeRecords;
 
-    // how many assignments target each canonical test — the sole-assignment
-    // fallback below only fires when there is no ambiguity about which
-    // assignment an untagged attempt belongs to
+    // real (non-legacy) assignments per canonical test — the sole-assignment
+    // fallback only fires when exactly one owns the untagged attempt
     const assignCountByTest = {};
     (state.assignments || []).forEach(a => {
+      if(isLegacyAssign(a)) return;
       const c = canonTestId(a.testId);
       assignCountByTest[c] = (assignCountByTest[c] || 0) + 1;
     });
@@ -724,37 +740,76 @@
       let resumable = explicit.filter(attemptResumable).sort(byStartDesc)[0] || null;
       /* Migration: an attempt with NO assignmentId (recorded before the
          assignment model, or the sole live student's) cannot be tied to a
-         specific assignment — so attribute it only when the test has exactly
-         ONE assignment, where there is no ambiguity. With several assignments
-         of one test, only records that carry the explicit assignmentId count;
-         every attempt started since the model exists carries it. Handled the
-         same way as legacyIds: absent references resolve, they don't vanish. */
-      if(!completed && !resumable && assignCountByTest[canon] === 1){
-        const pool = nullByTest[canon] || [];
+         specific assignment — attribute it only when the test has exactly ONE
+         real assignment AND the attempt was administered the same way (a
+         practice run must not consume a proctored assignment). With several
+         assignments, only explicit assignmentIds count; every attempt started
+         since the model exists carries one. Same care as legacyIds: absent
+         references resolve, they don't vanish. */
+      if(!completed && !resumable && assignCountByTest[canon] === 1 && !isLegacyAssign(a)){
+        const pool = (nullByTest[canon] || []).filter(r => categoryMatchesConditions(a.category, r.conditions));
         completed = pool.find(attemptCompleted) || null;
         resumable = pool.filter(attemptResumable).sort(byStartDesc)[0] || null;
       }
+      // completed wins: a resumable record on a done assignment is an orphan,
+      // never offered (and never crash-resumed — see below)
+      if(completed) resumable = null;
       idx[a.assignmentId] = { completed, resumable };
     });
     state.assignAttempts = idx;
+
+    /* Crash-resume map: best resumable per canonical test, EXCLUDING any record
+       whose owning assignment is already completed. Without that exclusion a
+       stray checkpoint on a done assignment (a migration shape) would auto-drop
+       the student back into a test they finished and produce a second completed
+       record — bypassing the retake guard, which only sits on startTestFlow. */
+    const resumeRecords = {};
+    (all || []).forEach(rec => {
+      if(!attemptResumable(rec)) return;
+      const canon = canonTestId(rec.testId);
+      let ownerCompleted = false;
+      if(rec.assignmentId){
+        const ix = idx[rec.assignmentId];
+        ownerCompleted = !!(ix && ix.completed);
+      } else {
+        const owners = (state.assignments || []).filter(x => !isLegacyAssign(x) &&
+          canonTestId(x.testId) === canon && categoryMatchesConditions(x.category, rec.conditions));
+        if(owners.length === 1){ const ix = idx[owners[0].assignmentId]; ownerCompleted = !!(ix && ix.completed); }
+      }
+      if(ownerCompleted) return;
+      if(!resumeRecords[canon] || (rec.startedAt || "") > (resumeRecords[canon].startedAt || "")){
+        resumeRecords[canon] = rec;
+      }
+    });
+    state.resumeRecords = resumeRecords;
   }
 
   /* One refresh for all home data: past attempts + the per-assignment index +
-     the crash-resume map, from a single read. Used at sign-in and after any
-     flow that changes attempt state (finalize, save-and-exit). */
+     the crash-resume map, from a single read. Returns false when the read
+     FAILED (distinct from empty), so callers can hold the prior state or halt
+     rather than wiping a completed assignment back to startable. */
   async function refreshStudentState(code){
     const all = await Attempts.loadForStudent(code);
+    if(!Array.isArray(all)) return false;          // "unavailable" — keep prior state
     state.pastAttempts = all
       .filter(r => r.status === "completed" || r.status === "timed-out")
       .sort(byStartDesc);
     buildAssignmentIndex(all);
+    return true;
   }
 
-  /* Phase F §2 semantics, now derived per assignment: a completed attempt
-     wins; a resumable one resumes; then window/expiry gates Start. */
+  /* Phase F §2 semantics, derived per assignment. Completion comes from the
+     attempt records AND the persisted completedAttemptId hint — either counts,
+     so a transient read failure that empties the derived index cannot re-offer
+     a finished assignment, and an old completion whose record was archived away
+     still reads done. A resumable attempt resumes; then window/expiry gates. */
+  function assignmentComplete(a){
+    const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
+    return !!(idx.completed || a.completedAttemptId);
+  }
   function assignmentState(a){
     const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
-    if(idx.completed) return "completed";
+    if(assignmentComplete(a)) return "completed";
     if(idx.resumable) return "resume";
     if(a.windowOpens && Date.now() < Date.parse(a.windowOpens)) return "notyet";
     if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
@@ -1002,10 +1057,7 @@
        it covers the proctored path (start-code screen -> startTestFlow) and
        any stale click, so the data-integrity guarantee does not depend on the
        UI being fresh. */
-    if(assignment){
-      const idx = (state.assignAttempts && state.assignAttempts[assignment.assignmentId]) || {};
-      if(idx.completed){ renderHome(); showOnly("screen-home"); return; }
-    }
+    if(assignment && assignmentComplete(assignment)){ renderHome(); showOnly("screen-home"); return; }
     withTestContent(entry, full => startTestFlowLoaded(full, assignment));
   }
   function startTestFlowLoaded(test, assignment){

@@ -635,15 +635,21 @@ window.Dashboard = (function(){
   }
   /* Attempts belonging to THIS assignment. Prefer the explicit assignmentId
      the record carries; fall back to same-test untagged records only when the
-     code has a single assignment for that test (otherwise the attribution is
-     ambiguous) — the migration rule the student home uses. */
+     code has a single assignment for that test AND the attempt was
+     administered the way the assignment's category implies (a practice run
+     must not be counted against a proctored assignment) — the same migration
+     rule the student home uses, so the two views agree. */
+  function attemptCategoryMatches(category, conditions){
+    return category === "test" ? conditions === "proctored" : conditions !== "proctored";
+  }
   function attemptsForAssignment(code, a){
     const explicit = recs.filter(r => r.student && r.student.key === code &&
       r.assignmentId && r.assignmentId === a.assignmentId);
     if(explicit.length) return explicit;
     if(assignCountFor(code, a.testId) === 1){
       return recs.filter(r => r.student && r.student.key === code &&
-        !r.assignmentId && sameTest(r.testId, a.testId));
+        !r.assignmentId && sameTest(r.testId, a.testId) &&
+        attemptCategoryMatches(a.category, r.conditions));
     }
     return [];
   }

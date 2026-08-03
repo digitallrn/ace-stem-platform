@@ -998,7 +998,16 @@ window.Attempts = (function(){
     /* EVERY attempt record for this code, any status, newest first. One place
        does the remote pull (a tutor's `released` flip reaches the student
        here) and the enumeration, so the home screen can bucket attempts by
-       assignment from a single consistent read rather than several. */
+       assignment from a single consistent read rather than several.
+
+       Returns "unavailable" when the local read genuinely FAILS — the same
+       distinction Attempts.assignments() draws, and for the same reason: a
+       failed read must not read as "no attempts". Collapsing failure to []
+       let a transient storage blip erase a completed assignment's derived
+       state and re-offer it as startable (a second sitting on a done
+       assignment). A remote-pull failure is NOT a local read failure — it
+       falls through to whatever is cached locally, exactly as assignments()
+       does. */
     async loadForStudent(code){
       try{
         const key = String(code || "").trim().toUpperCase();
@@ -1013,7 +1022,7 @@ window.Attempts = (function(){
           }catch(e){ /* offline: fall through to the local copy */ }
         }
         const keys = await AttemptStore.list("attempt:");
-        if(!keys) return [];
+        if(keys === null) return "unavailable";   // storage down — NOT "empty"
         const out = [];
         for(const k of keys){
           const r = await AttemptStore.get(k);
@@ -1022,12 +1031,13 @@ window.Attempts = (function(){
         }
         out.sort((a,b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
         return out;
-      }catch(e){ return []; }
+      }catch(e){ return "unavailable"; }
     },
 
     /* completed/timed-out attempts for this code, newest first. */
     async pastAttempts(code){
       const all = await this.loadForStudent(code);
+      if(!Array.isArray(all)) return [];
       return all.filter(r => r.status === "completed" || r.status === "timed-out");
     },
 
