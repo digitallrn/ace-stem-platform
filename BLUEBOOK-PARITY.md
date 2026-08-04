@@ -141,7 +141,32 @@ Line Reader, Save and Exit.
    6–14); we removed it early on at David's request. Keeping it removed
    unless David reverses — one line to restore if he does.
 
-## Technical notes
+## Measured call: inline fractions in stem prose stay text-style (2026-08-04)
+
+Revisited d814cb0's deliberate split (choices/lead-ins displaystyle, prose
+text-style) with measurements, because prose fractions "read too small".
+The reference set DOES contain a real-Bluebook inline fraction in running
+prose: screenshot 35's mixed-number bullet ("such as 3½"). Pixel-scanned:
+
+|                          | real Bluebook (ref 35)   | ours (q-text, 17.5px)     |
+|--------------------------|--------------------------|---------------------------|
+| numerator ÷ full digit   | 11px ÷ 15px = **0.73**   | 13.23px ÷ 18.9px = **0.70** |
+| line pitch, fraction line| 29px, same as neighbours | 28px, same as neighbours  |
+| stack leading overflow   | ~2px into leading        | fits within 28px line     |
+
+Real Bluebook renders prose fractions at TeX text-style proportions — the
+numerator is ~0.7 of full size and the line does NOT grow. Ours already
+matches within PNG antialiasing error (0.70 vs 0.73 ≈ 0.4px of glyph ink at
+this size), on the three paths of the 202511 ma2-q18 comparison fraction
+({{mm}} lead-in: full-size numerator at 20.65px; prose {{m}}: 13.23px
+numerator, pitch unchanged; choice bigInline: full-size 18.9px numerator) and
+on every shipped v1/v2 inline-prose fraction (ma1-q5/q7/q17/q20,
+ma2-q6/q13/q16; v2 ma1-q12, ma2-q5 — all 0.70, all uniform 28px pitch).
+
+**No change shipped.** Scaling prose fractions up would diverge from the
+measured reference, and the reference confirms the original call: "too
+small" is how real Bluebook typesets them too. If this is revisited again,
+start from these numbers.
 
 - Annotations (highlights/notes) are currently innerHTML-per-question in
   moduleState; serializing them into the attempt record for resume must not
