@@ -33,16 +33,85 @@ function escapeHtml(str){
      same fraction in the stem. \displaystyle restores full height and leaves it
      inline. Opt-in per call site — prose keeps text style, or every fraction in
      a sentence would blow the line height apart. */
-  function renderKatex(tex, display, bigInline){
+  /* Inline math immediately before punctuation ("…{{m}}x{{/m}},") showed a
+     visible gap — "x ," instead of "x,". It is NOT a space in the data (audited:
+     zero literal spaces between {{/m}} and punctuation); it is KaTeX's italic
+     correction, a `margin-right` it bakes onto the trailing italic glyph so a
+     slanted letter doesn't collide with what follows. That overhang reads as an
+     unwanted gap before an upright comma/period. When `hugRight` is set we strip
+     that one trailing margin so the punctuation hugs the letter. Display math
+     ({{mm}}) is never hugged — it sits on its own line. */
+  function stripTrailingItalicCorrection(html){
+    if(typeof document === "undefined") return html;   // node/fallback: no DOM
+    try{
+      const tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      const htmlPart = tpl.content.querySelector(".katex-html");
+      if(htmlPart){
+        const bases = htmlPart.querySelectorAll(".base");
+        const lastBase = bases[bases.length - 1];
+        const last = lastBase && lastBase.lastElementChild;
+        if(last && last.style && parseFloat(last.style.marginRight)) last.style.marginRight = "0px";
+      }
+      return tpl.innerHTML;
+    }catch(e){ return html; }
+  }
+
+  function renderKatex(tex, display, bigInline, hugRight){
     if(typeof katex === "undefined"){
       return '<span class="katex-fallback">' + escapeHtml(tex) + '</span>';
     }
     try{
       const src = (!display && bigInline) ? "\\displaystyle " + tex : tex;
-      return katex.renderToString(src, { throwOnError:false, displayMode:!!display });
+      let html = katex.renderToString(src, { throwOnError:false, displayMode:!!display });
+      if(hugRight && !display) html = stripTrailingItalicCorrection(html);
+      return html;
     }catch(e){
       return '<span class="katex-fallback">' + escapeHtml(tex) + '</span>';
     }
+  }
+
+  /* ---- caption / paired-passage detection (reference: real Bluebook) ----
+     Both are recognised generically from the token stream, so they apply
+     retroactively to every shipped table and paired passage, not a hardcoded
+     list. */
+
+  /* A short title-case run immediately before {{table}} is the table's caption
+     (styled bold + centred above it), NOT body prose. The discriminators, in
+     the order they reject: a trailing sentence mark (a period-ended run is an
+     intro sentence — "…types of blocks in each set." — not a title), excessive
+     length, and a failing title-case ratio (a running-prose lead-in like "the
+     table below shows the results" has almost no capitalised significant
+     words). Live captions this accepts: "Average DOC and TDN Concentrations in
+     Rainwater Samples", "Estimated Annual Costs and Profits for Biofuel Profit
+     Models (in dollars)", "Number of Days to Construct Modular Retail
+     Facilities". */
+  const CAP_SMALL = /^(a|an|and|the|of|to|in|on|for|per|by|or|vs|with|from|at|as)$/i;
+  function isTableCaption(raw){
+    const s = String(raw == null ? "" : raw).trim();
+    if(!s || s.length > 120) return false;
+    if(/[.!?:]$/.test(s)) return false;                       // ends like a sentence/intro
+    const words = s.split(/\s+/).filter(w => /[A-Za-z]/.test(w));
+    const sig = words.filter(w => !CAP_SMALL.test(w.replace(/[^A-Za-z]/g, "")));
+    if(!sig.length) return false;
+    const capped = sig.filter(w => /^[^A-Za-z]*[A-Z0-9]/.test(w)).length;
+    return capped / sig.length >= 0.6;                        // "generally title case"
+  }
+
+  /* "Text 1" / "Text 2" paired-passage labels — styled as headers with clear
+     vertical separation, matching Bluebook's paired-passage layout. */
+  function isPassageLabel(raw){ return /^Text\s+\d+$/.test(String(raw == null ? "" : raw).trim()); }
+  /* skipping only {{br}} voids from index i, is the next part a passage label? */
+  function labelFollows(parts, i){
+    while(i < parts.length && parts[i].t === "void" && parts[i].n === "br") i++;
+    return i < parts.length && parts[i].t === "text" && isPassageLabel(parts[i].s);
+  }
+  /* Is this text run a caption — i.e. does a {{table}} follow it across only
+     {{br}}s, and does the run read as a title? */
+  function labelIsCaptionBeforeTable(parts, i, raw){
+    let j = i;
+    while(j < parts.length && parts[j].t === "void" && parts[j].n === "br") j++;
+    return j < parts.length && parts[j].t === "open" && parts[j].n === "table" && isTableCaption(raw);
   }
 
   function fmtTokenize(text){
@@ -96,8 +165,29 @@ function escapeHtml(str){
         continue;                                            // stray close: ignore
       }
       ptr.i++;
-      if(p.t === "text"){ out += fmtText(p.s); }
-      else if(p.t === "void"){ if(p.n === "br") out += "<br>"; }  // {{row}} outside a table: drop
+      if(p.t === "text"){
+        // paired-passage label: render as a header and swallow the {{br}}s that
+        // follow it, so the header sits directly above its passage body
+        if(isPassageLabel(p.s)){
+          out += '<div class="fmt-passage-label">' + fmtText(p.s.trim()) + '</div>';
+          while(ptr.i < parts.length && parts[ptr.i].t === "void" && parts[ptr.i].n === "br") ptr.i++;
+          continue;
+        }
+        // table caption: a title-case run right before {{table}} — style it and
+        // swallow the intervening {{br}}s so it sits as the table's title
+        if(labelIsCaptionBeforeTable(parts, ptr.i, p.s)){
+          out += '<div class="fmt-caption">' + fmtText(p.s.trim()) + '</div>';
+          while(ptr.i < parts.length && parts[ptr.i].t === "void" && parts[ptr.i].n === "br") ptr.i++;
+          continue;
+        }
+        out += fmtText(p.s);
+      }
+      else if(p.t === "void"){
+        // {{row}} outside a table: drop. A {{br}} that only leads into a passage
+        // label is dropped too — the label's own margin is the separator, so we
+        // don't stack blank lines before it as well.
+        if(p.n === "br" && !labelFollows(parts, ptr.i)) out += "<br>";
+      }
       else if(p.n === "u"){ out += "<u>" + fmtRenderParts(parts, ptr, "u", opts) + "</u>"; }
       else if(p.n === "i"){ out += "<i>" + fmtRenderParts(parts, ptr, "i", opts) + "</i>"; }
       else if(p.n === "m" || p.n === "mm"){ out += fmtRenderMath(parts, ptr, p.n, opts); }
@@ -110,6 +200,10 @@ function escapeHtml(str){
     return out;
   }
 
+  // inline math whose next part begins with punctuation should hug it (strip
+  // KaTeX's trailing italic correction). No LEADING space in the next part — a
+  // space there is intentional and must be preserved.
+  const HUG_PUNCT_RE = /^[,.;:!?)\]]/;
   function fmtRenderMath(parts, ptr, name, opts){
     let buf = "";
     while(ptr.i < parts.length){
@@ -118,7 +212,12 @@ function escapeHtml(str){
       if(p.t === "text") buf += p.s;
       else buf += "{{" + (p.t === "close" ? "/" : "") + p.n + "}}";  // defensive: keep strays literal
     }
-    return renderKatex(buf, name === "mm", !!(opts && opts.bigInline));
+    let hug = false;
+    if(name === "m"){                                         // inline only
+      const nx = parts[ptr.i];                               // part just after {{/m}}
+      if(nx && nx.t === "text" && HUG_PUNCT_RE.test(nx.s)) hug = true;
+    }
+    return renderKatex(buf, name === "mm", !!(opts && opts.bigInline), hug);
   }
 
   /* {{bullets}} a {{item}} b {{/bullets}} — same shape as fmtRenderTable, one

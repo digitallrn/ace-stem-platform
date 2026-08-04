@@ -24,6 +24,25 @@ balance/nesting walk: `{{item}}` outside `{{bullets}}` fails a row exactly as
 `{{row}}` outside `{{table}}` does. Purely additive — data using none of them
 is unaffected, so no `testVersion` bump is warranted.
 
+**v1.2 addendum (2026-08-04, rendering conventions — NO new tokens):** three
+behaviours the app derives from existing text patterns, so they apply
+retroactively and there is nothing to add to a cell:
+- **Table caption.** A short **title-case** run with **no trailing sentence
+  mark**, placed immediately before `{{table}}` (across the separating
+  `{{br}}`), is rendered as the table's bold centred title. To keep an intro
+  *sentence* before a table as ordinary prose, **end it with a period** —
+  `…the types of blocks in each set.{{br}}{{br}}{{table}}` stays prose, while
+  `Average DOC Concentrations in Rainwater{{br}}{{table}}` becomes a caption.
+  (A running-prose lead-in without a period still stays prose — the heuristic
+  also requires most significant words to be capitalised.)
+- **Paired passages.** A line whose entire text is exactly `Text N`
+  (`Text 1`, `Text 2`) renders as a paired-passage header with a rule and
+  vertical break; keep it on its own line:
+  `Text 1{{br}}{{br}}…{{br}}{{br}}Text 2{{br}}{{br}}…`.
+- **Inline math before punctuation.** A comma/period directly after
+  `{{m}}…{{/m}}` now hugs the math (KaTeX's trailing italic-correction gap is
+  removed). Write `{{m}}r{{/m}},` with **no** compensating space.
+
 > **This file is a COPY.** The canonical contract lives in the test-bank repo
 > (`test-bank-repo/SCHEMA-v1.2.md`), which the converter enforces. That copy
 > also carries two addenda this one does not yet mirror (optional `rationale`,

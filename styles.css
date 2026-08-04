@@ -873,6 +873,24 @@
      read heavier than anything in the reference set. The header is a notch
      smaller and tighter still — a wide header label ("Estimated electricity…")
      was forcing the whole column wider than its data needed. */
+  /* A table's title: a short title-case run that precedes {{table}} in the
+     data. Bold and centred over the (centred) table; the adjacency rule pulls
+     the table up under it so they read as one titled unit. */
+  .fmt-caption{
+    font-weight:700; text-align:center; margin:14px auto 4px; max-width:520px;
+    line-height:1.3;
+  }
+  .fmt-caption + .fmt-table{ margin-top:2px; }
+  /* Paired-passage "Text 1" / "Text 2" headers. Bold, and a generous top rule
+     gives the clear vertical break between the two blocks that real Bluebook
+     shows; the label swallows the {{br}}s around it so this margin is the only
+     spacing. The first label needs no rule above it. */
+  .fmt-passage-label{
+    font-weight:700; font-size:1.02em; margin:26px 0 10px; padding-top:18px;
+    border-top:1px solid var(--line);
+  }
+  .fmt-passage-label:first-child{ margin-top:0; padding-top:0; border-top:none; }
+
   .fmt-table{ border-collapse:collapse; margin:12px auto; background:#fff; }
   .fmt-table th, .fmt-table td{
     border:1px solid #8a8a8a; padding:7px 14px; text-align:center;
