@@ -106,12 +106,47 @@ function escapeHtml(str){
     while(i < parts.length && parts[i].t === "void" && parts[i].n === "br") i++;
     return i < parts.length && parts[i].t === "text" && isPassageLabel(parts[i].s);
   }
-  /* Is this text run a caption — i.e. does a {{table}} follow it across only
-     {{br}}s, and does the run read as a title? */
-  function labelIsCaptionBeforeTable(parts, i, raw){
-    let j = i;
-    while(j < parts.length && parts[j].t === "void" && parts[j].n === "br") j++;
-    return j < parts.length && parts[j].t === "open" && parts[j].n === "table" && isTableCaption(raw);
+
+  /* Pre-pass: fold a caption RUN — the whole line of inline content immediately
+     before {{table}} — into one synthetic {t:"caption"} node, and drop the
+     {{br}}s that separated it from the table. Whole run, not just the trailing
+     text fragment: a caption can carry inline formatting ("Number of
+     {{i}}Daphnia{{/i}} Observed…", "Mean {{m}}CO_2{{/m}} by Site"), which
+     splits the line into several parts. Testing only the last fragment tore
+     such a caption in half — half inline prose, half a centred block. The run
+     is bounded by the previous {{br}} (captions sit on their own line) and must
+     be inline-only; its concatenated visible text decides via isTableCaption. */
+  const CAP_BLOCK = { table:1, bullets:1, quote:1, credit:1, tnote:1, row:1, item:1 };
+  function markTableCaptions(parts){
+    let hasTable = false;
+    for(let k = 0; k < parts.length; k++){ if(parts[k].t === "open" && parts[k].n === "table"){ hasTable = true; break; } }
+    if(!hasTable) return parts;
+    const capAt = {};                                     // runStart -> {contentEnd, tableAt}
+    for(let j = 0; j < parts.length; j++){
+      if(!(parts[j].t === "open" && parts[j].n === "table")) continue;
+      let b = j - 1;
+      while(b >= 0 && parts[b].t === "void" && parts[b].n === "br") b--;   // skip the {{br}}s
+      if(b < 0 || (parts[b].t === "void" && parts[b].n === "br")) continue;
+      let s = b, hasBlock = false;                        // walk the run back to the prior {{br}}
+      while(s >= 0 && !(parts[s].t === "void" && parts[s].n === "br")){
+        const p = parts[s];
+        if((p.t === "open" || p.t === "close") && CAP_BLOCK[p.n]) hasBlock = true;
+        s--;
+      }
+      if(hasBlock) continue;                              // a block token in the line -> not a caption
+      const runStart = s + 1;
+      const plain = parts.slice(runStart, b + 1).filter(p => p.t === "text").map(p => p.s).join("");
+      if(isTableCaption(plain)) capAt[runStart] = { contentEnd: b, tableAt: j };
+    }
+    if(!Object.keys(capAt).length) return parts;
+    const out = [];
+    let i = 0;
+    while(i < parts.length){
+      const rec = capAt[i];
+      if(rec){ out.push({ t: "caption", parts: parts.slice(i, rec.contentEnd + 1) }); i = rec.tableAt; continue; }
+      out.push(parts[i]); i++;
+    }
+    return out;
   }
 
   function fmtTokenize(text){
@@ -151,7 +186,7 @@ function escapeHtml(str){
     if(text == null) return "";
     text = String(text);
     if(text.indexOf("{{") === -1) return fmtText(text);      // fast path, incl. all v1.0 data
-    return fmtRenderParts(fmtTokenize(text), { i:0 }, null, opts || {});
+    return fmtRenderParts(markTableCaptions(fmtTokenize(text)), { i:0 }, null, opts || {});
   }
 
   function fmtRenderParts(parts, ptr, stopName, opts){
@@ -165,18 +200,17 @@ function escapeHtml(str){
         continue;                                            // stray close: ignore
       }
       ptr.i++;
+      // table caption: a synthetic node from the markTableCaptions pre-pass —
+      // holds the WHOLE run (inline formatting included), rendered recursively
+      if(p.t === "caption"){
+        out += '<div class="fmt-caption">' + fmtRenderParts(p.parts, { i:0 }, null, opts).trim() + '</div>';
+        continue;
+      }
       if(p.t === "text"){
         // paired-passage label: render as a header and swallow the {{br}}s that
         // follow it, so the header sits directly above its passage body
         if(isPassageLabel(p.s)){
           out += '<div class="fmt-passage-label">' + fmtText(p.s.trim()) + '</div>';
-          while(ptr.i < parts.length && parts[ptr.i].t === "void" && parts[ptr.i].n === "br") ptr.i++;
-          continue;
-        }
-        // table caption: a title-case run right before {{table}} — style it and
-        // swallow the intervening {{br}}s so it sits as the table's title
-        if(labelIsCaptionBeforeTable(parts, ptr.i, p.s)){
-          out += '<div class="fmt-caption">' + fmtText(p.s.trim()) + '</div>';
           while(ptr.i < parts.length && parts[ptr.i].t === "void" && parts[ptr.i].n === "br") ptr.i++;
           continue;
         }
