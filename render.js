@@ -225,11 +225,26 @@ function escapeHtml(str){
       else if(p.n === "u"){ out += "<u>" + fmtRenderParts(parts, ptr, "u", opts) + "</u>"; }
       else if(p.n === "i"){ out += "<i>" + fmtRenderParts(parts, ptr, "i", opts) + "</i>"; }
       else if(p.n === "m" || p.n === "mm"){ out += fmtRenderMath(parts, ptr, p.n, opts); }
-      else if(p.n === "table"){ out += fmtRenderTable(parts, ptr, opts); }
+      else if(p.n === "table"){
+        out += fmtRenderTable(parts, ptr, opts);
+        /* The table is a block with its own bottom margin, so a {{br}} run
+           after {{/table}} stacks empty lines ON TOP of that margin — the
+           authoring convention writes one or two, and measured on dist that
+           made the gap 44.7px / 73.4px against the intended 16px. Swallowing
+           the run here normalizes every shipped test without touching data.
+           A {{tnote}} is unaffected: it must follow {{/table}} directly, and
+           anything that is not a {{br}} stops the swallow at once. */
+        while(ptr.i < parts.length && parts[ptr.i].t === "void" && parts[ptr.i].n === "br") ptr.i++;
+      }
       else if(p.n === "bullets"){ out += fmtRenderBullets(parts, ptr, opts); }
       else if(p.n === "quote"){ out += '<div class="fmt-quote">' + fmtRenderParts(parts, ptr, "quote", opts) + "</div>"; }
       else if(p.n === "credit"){ out += '<div class="fmt-credit">' + fmtRenderParts(parts, ptr, "credit", opts) + "</div>"; }
-      else if(p.n === "tnote"){ out += '<div class="fmt-tnote">' + fmtRenderParts(parts, ptr, "tnote", opts) + "</div>"; }
+      else if(p.n === "tnote"){
+        out += '<div class="fmt-tnote">' + fmtRenderParts(parts, ptr, "tnote", opts) + "</div>";
+        // same normalization: the tnote block carries the gap below it
+        // (SCHEMA v1.2), so a trailing {{br}} run would double-space
+        while(ptr.i < parts.length && parts[ptr.i].t === "void" && parts[ptr.i].n === "br") ptr.i++;
+      }
     }
     return out;
   }
