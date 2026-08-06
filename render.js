@@ -57,12 +57,52 @@ function escapeHtml(str){
     }catch(e){ return html; }
   }
 
+  /* A fraction INSIDE a superscript lands in scriptscript style — its
+     numerals render at 0.5x (9.45px at our sizes), the one genuinely
+     illegible case in the library (p^{17/4} choice sets). Ruled 2026-08-04:
+     force \textstyle for exactly that shape, so the fraction renders as a
+     text-style fraction and its numerals reach script size (13.23px) — the
+     same size as a plain exponent, which stays untouched (script size is
+     standard TeX and matches the real app).
+     Brace-aware, not a regex: \frac's own arguments contain braces. Escaped
+     characters are skipped so \{ never counts. An unbalanced group (possible
+     in hostile record data) is passed through unchanged — KaTeX's own error
+     handling owns it. Only braced ^{...} groups are considered; no bare
+     ^\frac exists in the library, and \textstyle/\displaystyle already
+     present means the author chose, so we don't override. */
+  function liftSupFractions(tex){
+    let out = "", i = 0;
+    while(i < tex.length){
+      if(tex[i] === "^" && tex[i+1] === "{"){
+        let depth = 0, j = i + 1;
+        for(; j < tex.length; j++){
+          if(tex[j] === "\\"){ j++; continue; }
+          if(tex[j] === "{") depth++;
+          else if(tex[j] === "}"){ depth--; if(depth === 0) break; }
+        }
+        if(j >= tex.length){ out += tex.slice(i); break; }   // unbalanced: pass through
+        const group = tex.slice(i + 2, j);
+        const lifted = liftSupFractions(group);              // nested sups too
+        out += (group.indexOf("\\frac") !== -1 &&
+                group.indexOf("\\textstyle") === -1 &&
+                group.indexOf("\\displaystyle") === -1)
+          ? "^{\\textstyle " + lifted + "}"
+          : "^{" + lifted + "}";
+        i = j + 1;
+        continue;
+      }
+      out += tex[i]; i++;
+    }
+    return out;
+  }
+
   function renderKatex(tex, display, bigInline, hugRight){
     if(typeof katex === "undefined"){
       return '<span class="katex-fallback">' + escapeHtml(tex) + '</span>';
     }
     try{
-      const src = (!display && bigInline) ? "\\displaystyle " + tex : tex;
+      const lifted = liftSupFractions(tex);
+      const src = (!display && bigInline) ? "\\displaystyle " + lifted : lifted;
       let html = katex.renderToString(src, { throwOnError:false, displayMode:!!display });
       if(hugRight && !display) html = stripTrailingItalicCorrection(html);
       return html;

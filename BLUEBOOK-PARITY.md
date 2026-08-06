@@ -168,6 +168,33 @@ measured reference, and the reference confirms the original call: "too
 small" is how real Bluebook typesets them too. If this is revisited again,
 start from these numbers.
 
+**Re-measured 2026-08-04 across three tests and RULED — closed.** The same
+flag came back after 202511asiav1 landed. Measured: fractions render
+identically across 202511asiav1 / 202606asiav1 / 202606asiav2 on all three
+paths (prose numerator 13.23px = 0.70 script; choices full-size 18.9px;
+lead-in full-size 20.65px). David ruled: no change — parity holds and the
+tests match each other. Do not re-litigate without new reference material.
+
+## Measured call: lead-in display equations stay at 1.18em (2026-08-04)
+
+Flag was "a touch too big". Measured the other way: reference 35's display
+equation digits are **1.21×** its stem cap height; ours are **1.15×** (KaTeX
+digits at 20.65px over Georgia caps at 17.5px — Georgia's tall old-style
+figures make the 1.18em bump read bigger than it measures). We are slightly
+UNDER parity; matching the reference would mean raising toward ~1.24em, not
+lowering. Ruled: no change. Start here if revisited.
+
+## Ruled: fractions inside superscripts render \textstyle (2026-08-04)
+
+The one genuinely illegible case: a fraction inside a superscript lands in
+scriptscript style, numerals at 0.5 = **9.45px** (v1 ma1-q7's p^(17/4)
+choice set). Ruled: force `\textstyle` for exactly that shape —
+`liftSupFractions()` in render.js — so the numerals reach script size
+**13.23px**, the same as a plain exponent. Plain exponents stay at script
+0.7 (standard TeX, matches the real app). Fires on 9 tokens across 4
+questions (v1 ma1-q7 stem + 4 choices, v1 ma1-q20 c1/c3, v2 ma2-q13 c2/c3);
+no subscript-fraction exists in the library; nothing in 202511asiav1 fires.
+
 - Annotations (highlights/notes) are currently innerHTML-per-question in
   moduleState; serializing them into the attempt record for resume must not
   break the fmt()/KaTeX-rendered content they sit on top of.
