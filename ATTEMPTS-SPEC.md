@@ -83,14 +83,34 @@ limited, hence the checkpoint schedule in §3 rather than a write per click.
   },
 
   // 2026-08-02: written by finalize() when the sitting made any highlights or
-  // notes; omitted otherwise. Same shape the resume/checkpoint blobs carry
-  // (moduleId -> { passageHtml: {qid: html}, notes: {qid: [{id, snippet,
-  // text}]} }), kept because those blobs are deleted at finalize and Score
-  // Details review replays the student's annotations in the test UI. The
-  // passage HTML is raw markup: it is UNTRUSTED on read-back like every other
-  // record field (§7) and must only ever re-enter the DOM through the resume
-  // sanitizer (AppSanitize.html), never innerHTML directly.
-  "annotations": { "2024-march-c-rw1": { "passageHtml": {}, "notes": {} } },
+  // notes; omitted otherwise. Same shape the resume/checkpoint blobs carry,
+  // kept because those blobs are deleted at finalize and Score Details review
+  // replays the student's annotations in the test UI:
+  //   moduleId -> {
+  //     passageHtml: {qid: html},          // R&W passage pane
+  //     stemHtml:    {qid: html},          // 2026-08-08: question stem (.q-text
+  //                                        //   BODY only — a hoisted {{mm}}
+  //                                        //   lead-in is always re-rendered
+  //                                        //   from source, never restored)
+  //     choiceHtml:  {qid: {idx: html}},   // 2026-08-08: one entry per choice
+  //                                        //   ordinal; the choice's .ctext
+  //     notes:       {qid: [{id, snippet, text}]}   // passage-only, by design
+  //   }
+  // All FOUR html slots are raw markup: UNTRUSTED on read-back like every
+  // other record field (§7), and they must only ever re-enter the DOM through
+  // the resume sanitizer (AppSanitize.html), never innerHTML directly. The
+  // 2026-08-08 widening to stem/choices added three new such sinks, so the
+  // rule is now load-bearing in more places, not fewer. The SHAPE is untrusted
+  // too — app.js restoreAnnotations() coerces each slot and drops anything
+  // that is not a string (or, for choiceHtml, not a numeric ordinal).
+  // Math modules never carry annotations; that invariant is enforced on the
+  // selection path AND on both click-to-edit paths, because a crafted record
+  // can plant markup that restore would otherwise render.
+  "annotations": {
+    "2024-march-c-rw1": {
+      "passageHtml": {}, "stemHtml": {}, "choiceHtml": {}, "notes": {}
+    }
+  },
 
   "client": { "userAgent": "...", "screen": "1512x982" }
 }

@@ -154,8 +154,24 @@
        that Review Mode replays through innerHTML. Plant the same hostile
        payload in every one — a sanitizer applied to the passage but forgotten
        on the stem or a choice is exactly the gap this has to catch. */
+    /* PLAINTEXT is a TOKENIZER switch, not an ordinary element: once the parser
+       meets it every following byte becomes its text and no end tag closes it.
+       An attribute filter therefore never touches it, and re-inserting it eats
+       whatever the app rendered AFTER the restored fragment — plant it in the
+       stem and the entire choice list disappears. It survived the sanitizer
+       until 2026-08-08. It goes LAST in the payload on purpose: anything after
+       it is swallowed at parse time, so the surviving-highlight assertion above
+       would fail for the wrong reason if it came first. */
+    const PLAINTEXT_PAY = '<plaintext>swallowed<xmp>also<listing>also';
+    /* annotationHost() decides which region a selection belongs to by walking
+       up with closest(), so #passageText / .q-text / .ctext / .choice are
+       load-bearing structural hooks. Replayed markup that carries one can make
+       a stem or a choice answer to closest("#passageText") and get itself saved
+       into the passage slot, corrupting a region it never belonged to. */
+    const HOOK_PAY = '<span id="passageText" class="q-text ctext choice passage-text">hook</span>';
     const HOSTILE_HTML = PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' + STYLE_PAY +
-        '<span class="hl c-yellow" data-note-id="' + ATTR_PAY + '">kept highlight</span>';
+        '<span class="hl c-yellow" data-note-id="' + ATTR_PAY + '">kept highlight</span>' +
+        HOOK_PAY + PLAINTEXT_PAY;
     const hostileAnnotations = annQ ? { [test.modules[annMi].moduleId]: {
       passageHtml: { [annQ.id]: HOSTILE_HTML },
       stemHtml:    { [annQ.id]: HOSTILE_HTML },
@@ -308,13 +324,16 @@
       function regionSafe(label, el){
         if(!el){ results.push({ surface: label, pass:false, note:"region not rendered" }); return; }
         const rs = [...el.querySelectorAll("*")];
-        const ex = rs.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
+        const ex = rs.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO|PLAINTEXT|XMP|LISTING)$/.test(e.tagName));
         const hd = rs.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
         const ua = rs.filter(e => [...e.attributes].some(a => /^(src|href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name)));
+        // structural hooks annotationHost() resolves regions with — see HOOK_PAY
+        const hk = rs.filter(e => e.id === "passageText" ||
+          [...e.classList].some(c => /^(passage-text|q-text|q-stimulus|ctext|choice|choices|q-lead)$/.test(c)));
         results.push({ surface: label,
-          pass: !ex.length && !hd.length && !ua.length && !!el.querySelector("span.hl") && !window.__XSS_FIRED,
-          note: ex.length || hd.length || ua.length
-            ? `survived: ${ex.length} executable, ${hd.length} handler(s), ${ua.length} url attr(s)`
+          pass: !ex.length && !hd.length && !ua.length && !hk.length && !!el.querySelector("span.hl") && !window.__XSS_FIRED,
+          note: ex.length || hd.length || ua.length || hk.length
+            ? `survived: ${ex.length} executable, ${hd.length} handler(s), ${ua.length} url attr(s), ${hk.length} structural hook(s)`
             : "hostile markup defused, real highlight span survived" });
       }
       regionSafe("Review Mode replayed STEM annotations sanitized",
@@ -323,6 +342,18 @@
         document.querySelector('#paneRight .choice[data-idx="0"] .ctext'));
       regionSafe("Review Mode replayed CHOICE annotations sanitized (2nd choice)",
         document.querySelector('#paneRight .choice[data-idx="2"] .ctext'));
+
+      /* The stem carries the same PLAINTEXT payload. If it survived, everything
+         the app rendered after the stem — the entire choice list — is swallowed
+         into its text. Counting the choices is the direct check that it did
+         not, and it fails loudly rather than quietly rendering a stray tag. */
+      {
+        const nChoices = document.querySelectorAll('#paneRight .choice').length;
+        results.push({ surface: "Review Mode: <plaintext> in the stem does not swallow the choice list",
+          pass: nChoices >= 2,
+          note: nChoices >= 2 ? `${nChoices} choices still rendered after the poisoned stem`
+                              : `only ${nChoices} choice(s) rendered — markup after the stem was swallowed` });
+      }
 
       const rail = $("notesCards");
       results.push(audit("Review Mode notes rail (hostile note id/snippet/text)", rail));

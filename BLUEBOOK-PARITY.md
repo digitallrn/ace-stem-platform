@@ -258,3 +258,35 @@ deleteNote resolves its span inside #passageText, so a note on a stem or
 choice highlight could never be shown or deleted. The note button is withheld
 on those selections; highlighting there is otherwise complete. Extending notes
 is a separate piece of work.
+
+### The interaction ordering this exposed (2026-08-08, second pass)
+
+Widening the highlightable region collided with how the choice list is
+repainted, and the collision is worth recording because it is invisible in any
+static comparison.
+
+A real drag inside a choice emits `mousedown → mousemove → mouseup → click`.
+Our selection handler ran on a `setTimeout(0)` after `mouseup`, so the `click`
+landed first, and picking an answer rebuilt the whole question pane via
+`innerHTML`. Replacing the markup **collapses the live selection**, so the
+deferred handler found nothing and refused. The net effect was the worst
+possible one: a student trying to highlight a choice silently changed their
+recorded answer and got no highlight. Real Bluebook does not have this problem
+because selecting an answer there does not rebuild the text the selection
+lives in.
+
+Two rules taken from it:
+1. **An answer pick only changes which choice carries `.selected`.** It now
+   updates that class in place. Un-crossing does the same, since it is
+   reachable by dragging inside a crossed-out choice. Crossing *out* keeps the
+   full rebuild — it is reached from the ABC button, never from a drag.
+2. **In highlight mode the span is created synchronously on `mouseup`**, before
+   the click can reach anything, so the markup is already in `moduleState` and
+   survives any later rebuild.
+
+Verification note, since this is exactly what the first pass got wrong:
+dispatching `mouseup` alone reproduces neither the bug nor the fix. The `click`
+is the whole mechanism. A drag harness must emit the full sequence **and
+resolve each event's target at dispatch time** — resolving it up front hands
+the click a node the new highlight span has since detached, which silently
+swallows the answer-selection half and looks like a regression that isn't one.

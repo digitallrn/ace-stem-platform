@@ -137,8 +137,23 @@
      element up to cover the viewport. fmt() never emits <style>, so one in a
      saved passage came from a crafted record. NOSCRIPT joins it because its
      content is parsed as markup when scripting is disabled. */
-  const DROP_ELEMENTS = /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL)$/;
-  const DROP_ATTRS = /^(src|href|xlink:href|srcdoc|srcset|action|formaction|data|background|ping|dynsrc|lowsrc)$/;
+  /* PLAINTEXT (and its cousins XMP and LISTING) are dropped because they are
+     TOKENIZER switches, not ordinary elements: once the parser meets one, every
+     byte after it becomes that element's text and no end tag can close it. It
+     therefore survives an attribute filter untouched, and re-inserting it eats
+     whatever the app rendered AFTER the restored fragment — the rest of the
+     stem, the whole choice list, the question pane. fmt() emits none of them,
+     so one in a saved annotation came from a crafted record. */
+  const DROP_ELEMENTS = /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL|PLAINTEXT|XMP|LISTING)$/;
+  const DROP_ATTRS = /^(src|href|xlink:href|srcdoc|srcset|action|formaction|data|background|ping|dynsrc|lowsrc|id)$/;
+  /* annotationHost decides which region a selection belongs to by walking up
+     with closest(), so these structural hooks are load-bearing. Restored markup
+     has no legitimate reason to carry one — a highlight span is <span class="hl
+     hl-yellow"> — and one that did could make a stem or a choice answer to
+     closest("#passageText") and get itself saved into the passage slot. `id` is
+     dropped outright above; these class tokens are dropped individually so that
+     KaTeX's large, version-dependent class vocabulary keeps working. */
+  const DROP_CLASSES = /^(passage-text|passageText|q-text|q-stimulus|ctext|choice|choices|q-lead)$/;
   function sanitizeSavedHtml(html){
     // a <template>'s content is inert: parsing here runs no script and fetches
     // nothing, so the payload is defused before it is ever examined
@@ -150,6 +165,13 @@
         const n = at.name.toLowerCase();
         if(n.indexOf("on") === 0 || DROP_ATTRS.test(n)){ node.removeAttribute(at.name); return; }
         if(n === "style" && /url\s*\(|expression\s*\(|javascript:/i.test(at.value)) node.removeAttribute(at.name);
+        if(n === "class"){
+          const kept = String(at.value).split(/\s+/).filter(c => c && !DROP_CLASSES.test(c));
+          if(kept.length !== String(at.value).split(/\s+/).filter(Boolean).length){
+            if(kept.length) node.setAttribute("class", kept.join(" "));
+            else node.removeAttribute("class");
+          }
+        }
       });
     });
     return tpl.innerHTML;
@@ -1446,6 +1468,10 @@
 
   let lastRenderedQKey = null;   // which question the divider width belongs to
   function renderQuestionView(){
+    /* Any rebuild detaches the nodes the highlight popup points at, so dismiss
+       it first — otherwise a swatch click would recolour a span that is no
+       longer in the document and save that stale markup. */
+    hideHlPopup();
     const mod = currentModule();
     const q = currentQuestion();
     const ms = currentModState();
@@ -1778,10 +1804,17 @@
            dragging inside a crossed-out choice highlights the text AND
            un-crosses the choice — each half being the documented behaviour of
            its own gesture. */
-        if(elimSet && elimSet.has(idx)){ toggleEliminate(q.id, idx); return; }
+        if(elimSet && elimSet.has(idx)){ toggleEliminate(q.id, idx, true); return; }
         ms.answers[q.id] = idx;
         Attempts.answerCommitted(q.id, idx);
-        renderQuestionView();
+        /* Update the selected state IN PLACE. A drag inside a choice ends with
+           a click here, and replacing paneRight.innerHTML would collapse the
+           student's live text selection before it could become a highlight —
+           which killed choice highlighting outright. Picking an answer only
+           changes which choice carries .selected, so a full rebuild was never
+           needed for it. */
+        document.querySelectorAll("#paneRight .choice").forEach(c =>
+          c.classList.toggle("selected", parseInt(c.dataset.idx, 10) === idx));
       });
     });
     document.querySelectorAll("#paneRight .elim-btn").forEach(btn=>{
@@ -1798,10 +1831,24 @@
     });
   }
 
-  function toggleEliminate(qid, idx){
+  /* inPlace: un-crossing is reachable by DRAGGING inside a crossed-out choice,
+     and a rebuild there would collapse the live selection — and dismiss the
+     popup — before it could become a highlight, leaving the compound case
+     inconsistent with its two halves. Un-crossing only flips two classes, so
+     it is done in place on that path. Crossing OUT keeps the full rebuild: it
+     is reached from the elim button, never from a drag, and it can also clear
+     the recorded answer. */
+  function toggleEliminate(qid, idx, inPlace){
     const ms = currentModState();
     if(!ms.eliminated[qid]) ms.eliminated[qid] = new Set();
-    if(ms.eliminated[qid].has(idx)) ms.eliminated[qid].delete(idx);
+    if(ms.eliminated[qid].has(idx)){
+      ms.eliminated[qid].delete(idx);
+      if(inPlace){
+        const c = document.querySelector('#paneRight .choice[data-idx="' + idx + '"]');
+        const row = c && c.closest(".choice-row");
+        if(c && row){ c.classList.remove("eliminated"); row.classList.remove("is-elim"); return; }
+      }
+    }
     else {
       ms.eliminated[qid].add(idx);
       if(ms.answers[qid] === idx){
@@ -2540,21 +2587,32 @@
 
   document.addEventListener("mouseup", e=>{
     if(hlPopup.contains(e.target)) return;
+    /* In highlight mode the span is created and SAVED synchronously, here,
+       before the browser dispatches the click that follows a drag. A drag
+       inside a choice ends on that choice, and anything which re-renders the
+       pane in the click handler collapses the live selection — a deferred
+       handler would then find nothing to highlight. Creating it now also means
+       the markup is already in moduleState, so it survives a later rebuild.
+       The popup path stays deferred, so the selection has settled before it is
+       measured and positioned. */
+    if(state.hlMode && handleSelection(true)) return;
     setTimeout(handleSelection, 0);   // let selection settle
   });
 
+  /* Returns true when it turned the selection into a highlight (highlight
+     mode); false otherwise, including every refusal. */
   function handleSelection(){
-    if(el("screen-test").classList.contains("hidden")) return;
-    if(state.reviewMode) return;   // annotations replay read-only in review — no new highlights
-    if(currentModule().section === "Math") return;   // annotation is R&W-only: no toolbar in Math
+    if(el("screen-test").classList.contains("hidden")) return false;
+    if(state.reviewMode) return false;   // annotations replay read-only in review — no new highlights
+    if(currentModule().section === "Math") return false;   // annotation is R&W-only: no toolbar in Math
     const sel = window.getSelection();
-    if(sel.isCollapsed || sel.rangeCount === 0){ return; }
+    if(sel.isCollapsed || sel.rangeCount === 0){ return false; }
     const range = sel.getRangeAt(0);
     /* Passage, stem, or one choice — see annotationHost. A selection the
        regions don't wholly contain (across two choices, or onto the header
        band) yields null and is refused here. */
     const host = annotationHost(range.commonAncestorContainer);
-    if(!host){ hideHlPopup(); return; }
+    if(!host){ hideHlPopup(); return false; }
     if(state.hlMode){
       // highlight mode: releasing the drag highlights instantly, no popup (19-20)
       hideHlPopup();
@@ -2563,19 +2621,21 @@
       try{
         span.appendChild(range.extractContents());
         range.insertNode(span);
-      }catch(err){ return; }
+      }catch(err){ return false; }
       sel.removeAllRanges();
       saveAnnotation(host);
-      return;
+      return true;
     }
     state.savedRange = range.cloneRange();
     state.hlTarget = null;
     state.hlHost = host;
     positionHlPopup(range.getBoundingClientRect());
+    return false;
   }
 
   passagePane.addEventListener("click", e=>{
     if(state.reviewMode) return;   // a restored highlight is display-only in review
+    if(currentModule().section === "Math") return;   // Math is annotation-free
     const span = e.target.closest(".hl");
     if(!span) return;
     const sel = window.getSelection();
@@ -2587,16 +2647,22 @@
     e.stopPropagation();
   });
 
-  /* Click-to-edit for STEM highlights. Deliberately not extended to choices:
-     clicking a choice selects it as the answer (Bluebook's behaviour, which we
-     keep) and re-renders the pane, which would leave the popup pointing at a
-     detached span. A stem is not clickable, so there is no such conflict. */
+  /* Click-to-edit for STEM and CHOICE highlights. It reaches choices now that
+     picking an answer updates in place instead of rebuilding the pane — the
+     popup no longer risks pointing at a detached span. Without it a choice
+     highlight could be created but never recoloured or removed, which is a
+     one-way door the passage has never had. Clicking a choice still selects it
+     as the answer, which is Bluebook's behaviour and stays. */
   el("paneRight").addEventListener("click", e=>{
     if(state.reviewMode) return;
+    /* The Math invariant has to hold on THIS path too, not just on the
+       selection path: a crafted record can plant annotation markup on a Math
+       module, and restore renders whatever it plants. */
+    if(currentModule().section === "Math") return;
     const span = e.target.closest && e.target.closest(".hl");
     if(!span) return;
     const host = annotationHost(span);
-    if(!host || host.kind !== "stem") return;
+    if(!host || (host.kind !== "stem" && host.kind !== "choice")) return;
     const sel = window.getSelection();
     if(sel && !sel.isCollapsed) return;  // selection handler takes precedence
     state.hlTarget = span;

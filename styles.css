@@ -387,7 +387,11 @@
 
   /* Highlight-mode cursor (screenshot 18): I-beam + marker, hotspot at the
      marker tip */
-  .t-body.hl-mode .passage-text{
+  /* Every annotatable region gets the affordance, not just the passage —
+     highlighting covers the stem and each choice's text too. */
+  .t-body.hl-mode .passage-text,
+  .t-body.hl-mode .q-text,
+  .t-body.hl-mode .ctext{
     cursor:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Cg fill='none' stroke='%231E1E1E' stroke-width='1.7' stroke-linecap='round'%3E%3Cpath d='M3 4h6M6 4v18M3 22h6'/%3E%3C/g%3E%3Cpath d='M16 4.5l7 7-6 6-7-7z' fill='%23fff' stroke='%231E1E1E' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M10 10.5l7 7-10 2.8z' fill='%231E1E1E'/%3E%3C/svg%3E") 7 20, text;
   }
 
@@ -425,7 +429,12 @@
     font-family:var(--serif); font-size:17.5px; line-height:1.64;
     max-width:var(--pane-content); white-space:pre-wrap;
   }
-  .passage-text ::selection, .passage-text::selection{ background:#BBD3F5; }
+  /* Bluebook's selection blue, on every region a selection can be turned into
+     a highlight — otherwise the stem and choices drag in the OS default and
+     look like a different app mid-gesture. */
+  .passage-text ::selection, .passage-text::selection,
+  .q-text ::selection, .q-text::selection,
+  .ctext ::selection, .ctext::selection{ background:#BBD3F5; }
   .hl{ cursor:pointer; }
   .hl.c-yellow{ background:var(--hl-yellow); }
   .hl.c-blue{ background:var(--hl-blue); }
