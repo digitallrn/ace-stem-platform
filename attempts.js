@@ -482,8 +482,16 @@ window.Attempts = (function(){
     Object.keys(appState.moduleState || {}).forEach(mid => {
       const ms = appState.moduleState[mid];
       if(!ms) return;
-      if(Object.keys(ms.passageHtml || {}).length || Object.keys(ms.notes || {}).length){
-        annotations[mid] = { passageHtml: ms.passageHtml, notes: ms.notes };
+      /* Highlighting covers the passage, the stem and individual choices
+         (2026-08-08), each in its own keyed slot so a restore can put every
+         region's markup back where it came from. All of it is untrusted on
+         read-back and only re-enters the DOM through AppSanitize.html. */
+      if(Object.keys(ms.passageHtml || {}).length ||
+         Object.keys(ms.stemHtml || {}).length ||
+         Object.keys(ms.choiceHtml || {}).length ||
+         Object.keys(ms.notes || {}).length){
+        annotations[mid] = { passageHtml: ms.passageHtml, stemHtml: ms.stemHtml,
+                             choiceHtml: ms.choiceHtml, notes: ms.notes };
       }
     });
     return {
@@ -984,6 +992,12 @@ window.Attempts = (function(){
     },
 
     currentAttemptId(){ return rec ? rec.attemptId : null; },
+
+    /* The one place that describes "where the student is and what they have
+       annotated". Save-and-Exit used to build its own copy of this object,
+       which silently missed the stem/choice highlight slots when annotation
+       widened — two builders, one updated. Exposed so there is exactly one. */
+    positionBlob(){ try{ return positionBlob(); }catch(e){ return null; } },
 
     /* Phase F §9: bug reports — one storage key per report, same
        last-write-wins-safe pattern as attempts */

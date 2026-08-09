@@ -503,6 +503,11 @@
     margin-top:-1px; background:var(--ink); pointer-events:none;
   }
   .choice.eliminated .clabel{ border-color:#999; color:#999; }
+  /* A highlight inside a crossed-out choice: the choice greys its text to
+     #999, which over a pastel fill drops to ~2.3:1 and is unreadable. Restore
+     full ink inside the highlight — the strikethrough still carries the
+     crossed-out meaning, and the highlighted words stay legible (~13:1). */
+  .choice.eliminated .hl{ color:var(--ink); }
   .elim-btn{
     width:30px; height:30px; border-radius:50%; border:1.5px solid var(--ink); background:#fff;
     font-size:12px; font-weight:700; position:relative; flex-shrink:0; display:none;

@@ -19,6 +19,7 @@
     timerHidden: false,
     elimMode: false,
     hlTarget: null,              // existing .hl span being edited, or null (new selection)
+    hlHost: null,                // which annotatable region the popup is acting on
     savedRange: null,
     noteSeq: 0,                  // session-unique note id counter (Phase B)
     notesCollapsed: false,       // notes rail collapse preference, survives navigation
@@ -170,13 +171,36 @@
     Object.keys(ann).forEach(mid => {
       const ms = moduleState[mid], src = ann[mid];
       if(!ms || !src || typeof src !== "object") return;
-      if(src.passageHtml && typeof src.passageHtml === "object"){
+      /* passageHtml and stemHtml: {qid: html}. Only string values survive —
+         a crafted record can put anything here, and a non-string reaching
+         innerHTML is how a restore turns into a crash. */
+      ["passageHtml", "stemHtml"].forEach(key => {
+        if(src[key] && typeof src[key] === "object"){
+          const out = {};
+          Object.keys(src[key]).forEach(qid => {
+            const h = src[key][qid];
+            if(typeof h === "string") out[qid] = h;   // sanitized at every render
+          });
+          ms[key] = out;
+        }
+      });
+      /* choiceHtml is one level deeper: {qid: {choiceIndex: html}}. The index
+         must be a real choice ordinal, so anything non-numeric is dropped
+         rather than carried into a lookup. */
+      if(src.choiceHtml && typeof src.choiceHtml === "object"){
         const out = {};
-        Object.keys(src.passageHtml).forEach(qid => {
-          const h = src.passageHtml[qid];
-          if(typeof h === "string") out[qid] = h;   // sanitized at every render
+        Object.keys(src.choiceHtml).forEach(qid => {
+          const perChoice = src.choiceHtml[qid];
+          if(!perChoice || typeof perChoice !== "object") return;
+          const clean = {};
+          Object.keys(perChoice).forEach(idx => {
+            const n = parseInt(idx, 10);
+            if(isNaN(n) || n < 0) return;
+            if(typeof perChoice[idx] === "string") clean[n] = perChoice[idx];
+          });
+          if(Object.keys(clean).length) out[qid] = clean;
         });
-        ms.passageHtml = out;
+        ms.choiceHtml = out;
       }
       if(src.notes && typeof src.notes === "object"){
         const out = {};
@@ -1068,7 +1092,7 @@
     state.moduleIndex = 0;
     state.moduleState = {};
     test.modules.forEach(m=>{
-      state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} };
+      state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, stemHtml:{}, choiceHtml:{}, notes:{} };
     });
     const conditions = (assignment && assignment.category === "test")
       ? "proctored" : "self-administered";
@@ -1134,7 +1158,7 @@
   function buildModuleStateFromRecord(test, record){
     const mstate = {};
     test.modules.forEach(m=>{
-      mstate[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, notes:{} };
+      mstate[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, stemHtml:{}, choiceHtml:{}, notes:{} };
     });
     test.modules.forEach(m=>{
       const ms = mstate[m.moduleId];
@@ -1506,14 +1530,20 @@
      Only leading {{mm}}/{{table}} qualify — inline {{m}} opening a sentence
      ("{{m}}f{{/m}} is defined by…") is prose and must not be hoisted. */
   const LEAD_IN_RE = /^(?:\s*(?:\{\{mm\}\}[\s\S]*?\{\{\/mm\}\}|\{\{table\}\}[\s\S]*?\{\{\/table\}\})\s*(?:\{\{br\}\})*)+/;
-  function stemHtml(questionText){
+  /* `saved` is the student's annotated markup for the stem, when they have
+     highlighted it. It replaces only the .q-text BODY — a hoisted {{mm}}/
+     {{table}} lead-in is re-rendered from the source either way, because the
+     lead is not annotatable and its saved copy would otherwise be the only
+     record of it. Sanitized here like every other stored-markup path. */
+  function stemHtml(questionText, saved){
+    const inner = (saved !== undefined && saved !== null) ? sanitizeSavedHtml(saved) : null;
     const qt = String(questionText == null ? "" : questionText);
     const m = LEAD_IN_RE.exec(qt);
-    if(!m || !m[0].trim()) return '<div class="q-text">' + fmt(qt) + '</div>';
+    if(!m || !m[0].trim()) return '<div class="q-text">' + (inner !== null ? inner : fmt(qt)) + '</div>';
     const rest = qt.slice(m[0].length);
-    if(!rest.trim()) return '<div class="q-text">' + fmt(qt) + '</div>';  // math IS the stem
+    if(!rest.trim()) return '<div class="q-text">' + (inner !== null ? inner : fmt(qt)) + '</div>';  // math IS the stem
     return '<div class="q-lead">' + fmt(m[0]) + '</div>' +
-           '<div class="q-text">' + fmt(rest) + '</div>';
+           '<div class="q-text">' + (inner !== null ? inner : fmt(rest)) + '</div>';
   }
 
   function buildQuestionHtml(q, ms){
@@ -1572,6 +1602,12 @@
           const letter = String.fromCharCode(65+idx);
           const sel = ms.answers[q.id] === idx;
           const elim = elimSet.has(idx);
+          /* A highlighted choice replays the student's own markup. Sanitized
+             on the way in like every stored-markup path — a choice blob is
+             record-derived and therefore untrusted (ATTEMPTS-SPEC 7). */
+          const savedC = (ms.choiceHtml && ms.choiceHtml[q.id]) ? ms.choiceHtml[q.id][idx] : undefined;
+          const ctext = (savedC !== undefined && savedC !== null)
+            ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
           /* Review marks: the key and the student's pick, on the choices
              themselves. A crossed-out choice keeps its strikethrough (that is
              their work), but the cross-out buttons don't render — nothing on
@@ -1586,7 +1622,7 @@
               <div class="choice-row${elim ? " is-elim" : ""}">
                 <div class="choice rv ${isKey ? "rv-key" : ""} ${sel && !isKey ? "rv-wrong" : ""} ${elim ? "eliminated" : ""}" data-idx="${idx}">
                   <span class="clabel">${letter}</span>
-                  <span class="ctext">${fmt(c, {bigInline:true})}</span>
+                  <span class="ctext">${ctext}</span>
                   ${mark}
                 </div>
               </div>`;
@@ -1595,7 +1631,7 @@
             <div class="choice-row${elim ? " is-elim" : ""}">
               <div class="choice ${sel?"selected":""} ${elim?"eliminated":""}" data-idx="${idx}">
                 <span class="clabel">${letter}</span>
-                <span class="ctext">${fmt(c, {bigInline:true})}</span>
+                <span class="ctext">${ctext}</span>
               </div>
               <button class="elim-btn" data-elim="${idx}" title="Cross out choice ${letter}">${letter}</button>
               <button class="elim-undo" data-undo="${idx}">Undo</button>
@@ -1621,7 +1657,7 @@
       </div>
       ${figHtml}
       ${stackedHtml}
-      ${stemHtml(q.questionText)}
+      ${stemHtml(q.questionText, ms.stemHtml ? ms.stemHtml[q.id] : undefined)}
       ${body}
       ${omittedHtml}
       ${rationaleHtml}`;
@@ -1734,7 +1770,15 @@
       node.addEventListener("click", ()=>{
         const idx = parseInt(node.dataset.idx,10);
         const elimSet = ms.eliminated[q.id];
-        if(elimSet && elimSet.has(idx)) return;   // can't select a crossed-out choice
+        /* Clicking a crossed-out choice UN-crosses it (confirmed against real
+           Bluebook 2026-08-08) rather than doing nothing, which is what this
+           did before. It does not also select it: one click undoes the
+           cross-out and leaves the choice available, which is the same result
+           as the row's Undo control. Composed with the drag behaviour below,
+           dragging inside a crossed-out choice highlights the text AND
+           un-crosses the choice — each half being the documented behaviour of
+           its own gesture. */
+        if(elimSet && elimSet.has(idx)){ toggleEliminate(q.id, idx); return; }
         ms.answers[q.id] = idx;
         Attempts.answerCommitted(q.id, idx);
         renderQuestionView();
@@ -2115,21 +2159,11 @@
     hide("fiveMinPopup");
     closeMoreMenu();
     const test = state.currentTest;
-    const annotations = {};
-    Object.keys(state.moduleState).forEach(mid=>{
-      const ms = state.moduleState[mid];
-      if(Object.keys(ms.passageHtml).length || Object.keys(ms.notes).length){
-        annotations[mid] = { passageHtml: ms.passageHtml, notes: ms.notes };
-      }
-    });
-    const ok = await Attempts.suspend({
-      moduleIndex: state.moduleIndex,
-      questionIndex: state.questionIndex,
-      timeRemainingSeconds: state.timeRemainingSec,
-      untimed: state.untimed,                 // Phase G §1: untimed resumes by elapsed
-      elapsedSeconds: state.elapsedSec,
-      annotations
-    });
+    /* Ask the recorder for the position/annotation blob rather than rebuilding
+       it here. This used to be a second, hand-maintained copy that carried only
+       passageHtml + notes, so widening annotation to the stem and choices would
+       have persisted nothing from them on Save-and-Exit. */
+    const ok = await Attempts.suspend(Attempts.positionBlob());
     if(!ok){
       // Phase F §8: never return home over unrecoverable progress — stay in
       // the test, restart the clock, explain, and offer the JSON fallback
@@ -2514,11 +2548,13 @@
     if(state.reviewMode) return;   // annotations replay read-only in review — no new highlights
     if(currentModule().section === "Math") return;   // annotation is R&W-only: no toolbar in Math
     const sel = window.getSelection();
-    const pt = document.getElementById("passageText");
-    if(!pt) { hideHlPopup(); return; }
     if(sel.isCollapsed || sel.rangeCount === 0){ return; }
     const range = sel.getRangeAt(0);
-    if(!pt.contains(range.commonAncestorContainer)){ hideHlPopup(); return; }
+    /* Passage, stem, or one choice — see annotationHost. A selection the
+       regions don't wholly contain (across two choices, or onto the header
+       band) yields null and is refused here. */
+    const host = annotationHost(range.commonAncestorContainer);
+    if(!host){ hideHlPopup(); return; }
     if(state.hlMode){
       // highlight mode: releasing the drag highlights instantly, no popup (19-20)
       hideHlPopup();
@@ -2529,11 +2565,12 @@
         range.insertNode(span);
       }catch(err){ return; }
       sel.removeAllRanges();
-      savePassage();
+      saveAnnotation(host);
       return;
     }
     state.savedRange = range.cloneRange();
     state.hlTarget = null;
+    state.hlHost = host;
     positionHlPopup(range.getBoundingClientRect());
   }
 
@@ -2545,6 +2582,26 @@
     if(sel && !sel.isCollapsed) return;  // selection handler takes precedence
     state.hlTarget = span;
     state.savedRange = null;
+    state.hlHost = annotationHost(span);
+    positionHlPopup(span.getBoundingClientRect());
+    e.stopPropagation();
+  });
+
+  /* Click-to-edit for STEM highlights. Deliberately not extended to choices:
+     clicking a choice selects it as the answer (Bluebook's behaviour, which we
+     keep) and re-renders the pane, which would leave the popup pointing at a
+     detached span. A stem is not clickable, so there is no such conflict. */
+  el("paneRight").addEventListener("click", e=>{
+    if(state.reviewMode) return;
+    const span = e.target.closest && e.target.closest(".hl");
+    if(!span) return;
+    const host = annotationHost(span);
+    if(!host || host.kind !== "stem") return;
+    const sel = window.getSelection();
+    if(sel && !sel.isCollapsed) return;  // selection handler takes precedence
+    state.hlTarget = span;
+    state.savedRange = null;
+    state.hlHost = host;
     positionHlPopup(span.getBoundingClientRect());
     e.stopPropagation();
   });
@@ -2558,10 +2615,16 @@
     const bodyRect = el("tBody").getBoundingClientRect();
     hlPopup.classList.remove("hidden");
     setUMenu(false);
-    // notes are Reading & Writing only (spec Phase B) — Math never shows the button
+    /* Notes stay PASSAGE-ONLY even though highlighting now covers the stem and
+       choices: the notes rail is keyed per passage question and only renders
+       when the question has one, and deleteNote resolves its span inside
+       #passageText. Offering the button on a stem or choice highlight would
+       create a note the rail could never show or delete. Highlighting there
+       works fully; only the note affordance is withheld. */
     const isRW = currentModule().section === "Reading and Writing";
-    el("hlNote").classList.toggle("hidden", !isRW);
-    el("hlNoteSep").classList.toggle("hidden", !isRW);
+    const notesOk = isRW && !!state.hlHost && state.hlHost.kind === "passage";
+    el("hlNote").classList.toggle("hidden", !notesOk);
+    el("hlNoteSep").classList.toggle("hidden", !notesOk);
     updateActiveDot();
     const top = Math.max(6, rect.top - bodyRect.top - 64);
     let left = rect.left - bodyRect.left;
@@ -2575,6 +2638,7 @@
     setUMenu(false);
     state.hlTarget = null;
     state.savedRange = null;
+    state.hlHost = null;
   }
 
   document.addEventListener("mousedown", e=>{
@@ -2598,12 +2662,53 @@
     return span;
   }
 
-  function savePassage(){
-    const pt = document.getElementById("passageText");
-    if(!pt) return;
-    const q = currentQuestion();
-    currentModState().passageHtml[q.id] = pt.innerHTML;
+  /* ---- annotatable regions (Reading and Writing) ----
+     Highlighting covers the passage, the question stem, and the text of a
+     SINGLE answer choice. Everything else is out: the header band (Mark for
+     Review / ABC), and any selection spanning two choices or straddling the
+     stem and a choice.
+
+     Those exclusions need no special-casing — they fall out of asking which
+     region CONTAINS the whole selection. A range covering two choices has
+     .choices as its common ancestor, and a range straddling stem and choice
+     has the pane; neither is inside a region, so both resolve to null and are
+     refused. One function answers "which region is this in?" for both the
+     selection gate and the save path, so the two can never disagree about
+     what is annotatable. */
+  function annotationHost(node){
+    if(!node) return null;
+    const start = node.nodeType === 1 ? node : node.parentElement;
+    if(!start || !start.closest) return null;
+    const pt = start.closest("#passageText");
+    if(pt) return { kind: "passage", el: pt };
+    const stem = start.closest(".q-text");
+    if(stem) return { kind: "stem", el: stem };
+    const ctext = start.closest(".ctext");
+    if(ctext){
+      const choice = ctext.closest(".choice");
+      const idx = choice ? parseInt(choice.dataset.idx, 10) : NaN;
+      if(!isNaN(idx)) return { kind: "choice", el: ctext, idx: idx };
+    }
+    return null;
   }
+
+  /* Persist a region's markup into its own keyed slot. Each region is stored
+     separately (rather than one blob per question) so a restore can put each
+     back into the element it came from — the stem's saved HTML must not be
+     dropped into a choice. */
+  function saveAnnotation(host){
+    if(!host || !host.el) return;
+    const ms = currentModState();
+    const qid = currentQuestion().id;
+    if(host.kind === "passage"){ ms.passageHtml[qid] = host.el.innerHTML; }
+    else if(host.kind === "stem"){ ms.stemHtml[qid] = host.el.innerHTML; }
+    else if(host.kind === "choice"){
+      if(!ms.choiceHtml[qid]) ms.choiceHtml[qid] = {};
+      ms.choiceHtml[qid][host.idx] = host.el.innerHTML;
+    }
+  }
+  // save whichever region this node lives in
+  function saveFromNode(node){ saveAnnotation(annotationHost(node)); }
 
   function updateActiveDot(){
     hlPopup.querySelectorAll(".hl-dot").forEach(d =>
@@ -2619,7 +2724,7 @@
       state.activeHlColor = dot.dataset.color;   // becomes the last-used swatch
       updateActiveDot();
       state.hlTarget = span; state.savedRange = null;
-      savePassage();
+      saveFromNode(span);
     });
   });
 
@@ -2644,19 +2749,22 @@
       }
       state.hlTarget = span; state.savedRange = null;
       setUMenu(false);
-      savePassage();
+      saveFromNode(span);
     });
   });
 
   el("hlTrash").addEventListener("click", ()=>{
     const span = state.hlTarget;
     if(span){
+      // resolve the region BEFORE unwrapping — afterwards the span is detached
+      // and can no longer say which region it belonged to
+      const host = annotationHost(span);
       if(span.dataset.noteId) removeNoteRecord(span.dataset.noteId);   // don't orphan the note
       const parent = span.parentNode;
       while(span.firstChild) parent.insertBefore(span.firstChild, span);
       parent.removeChild(span);
       parent.normalize();
-      savePassage();
+      saveAnnotation(host);
       renderNotesRail();
     }
     hideHlPopup();
@@ -2683,7 +2791,7 @@
       ms.notes[q.id].push({ id, snippet: (span.textContent || "").trim().slice(0, 80), text: "" });
     }
     state.notesCollapsed = false;
-    savePassage();
+    saveFromNode(span);
     hideHlPopup();
     renderNotesRail();
     const ta = document.querySelector('.note-card[data-note="' + id + '"] .note-body-ta');
@@ -2703,7 +2811,7 @@
     // downgrade the span to a normal highlight — keep the highlight itself
     const span = document.querySelector('#passageText .hl[data-note-id="' + id + '"]');
     if(span) span.removeAttribute("data-note-id");
-    savePassage();
+    if(span) saveFromNode(span);
     renderNotesRail();
   }
 

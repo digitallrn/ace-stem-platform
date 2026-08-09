@@ -204,3 +204,57 @@ no subscript-fraction exists in the library; nothing in 202511asiav1 fires.
 - After Phase D, the sign-in → home → test → results flow is different
   enough that the full end-to-end verification (real clicks, then dashboard
   reconciliation) should be re-run the way the attempts build was verified.
+
+## CORRECTION: highlighting covers stem and choices, not just the passage (2026-08-08)
+
+**A conclusion recorded earlier was wrong, and so was the method that produced
+it. Read this before re-deriving anything about annotation scope from the
+screenshots.**
+
+An earlier analysis concluded that real Bluebook confines highlighting to the
+passage, and that our passage-only behaviour was therefore correct parity. It
+was drawn entirely from the reference screenshots: every highlight in
+06–14/31/35 sits in the left pane, and screenshot 12 shows text *selected*
+inside choice D with no highlight toolbar visible. A per-pane pixel scan of
+all eleven images agreed.
+
+**David then tested the live Bluebook app directly: selecting text in the
+question stem or inside an answer choice DOES pop the highlight toolbar.**
+Highlighting is available there. The screenshots were never evidence of a
+restriction.
+
+Why the method failed, so it is not repeated: the toolbar is a **transient
+popup — it appears on selection and dismisses on click**. A screenshot is one
+frame, and every frame in the set was captured either before it appeared or
+after it dismissed. Screenshot 12, the one that looked decisive, shows a live
+selection in a choice with no toolbar; that reads as a refusal but is equally
+consistent with a frame taken after dismissal. **Absence of a transient
+control in a static frame is not evidence that the control does not exist.**
+For any affordance that is transient — popups, hover states, drag handles,
+toasts — the screenshots can confirm presence but never absence. Confirm
+absence by driving the real app.
+
+Implemented accordingly. Highlightable in Reading and Writing:
+- the passage,
+- the question stem,
+- the text of a **single** answer choice.
+
+Not highlightable: a selection spanning two choices, a selection straddling
+stem and choice, and the header band (Mark for Review / ABC). Math stays
+annotation-free — unchanged and separately established.
+
+Behaviours confirmed live and matched here: a drag inside a choice also
+selects that choice as the answer, so the click-after-drag is correct and
+carries **no** suppression guard; and clicking a crossed-out choice un-crosses
+it (we previously did nothing on that click — now fixed). Composed, dragging
+inside a crossed-out choice highlights the text and un-crosses the choice.
+A highlight inside a crossed-out choice restores full ink inside the
+highlight: the choice greys its text to #999, which over a pastel fill falls
+to ~2.3:1, while the strikethrough still carries the crossed-out meaning.
+
+Scope boundary kept deliberately: **notes stay passage-only.** The notes rail
+is keyed per passage question and only renders when the question has one, and
+deleteNote resolves its span inside #passageText, so a note on a stem or
+choice highlight could never be shown or deleted. The note button is withheld
+on those selections; highlighting there is otherwise complete. Extending notes
+is a separate piece of work.
