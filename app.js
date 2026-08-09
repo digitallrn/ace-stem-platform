@@ -20,6 +20,7 @@
     elimMode: false,
     hlTarget: null,              // existing .hl span being edited, or null (new selection)
     hlHost: null,                // which annotatable region the popup is acting on
+    hlGestureUsed: false,        // this drag already became a highlight — see the mousedown reset
     savedRange: null,
     noteSeq: 0,                  // session-unique note id counter (Phase B)
     notesCollapsed: false,       // notes rail collapse preference, survives navigation
@@ -144,7 +145,23 @@
      whatever the app rendered AFTER the restored fragment — the rest of the
      stem, the whole choice list, the question pane. fmt() emits none of them,
      so one in a saved annotation came from a crafted record. */
-  const DROP_ELEMENTS = /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL|PLAINTEXT|XMP|LISTING)$/;
+  /* SMIL animation elements are dropped because they can PUT BACK an attribute
+     this filter just removed: <a><animate attributeName="href" values="..."> is
+     untouched by DROP_ATTRS (its payload lives in attributeName/values/to, none
+     of which are URL attributes), and once the animation starts the anchor
+     navigates on the animated value even though getAttribute("href") is still
+     null. Planted in choiceHtml the SVG IS the visible choice, so the student's
+     ordinary answering click would navigate the sitting away. A is dropped with
+     them: nothing this app renders emits an anchor, so one in a saved
+     annotation came from a crafted record.
+     TITLE/NOEMBED/NOFRAMES are RCDATA — the HTML serializer does not escape
+     their text, so a payload parked inside one comes back out as live markup on
+     the next parse. FOREIGNOBJECT switches back to HTML parsing inside SVG and
+     is the usual lever for that round-trip confusion.
+     Verified against the whole shipped library before denying them: fmt() over
+     every passage, stem, choice and rationale in all five tests (2542 strings,
+     1.16MB of output) emits none of these tags, so no real content is lost. */
+  const DROP_ELEMENTS = /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL|PLAINTEXT|XMP|LISTING|A|ANIMATE|ANIMATEMOTION|ANIMATETRANSFORM|SET|TITLE|NOEMBED|NOFRAMES|FOREIGNOBJECT)$/;
   const DROP_ATTRS = /^(src|href|xlink:href|srcdoc|srcset|action|formaction|data|background|ping|dynsrc|lowsrc|id)$/;
   /* annotationHost decides which region a selection belongs to by walking up
      with closest(), so these structural hooks are load-bearing. Restored markup
@@ -154,7 +171,7 @@
      dropped outright above; these class tokens are dropped individually so that
      KaTeX's large, version-dependent class vocabulary keeps working. */
   const DROP_CLASSES = /^(passage-text|passageText|q-text|q-stimulus|ctext|choice|choices|q-lead)$/;
-  function sanitizeSavedHtml(html){
+  function sanitizeOnce(html){
     // a <template>'s content is inert: parsing here runs no script and fetches
     // nothing, so the payload is defused before it is ever examined
     const tpl = document.createElement("template");
@@ -175,6 +192,27 @@
       });
     });
     return tpl.innerHTML;
+  }
+  /* Sanitize to a FIXED POINT. This filter parses into a <template>, edits, and
+     serializes; the caller then assigns that string somewhere else, which parses
+     it a SECOND time. Mutation-XSS is the whole family of payloads where that
+     second parse yields a different tree than the first — the markup is inert
+     in the template and live in the destination. Re-running the filter until
+     the string stops changing collapses that gap: a fragment that survives is
+     one the parser and serializer already agree on. Benign markup settles on
+     the second pass (the first only normalizes, e.g. <animate/> to <animate>),
+     so a fragment still changing after several rounds is not content — it is a
+     payload that re-writes itself, and it is dropped entirely rather than
+     handed on in whatever state the last round left it. */
+  const SANITIZE_ROUNDS = 4;
+  function sanitizeSavedHtml(html){
+    let cur = sanitizeOnce(html);
+    for(let i = 1; i < SANITIZE_ROUNDS; i++){
+      const next = sanitizeOnce(cur);
+      if(next === cur) return cur;
+      cur = next;
+    }
+    return sanitizeOnce(cur) === cur ? cur : "";
   }
   window.AppSanitize = { html: sanitizeSavedHtml };
 
@@ -2585,6 +2623,13 @@
   const hlPopup = el("hlPopup");
   const uMenu = el("uMenu");
 
+  /* Capture phase, so the reset lands before any handler that reads the flag:
+     a new press is a new gesture, whatever the previous one did. Tying the
+     flag's life to the gesture rather than to a timer means a drag that ends
+     without a click (released outside the window, cancelled) cannot leave it
+     stuck on. */
+  document.addEventListener("mousedown", ()=>{ state.hlGestureUsed = false; }, true);
+
   document.addEventListener("mouseup", e=>{
     if(hlPopup.contains(e.target)) return;
     /* In highlight mode the span is created and SAVED synchronously, here,
@@ -2624,6 +2669,14 @@
       }catch(err){ return false; }
       sel.removeAllRanges();
       saveAnnotation(host);
+      /* This gesture has spent itself: it became a highlight. The click that
+         always follows a drag must not ALSO be read as a click-to-edit, because
+         removeAllRanges() above has just made the "a selection is live, stand
+         down" guard in those handlers stop holding. Without this the popup
+         opens on the ENCLOSING span, and the next swatch recolours the whole
+         existing highlight — or the trash unwraps it and takes its note with
+         it — instead of touching the piece the student just dragged. */
+      state.hlGestureUsed = true;
       return true;
     }
     state.savedRange = range.cloneRange();
@@ -2636,6 +2689,7 @@
   passagePane.addEventListener("click", e=>{
     if(state.reviewMode) return;   // a restored highlight is display-only in review
     if(currentModule().section === "Math") return;   // Math is annotation-free
+    if(state.hlGestureUsed) return;   // this click is the tail of a drag that already highlighted
     const span = e.target.closest(".hl");
     if(!span) return;
     const sel = window.getSelection();
@@ -2659,6 +2713,7 @@
        selection path: a crafted record can plant annotation markup on a Math
        module, and restore renders whatever it plants. */
     if(currentModule().section === "Math") return;
+    if(state.hlGestureUsed) return;   // ditto — see the passage handler above
     const span = e.target.closest && e.target.closest(".hl");
     if(!span) return;
     const host = annotationHost(span);

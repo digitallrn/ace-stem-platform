@@ -283,6 +283,21 @@ Two rules taken from it:
 2. **In highlight mode the span is created synchronously on `mouseup`**, before
    the click can reach anything, so the markup is already in `moduleState` and
    survives any later rebuild.
+3. **A gesture that became a highlight is spent.** Creating the span calls
+   `removeAllRanges()`, which is exactly what the click-to-edit handlers used as
+   their "a selection is live, stand down" signal — so the drag's trailing click
+   started reading as a request to EDIT whichever highlight sat under the
+   pointer. Dragging inside an existing highlight would then open the popup on
+   the enclosing span, and the next swatch recoloured the whole thing, or the
+   trash unwrapped it and took its note with it. A flag set when the highlight
+   is created, and cleared on the next `mousedown` (capture phase), scopes the
+   suppression to that one gesture — no timers, and a drag that ends without a
+   click cannot leave it stuck on.
+
+`tests/drag-harness.js` holds these as runnable cases. It is validated the only
+way a check like this can be: it fails on `4e55c36` for the choice-highlight
+case and on `80b051e` for the nested-drag case, and passes only on the build
+that fixes both.
 
 Verification note, since this is exactly what the first pass got wrong:
 dispatching `mouseup` alone reproduces neither the bug nor the fix. The `click`
