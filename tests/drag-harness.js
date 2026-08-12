@@ -233,6 +233,43 @@
         pass: true, note: "SKIPPED — this passage has no table (open a table question to cover it)" });
     }
 
+    /* 4c — a drag that SWALLOWS a block whole. Checking only the two endpoints
+       misses this: a block lying entirely between them leaves both resolving to
+       the same ancestor, and extractContents() then lifts it into the highlight
+       span. On a paired passage that is the "Text 2" header — which becomes the
+       span's first element child, so .fmt-passage-label:first-child fires and
+       the 42px separation between the two texts collapses, and is then SAVED.
+       Only runs on a paired passage; skipped elsewhere rather than passing. */
+    await setHlMode(true); dismissPopup();
+    const pt = $("passageText");
+    const labels = pt ? [...pt.querySelectorAll(".fmt-passage-label")] : [];
+    if(labels.length >= 2){
+      const shape = () => [...pt.childNodes].map(n => n.nodeType === 1 ? n.tagName + "." + n.className : "#text").join("|");
+      const gap = () => getComputedStyle(pt.querySelectorAll(".fmt-passage-label")[1]).marginTop;
+      const before = shape(), beforeGap = gap(), beforeHl = probe().passageHl;
+      const bodies = [...pt.childNodes].filter(n => n.nodeType === 3 && n.nodeValue.trim().length > 80);
+      if(bodies.length >= 2){
+        const r = document.createRange();
+        r.setStart(bodies[0], Math.max(0, bodies[0].nodeValue.length - 60));
+        r.setEnd(bodies[1], Math.min(60, bodies[1].nodeValue.length));
+        await dragRange(r);
+        ok("a drag across the Text 1 / Text 2 boundary is refused",
+           shape() === before && gap() === beforeGap && probe().passageHl === beforeHl,
+           shape() === before ? `structure intact, label margin still ${gap()}`
+                              : `label SWALLOWED: ${before} -> ${shape()}, margin ${beforeGap} -> ${gap()}`);
+        // and ordinary highlighting inside one of the two texts must still work
+        const h0 = probe().passageHl;
+        const r2 = document.createRange();
+        r2.setStart(bodies[0], 10); r2.setEnd(bodies[0], Math.min(bodies[0].nodeValue.length, 34));
+        await dragRange(r2);
+        ok("highlighting inside one paired text still works",
+           probe().passageHl > h0, `${h0} -> ${probe().passageHl}`);
+      } else ok("a drag across the Text 1 / Text 2 boundary is refused", false, "could not find two body text nodes");
+    } else {
+      results.push({ case: "a drag across the Text 1 / Text 2 boundary is refused",
+        pass: true, note: "SKIPPED — not a paired passage (open a Text 1 / Text 2 question to cover it)" });
+    }
+
     /* 5 — click-to-edit still works outside highlight mode (the gesture flag
        must not swallow an ordinary click on an existing highlight) */
     await setHlMode(false); dismissPopup();

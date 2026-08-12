@@ -429,7 +429,25 @@
           { name: "offset beyond the cap",
             html: '<span class="katex vlist" style="top:-9999em">x</span>', banned: /top/i },
           { name: "size beyond the cap",
-            html: '<span style="min-width:400em">x</span>', banned: /min-width/i }
+            html: '<span style="min-width:400em">x</span>', banned: /min-width/i },
+          /* The overlay rebuilt entirely from ALLOWLISTED properties (2026-08-09).
+             The first cap split trusted that only top/left/bottom/right can move
+             a box. A negative margin moves it in flow, vertical-align moves an
+             inline box, and padding manufactures hit area — so this div covered
+             the choices above the one it was planted in and every click there
+             recorded that choice. */
+          { name: "margin/padding overlay",
+            html: '<div style="margin-top:-20em;height:18em;width:40em;padding-left:40em">x</div>',
+            banned: /margin|padding|40em|18em/i },
+          { name: "vertical-align overlay",
+            html: '<span style="vertical-align:14em;padding-left:40em;padding-top:8em">x</span>',
+            banned: /vertical-align|padding/i },
+          { name: "negative margin-left",
+            html: '<span style="margin-left:-45em">x</span>', banned: /margin-left/i },
+          /* the cap compared the bare number, so it was unit-blind: 10rem passed
+             a cap of 10 and still moved 160px */
+          { name: "unit-blind cap (rem)",
+            html: '<span style="top:-10rem">x</span>', banned: /top/i }
         ];
         const styleBad = [];
         if(!S){ styleBad.push("AppSanitize.html not exposed"); }
@@ -455,6 +473,58 @@
           pass: styleBad.length === 0 && !window.__XSS_FIRED,
           note: styleBad.length ? styleBad.join(" | ")
                                 : `${styleCases.length} style vectors defused, all 7 KaTeX properties preserved` });
+      }
+
+      /* The CLASS attribute. Until 2026-08-09 this was a denylist of eight
+         structural hooks, which could not see that the app's own stylesheet
+         defines .qnav-overlay { position:fixed; inset:0; z-index:50 } and
+         .modal-overlay / .fig-overlay at z-index 120, all unscoped. A record
+         carrying nothing but class="qnav-overlay" therefore rendered a
+         full-viewport fixed layer with NO style attribute at all: in a choice
+         every click on screen answered that choice, in the passage it swallowed
+         clicks so Next and Back could not be reached. It is an allowlist now.
+         Both directions are asserted: chrome classes must go, and the KaTeX and
+         highlight vocabularies must survive or restored annotations break. */
+      {
+        const S = window.AppSanitize && window.AppSanitize.html;
+        const classBad = [];
+        const mustGo = ["qnav-overlay", "modal-overlay", "fig-overlay", "qnav-popup",
+                        "t-footer", "hl-popup", "choice", "ctext", "q-text", "passage-text",
+                        "dir-overlay", "elim-btn", "screen", "pill"];
+        const mustStay = ["hl", "c-yellow", "c-blue", "c-pink", "c-none",
+                          "u-solid", "u-dashed", "u-dotted",
+                          "katex", "katex-display", "katex-html", "katex-mathml",
+                          "mord", "mfrac", "frac-line", "vlist", "vlist-t2", "pstrut",
+                          "reset-size6", "size3", "mathnormal", "delimsizing", "sqrt",
+                          "fmt-table", "fmt-caption", "fmt-passage-label", "fmt-quote",
+                          "fmt-bullets", "fmt-tnote"];
+        if(!S){ classBad.push("AppSanitize.html not exposed"); }
+        else {
+          mustGo.forEach(c => {
+            const d = document.createElement("div");
+            d.innerHTML = S('<span class="' + c + '">x</span>');
+            const el = d.querySelector("span");
+            const got = el ? (el.getAttribute("class") || "") : "";
+            if(got.split(/\s+/).indexOf(c) !== -1) classBad.push(`chrome class "${c}" survived`);
+          });
+          mustStay.forEach(c => {
+            const d = document.createElement("div");
+            d.innerHTML = S('<span class="' + c + '">x</span>');
+            const el = d.querySelector("span");
+            const got = el ? (el.getAttribute("class") || "") : "";
+            if(got.split(/\s+/).indexOf(c) === -1) classBad.push(`legit class "${c}" was DROPPED`);
+          });
+          /* and the whole-payload form: a fixed overlay must not survive in any
+             attribute, so nothing it renders can win hit-testing */
+          const d = document.createElement("div");
+          d.innerHTML = S('<span class="qnav-overlay"></span>choice text');
+          const el = d.querySelector("span");
+          if(el && el.getAttribute("class")) classBad.push("qnav-overlay payload kept a class");
+        }
+        results.push({ surface: "Class attribute: allowlist strips app chrome, keeps KaTeX + highlight vocabulary",
+          pass: classBad.length === 0 && !window.__XSS_FIRED,
+          note: classBad.length ? classBad.join(" | ")
+                                : `${mustGo.length} chrome classes dropped, ${mustStay.length} legitimate classes preserved` });
       }
 
       const rail = $("notesCards");

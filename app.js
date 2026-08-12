@@ -163,14 +163,41 @@
      1.16MB of output) emits none of these tags, so no real content is lost. */
   const DROP_ELEMENTS = /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL|PLAINTEXT|XMP|LISTING|A|ANIMATE|ANIMATEMOTION|ANIMATETRANSFORM|SET|TITLE|NOEMBED|NOFRAMES|FOREIGNOBJECT)$/;
   const DROP_ATTRS = /^(src|href|xlink:href|srcdoc|srcset|action|formaction|data|background|ping|dynsrc|lowsrc|id)$/;
-  /* annotationHost decides which region a selection belongs to by walking up
-     with closest(), so these structural hooks are load-bearing. Restored markup
-     has no legitimate reason to carry one — a highlight span is <span class="hl
-     hl-yellow"> — and one that did could make a stem or a choice answer to
-     closest("#passageText") and get itself saved into the passage slot. `id` is
-     dropped outright above; these class tokens are dropped individually so that
-     KaTeX's large, version-dependent class vocabulary keeps working. */
-  const DROP_CLASSES = /^(passage-text|passageText|q-text|q-stimulus|ctext|choice|choices|q-lead)$/;
+  /* CLASS is an ALLOWLIST, and it has to be: this attribute, not style, is the
+     shortest path to a click-stealing overlay. Our own stylesheet defines
+     .qnav-overlay { position:fixed; inset:0; z-index:50 } and .modal-overlay /
+     .fig-overlay at z-index 120, all unscoped — so a record carrying nothing
+     but class="qnav-overlay" renders a 1280x720 fixed layer with no style
+     attribute at all. Planted in a choice, every click on screen bubbles to
+     that choice's handler and answers it; planted in the passage it simply
+     swallows clicks, and because .t-footer is unpositioned the student cannot
+     reach Next or Back until the timer runs out. The earlier denylist of eight
+     structural hooks could not see any of this, and no denylist could: it would
+     have to enumerate every class the app's CSS will ever define.
+     What restored markup legitimately needs is exactly two vocabularies —
+     KaTeX's, and the annotation classes the highlighter itself writes. Measured
+     over the whole shipped library (6 tests, every passage/stem/choice/
+     rationale) fmt() emits 50 distinct class tokens: 44 KaTeX plus our six
+     fmt-* block containers. The KaTeX families below are widened past that
+     measured set so a KaTeX upgrade cannot silently lose a fraction bar; none
+     of those names collide with app chrome, and anything unrecognised — every
+     overlay class included — is dropped. */
+  const KEEP_CLASSES = new RegExp("^(?:" + [
+    // the highlighter's own output — these MUST survive or annotations vanish
+    "hl", "c-(?:yellow|blue|pink|none)", "u-(?:solid|dashed|dotted)",
+    // fmt() block containers
+    "fmt-(?:blank|bullets|caption|passage-label|quote|table|tnote)",
+    // KaTeX: measured vocabulary, widened to the neighbouring families
+    "katex(?:-display|-html|-mathml)?", "base", "strut", "pstrut",
+    "vlist(?:-r|-s|-t|-t2)?", "m(?:ord|bin|rel|open|close|punct|inner|op|frac|spuub|space|tight)",
+    "msupsub", "frac-line", "sqrt", "root", "overline(?:-line)?", "underline(?:-line)?",
+    "delimsizing", "delimcenter", "nulldelimiter", "sizing", "reset-size\\d+", "size\\d+",
+    "math(?:normal|it|bf|rm|sf|tt|cal|scr|frak|bb|default)", "boldsymbol", "amsrm",
+    "text(?:bf|it)?", "hide-tail", "svg-align", "accent(?:-body)?", "op-(?:symbol|limits)",
+    "large-op", "small-op", "mtable", "col-align-[a-z]", "arraycolsep", "stretchy",
+    "x-arrow", "brace-[a-z]+", "halfarrow-[a-z]+", "rlap", "llap", "clap", "inner",
+    "fix", "newline", "eqn-num", "tag", "fbox", "boxpad", "mspace", "mtight"
+  ].join("|") + ")$");
   /* The style ATTRIBUTE is filtered by an ALLOWLIST of properties. It used to
      be three banned substrings (url(, expression(, javascript:) and that lost,
      twice over: `background-image:\000075rl(https://host/p)` and
@@ -195,20 +222,36 @@
      background, pointer-events — and those are what the overlay needed.
      A value must be a BARE LENGTH: no parentheses, no functions, no escapes,
      so url()/image-set()/calc() have nowhere left to hide regardless of
-     spelling. The magnitude caps bound what is left. OFFSETS
-     (top/left/bottom/right) get the tighter one, because they are the only
-     lengths that can MOVE a span: KaTeX's own stylesheet makes .vlist children
-     position:relative, and a crafted record may carry those classes, so an
-     unbounded `top` could slide an inline span over a different choice and
-     make a click there answer the wrong one. KaTeX's largest offset anywhere
-     in the library is 4.2029em, so 10 leaves ample room while holding any
-     displacement below a single choice's height. Sizes keep the looser cap —
-     with position and display gone they cannot reposition anything. */
+     spelling. What remains is bounded by CAPS, and the first version of those
+     caps was wrong in two ways worth recording, because both looked right:
+       - It said offsets were "the only lengths that can MOVE a span" and gave
+         everything else a loose cap. False. A negative margin-* moves a box in
+         normal flow, vertical-align:<length> moves an inline box, and padding-*
+         manufactures hit area. `margin-top:-20em;height:18em;width:40em;
+         padding-left:40em` on a div in one choice rebuilt the whole overlay out
+         of nothing but allowlisted properties: it covered the choices above it
+         and every click there recorded the choice it was planted in.
+       - The cap compared the bare NUMBER, so it was unit-blind: `top:-10rem`
+         passed a cap of 10 and still moved 160px.
+     So caps are now per ROLE and measured in PX-EQUIVALENT, with em/rem/ex
+     converted at 20px (an upper bound on any font-size here). Observed maxima
+     across the library, in px: top 73.6, height 57.7, vertical-align 24.2,
+     min-width 14.9, padding-left 14.6, margin-right 4.9, border-width 0.7.
+     The caps sit a modest multiple above those — enough that no real KaTeX
+     construct is touched, small enough that nothing built from them can travel
+     far. `%` is gone from the value grammar: the library uses only em and px,
+     and a percentage cannot be bounded without knowing the container. */
   const STYLE_ALLOW = /^(height|width|min-width|max-width|vertical-align|top|left|bottom|right|margin-(top|right|bottom|left)|padding-(top|right|bottom|left)|border-(top|right|bottom|left)-width)$/;
-  const STYLE_VALUE = /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:em|ex|rem|px|pt|%)?$/;
-  const STYLE_OFFSETS = /^(top|left|bottom|right)$/;
-  const STYLE_MAX = 50;          // sizes: >10x the library's largest
-  const STYLE_OFFSET_MAX = 10;   // offsets: the only lengths that can move a span
+  const STYLE_VALUE = /^(-?(?:\d+(?:\.\d+)?|\.\d+))(em|ex|rem|px|pt)?$/;
+  const STYLE_UNIT_PX = { em: 20, rem: 20, ex: 20, pt: 1.34, px: 1 };
+  /* px-equivalent caps by role */
+  const STYLE_CAPS = [
+    [/^(top|left|bottom|right)$/,                    120],  // observed max 73.6
+    [/^(height|width|min-width|max-width)$/,         120],  // observed max 57.7
+    [/^vertical-align$/,                              50],  // observed max 24.2
+    [/^(margin|padding)-(top|right|bottom|left)$/,    30],  // observed max 14.6
+    [/^border-(top|right|bottom|left)-width$/,        10]   // observed max 0.7
+  ];
   function sanitizeStyle(value){
     const kept = [];
     String(value == null ? "" : value).split(";").forEach(decl => {
@@ -217,9 +260,11 @@
       const prop = decl.slice(0, i).trim().toLowerCase();
       const val  = decl.slice(i + 1).trim();
       if(!STYLE_ALLOW.test(prop)) return;
-      if(!STYLE_VALUE.test(val)) return;
-      const cap = STYLE_OFFSETS.test(prop) ? STYLE_OFFSET_MAX : STYLE_MAX;
-      if(Math.abs(parseFloat(val)) > cap) return;
+      const m = STYLE_VALUE.exec(val);
+      if(!m) return;
+      const px = Math.abs(parseFloat(m[1])) * (m[2] ? (STYLE_UNIT_PX[m[2]] || 20) : 1);
+      const rule = STYLE_CAPS.find(c => c[0].test(prop));
+      if(!rule || px > rule[1]) return;
       kept.push(prop + ":" + val);
     });
     return kept.join(";");
@@ -239,11 +284,9 @@
           if(safe) node.setAttribute("style", safe); else node.removeAttribute(at.name);
         }
         if(n === "class"){
-          const kept = String(at.value).split(/\s+/).filter(c => c && !DROP_CLASSES.test(c));
-          if(kept.length !== String(at.value).split(/\s+/).filter(Boolean).length){
-            if(kept.length) node.setAttribute("class", kept.join(" "));
-            else node.removeAttribute("class");
-          }
+          const kept = String(at.value).split(/\s+/).filter(c => c && KEEP_CLASSES.test(c));
+          if(kept.length) node.setAttribute("class", kept.join(" "));
+          else node.removeAttribute("class");
         }
       });
     });
@@ -2716,10 +2759,26 @@
     }
     return root;
   }
+  /* Structural block containers fmt() can emit. KaTeX builds everything from
+     SPAN/svg/MathML and never one of these, so wrapping a whole inline formula
+     stays allowed — which it must, since highlighting a sentence containing
+     math is ordinary. */
+  const STRUCTURAL_BLOCKS = "div,p,table,thead,tbody,tfoot,tr,td,th,ul,ol,li," +
+                            "blockquote,figure,figcaption,hr,pre,h1,h2,h3,h4,h5,h6";
   function crossesBlock(range, root){
     try{
-      return blockAncestor(range.startContainer, root) !== blockAncestor(range.endContainer, root);
-    }catch(err){ return false; }
+      if(blockAncestor(range.startContainer, root) !== blockAncestor(range.endContainer, root)) return true;
+      /* Endpoints alone are not enough: a block sitting WHOLLY BETWEEN them
+         leaves both resolving to the same ancestor, and extractContents() then
+         lifts that entire block inside the new highlight span. On a paired
+         passage that swallows the "Text 2" header — which makes it the span's
+         first element child, so .fmt-passage-label:first-child fires and the
+         42px separation between the two texts collapses to nothing. Then it is
+         SAVED, so the ruined spacing is what the student reads for the rest of
+         the sitting and what Review Mode replays. Six shipped questions have
+         that shape. */
+      return !!range.cloneContents().querySelector(STRUCTURAL_BLOCKS);
+    }catch(err){ return true; }   // fail closed: refuse rather than shred
   }
 
   function handleSelection(){
