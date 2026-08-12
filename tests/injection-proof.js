@@ -490,14 +490,27 @@
         const classBad = [];
         const mustGo = ["qnav-overlay", "modal-overlay", "fig-overlay", "qnav-popup",
                         "t-footer", "hl-popup", "choice", "ctext", "q-text", "passage-text",
-                        "dir-overlay", "elim-btn", "screen", "pill"];
+                        "dir-overlay", "elim-btn", "screen", "pill",
+                        /* KaTeX's vocabulary, which the allowlist admitted until
+                           2026-08-09 "so an upgrade cannot lose a fraction bar".
+                           Every one of these is a positioning or sizing primitive in
+                           KaTeX's own stylesheet: .rlap>.inner / .llap>.inner /
+                           .clap>.inner / .halfarrow-left / .brace-left are
+                           position:absolute, .stretchy is position:relative +
+                           display:block + width:100%, and sizing/reset-size<n>/size<n>
+                           multiply font-size by up to 4.976x per level, compounding —
+                           which inflates every em-based cap underneath them. None of
+                           it can occur legitimately: annotations are Reading-and-Writing
+                           only, and no RW field in the library contains math. */
+                        "katex", "katex-display", "katex-html", "katex-mathml",
+                        "mord", "mfrac", "frac-line", "vlist", "vlist-t2", "pstrut",
+                        "reset-size1", "reset-size6", "size3", "size11", "sizing",
+                        "mathnormal", "delimsizing", "sqrt", "stretchy",
+                        "rlap", "llap", "clap", "inner", "halfarrow-left", "brace-left"];
         const mustStay = ["hl", "c-yellow", "c-blue", "c-pink", "c-none",
                           "u-solid", "u-dashed", "u-dotted",
-                          "katex", "katex-display", "katex-html", "katex-mathml",
-                          "mord", "mfrac", "frac-line", "vlist", "vlist-t2", "pstrut",
-                          "reset-size6", "size3", "mathnormal", "delimsizing", "sqrt",
-                          "fmt-table", "fmt-caption", "fmt-passage-label", "fmt-quote",
-                          "fmt-bullets", "fmt-tnote"];
+                          "fmt-blank", "fmt-bullets", "fmt-caption",
+                          "fmt-passage-label", "fmt-quote", "fmt-table", "fmt-tnote"];
         if(!S){ classBad.push("AppSanitize.html not exposed"); }
         else {
           mustGo.forEach(c => {
@@ -521,10 +534,99 @@
           const el = d.querySelector("span");
           if(el && el.getAttribute("class")) classBad.push("qnav-overlay payload kept a class");
         }
-        results.push({ surface: "Class attribute: allowlist strips app chrome, keeps KaTeX + highlight vocabulary",
+        results.push({ surface: "Class attribute: allowlist strips chrome + KaTeX, keeps highlight/fmt vocabulary",
           pass: classBad.length === 0 && !window.__XSS_FIRED,
           note: classBad.length ? classBad.join(" | ")
-                                : `${mustGo.length} chrome classes dropped, ${mustStay.length} legitimate classes preserved` });
+                                : `${mustGo.length} dangerous classes dropped, ${mustStay.length} legitimate classes preserved` });
+      }
+
+      /* The two overlays the 2026-08-09 review built ENTIRELY out of what the
+         allowlist permitted. Neither uses a banned substring or an out-of-cap
+         value: the reach comes from KaTeX classes granting position:absolute,
+         and from the sizing trio multiplying font-size so a "6em" box the
+         filter scores as 120px renders 532px. Asserted on the rendered result,
+         not on the string, because that is where the harm lives. */
+      {
+        const S = window.AppSanitize && window.AppSanitize.html;
+        const payloads = {
+          "stretchy layer":
+            '<span class="katex"><span class="sizing reset-size1 size11">' +
+            '<span class="stretchy" style="top:-3em;height:6em"></span></span></span>',
+          "rlap/inner absolute layer":
+            '<span class="katex"><span class="sizing reset-size1 size11"><span class="rlap">' +
+            '<span class="inner" style="top:-3em;left:-3em;width:6em;height:6em"></span></span></span></span>'
+        };
+        const bad = [];
+        if(!S) bad.push("AppSanitize.html not exposed");
+        else Object.keys(payloads).forEach(name => {
+          const host = document.createElement("span");
+          host.className = "ctext";
+          host.style.cssText = "position:absolute;left:-4000px;top:0;width:480px;";
+          document.body.appendChild(host);
+          host.innerHTML = S(payloads[name]);
+          [...host.querySelectorAll("*")].forEach(e => {
+            const cs = getComputedStyle(e);
+            if(cs.position === "absolute" || cs.position === "fixed")
+              bad.push(`${name}: an element rendered position:${cs.position}`);
+            if(parseFloat(cs.fontSize) > 40)
+              bad.push(`${name}: font-size inflated to ${cs.fontSize}`);
+            const r = e.getBoundingClientRect();
+            if(r.width > 200 || r.height > 200)
+              bad.push(`${name}: box ${Math.round(r.width)}x${Math.round(r.height)}`);
+          });
+          host.remove();
+        });
+        results.push({ surface: "Sanitized payloads cannot render a positioned or oversized box",
+          pass: bad.length === 0, note: bad.length ? bad.join(" | ")
+            : "both review overlays render static, un-inflated and zero-sized" });
+      }
+
+      /* DRIFT GATE. The allowlist is justified by a measurement: no Reading and
+         Writing field in the library contains math, so fmt() emits only the
+         seven fmt-* containers there. If a future test bank breaks that,
+         restored annotations would silently lose their styling — so this fails
+         loudly instead. It is the reason the allowlist can safely be this
+         small. */
+      {
+        const S = window.AppSanitize && window.AppSanitize.html;
+        const probe = document.createElement("div");
+        probe.style.cssText = "position:absolute;left:-4000px;top:0;width:560px;";
+        document.body.appendChild(probe);
+        const dropped = new Map();
+        let fields = 0;
+        Object.keys(window.__TESTDATA__ || {}).forEach(tid => {
+          const t = window.__TESTDATA__[tid];
+          (t.modules || []).forEach(m => {
+            if(m.section === "Math") return;               // annotation-free by design
+            (m.questions || []).forEach(q => {
+              const fs = [q.passage, q.questionText].concat(q.choices || []);
+              fs.forEach((v, i) => {
+                if(typeof v !== "string" || !v) return;
+                fields++;
+                let h; try{ h = fmt(v, i >= 2 ? { bigInline: true } : undefined); }catch(e){ return; }
+                probe.innerHTML = h;
+                const before = new Map();
+                probe.querySelectorAll("[class]").forEach(e =>
+                  e.getAttribute("class").split(/\s+/).filter(Boolean)
+                    .forEach(tk => before.set(tk, (before.get(tk) || 0) + 1)));
+                probe.innerHTML = S(h);
+                const after = new Map();
+                probe.querySelectorAll("[class]").forEach(e =>
+                  e.getAttribute("class").split(/\s+/).filter(Boolean)
+                    .forEach(tk => after.set(tk, (after.get(tk) || 0) + 1)));
+                before.forEach((n, tk) => {
+                  if((after.get(tk) || 0) < n) dropped.set(tk, (dropped.get(tk) || 0) + 1);
+                });
+              });
+            });
+          });
+        });
+        probe.remove();
+        results.push({ surface: "Allowlist covers every class fmt() emits in a Reading and Writing field",
+          pass: dropped.size === 0,
+          note: dropped.size
+            ? `RW classes DROPPED by the sanitizer: ${[...dropped.keys()].join(", ")} — restored annotations would lose styling; widen KEEP_CLASSES or re-check the no-math-in-RW assumption`
+            : `${fields} RW fields checked, no emitted class is dropped` });
       }
 
       const rail = $("notesCards");
@@ -797,16 +899,27 @@
         note: executable.length || handlers.length || urlAttrs.length
           ? `survived: ${executable.length} executable, ${handlers.length} handler(s), ${urlAttrs.length} url attr(s)`
           : hostileHtml.length + " hostile fragments defused; nothing can execute or fetch" });
-      /* the sanitizer must not be so blunt it eats real highlights or math —
-         a restored passage silently losing them is the failure mode that
-         would go unnoticed */
+      /* the sanitizer must not be so blunt it eats real highlights — a restored
+         passage silently losing them is the failure mode that would go
+         unnoticed.
+         This assertion used to require KaTeX markup to survive too. It no
+         longer does, and that reversal is deliberate: annotations are
+         Reading-and-Writing only and no RW field in the library contains math,
+         so a KaTeX class in a saved annotation can only have been crafted —
+         while KaTeX's own stylesheet makes several of those classes
+         position:absolute and lets the sizing trio multiply font-size, which
+         is what rebuilt the click-stealing overlay twice. TEXT is still
+         preserved; only the styling hooks go. The "don't eat real content"
+         concern is now covered far better by the drift gate above, which
+         checks every class fmt() emits across all 2268 RW fields. */
       const keep = document.createElement("div");
       keep.innerHTML = window.AppSanitize.html(
         '<span class="hl" data-note-id="n1">kept</span> <span class="katex"><span class="mord">x</span></span>');
-      results.push({ surface: "Sanitizer preserves highlights and KaTeX markup",
-        pass: !!keep.querySelector('span.hl[data-note-id="n1"]') && !!keep.querySelector("span.katex .mord") &&
-              keep.textContent.indexOf("kept") !== -1,
-        note: "highlight span, data-note-id and KaTeX spans survive" });
+      results.push({ surface: "Sanitizer preserves highlights; drops KaTeX hooks but not their text",
+        pass: !!keep.querySelector('span.hl[data-note-id="n1"]') &&
+              !keep.querySelector(".katex") && !keep.querySelector(".mord") &&
+              keep.textContent.indexOf("kept") !== -1 && keep.textContent.indexOf("x") !== -1,
+        note: "highlight span and data-note-id survive; KaTeX classes stripped, their text kept" });
       probe.remove();
     }
 

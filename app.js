@@ -163,41 +163,45 @@
      1.16MB of output) emits none of these tags, so no real content is lost. */
   const DROP_ELEMENTS = /^(SCRIPT|STYLE|NOSCRIPT|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|INPUT|TEXTAREA|SELECT|BUTTON|IMG|AUDIO|VIDEO|SOURCE|TRACK|APPLET|FRAME|FRAMESET|PORTAL|PLAINTEXT|XMP|LISTING|A|ANIMATE|ANIMATEMOTION|ANIMATETRANSFORM|SET|TITLE|NOEMBED|NOFRAMES|FOREIGNOBJECT)$/;
   const DROP_ATTRS = /^(src|href|xlink:href|srcdoc|srcset|action|formaction|data|background|ping|dynsrc|lowsrc|id)$/;
-  /* CLASS is an ALLOWLIST, and it has to be: this attribute, not style, is the
-     shortest path to a click-stealing overlay. Our own stylesheet defines
-     .qnav-overlay { position:fixed; inset:0; z-index:50 } and .modal-overlay /
-     .fig-overlay at z-index 120, all unscoped — so a record carrying nothing
-     but class="qnav-overlay" renders a 1280x720 fixed layer with no style
-     attribute at all. Planted in a choice, every click on screen bubbles to
-     that choice's handler and answers it; planted in the passage it simply
-     swallows clicks, and because .t-footer is unpositioned the student cannot
-     reach Next or Back until the timer runs out. The earlier denylist of eight
-     structural hooks could not see any of this, and no denylist could: it would
-     have to enumerate every class the app's CSS will ever define.
-     What restored markup legitimately needs is exactly two vocabularies —
-     KaTeX's, and the annotation classes the highlighter itself writes. Measured
-     over the whole shipped library (6 tests, every passage/stem/choice/
-     rationale) fmt() emits 50 distinct class tokens: 44 KaTeX plus our six
-     fmt-* block containers. The KaTeX families below are widened past that
-     measured set so a KaTeX upgrade cannot silently lose a fraction bar; none
-     of those names collide with app chrome, and anything unrecognised — every
-     overlay class included — is dropped. */
+  /* CLASS is an ALLOWLIST, and it is deliberately TINY.
+     History, because the two wrong versions both looked reasonable:
+       - A denylist of 8 structural hooks. It could not see that styles.css
+         defined .qnav-overlay{position:fixed;inset:0;z-index:50} unscoped, so
+         class="qnav-overlay" alone — no style attribute — rendered a
+         full-viewport click-stealing sheet.
+       - An allowlist of the KaTeX vocabulary, widened past what was measured
+         "so a KaTeX upgrade cannot silently lose a fraction bar". Every
+         speculative addition turned out to be a POSITIONING primitive: KaTeX's
+         own stylesheet gives .rlap>.inner, .llap>.inner, .clap>.inner,
+         .halfarrow-left and .brace-left position:absolute, and .stretchy
+         position:relative;display:block;width:100%. So the allowlist handed
+         back exactly the capability it was written to remove, and nesting
+         absolutely-positioned .inner elements made the offset cap meaningless
+         because each one becomes the containing block for the next. The
+         sizing trio (sizing / reset-size<n> / size<n>) was just as bad in a
+         different way: it is KaTeX's font-size multiplier, up to 4.976x per
+         level and compounding, which silently inflates every em-based cap
+         below it — a "6em" box the filter scores as 120px rendered 532px.
+     The measured answer is much smaller than either. Annotations are
+     Reading-and-Writing ONLY (Math is annotation-free on every path), and
+     across all six shipped tests fmt() over every RW passage, stem and choice
+     — 1944 fields — emits exactly SEVEN class tokens, all fmt-* block
+     containers, and ZERO KaTeX classes, because no RW field contains {{m}} or
+     {{mm}}. So no KaTeX class has any legitimate reason to appear in a saved
+     annotation, and none is allowed. That removes the positioning vocabulary
+     and the size multiplier at the root rather than trying to bound them.
+     Add the highlighter's own output and the list is complete.
+     If a future test bank ever puts math in an RW field, restored math would
+     lose its styling. That is a visible degradation, not a hole, and it fails
+     LOUDLY: tests/injection-proof.js asserts that fmt() over the whole library
+     emits no RW class outside this list. */
   const KEEP_CLASSES = new RegExp("^(?:" + [
     // the highlighter's own output — these MUST survive or annotations vanish
     "hl", "c-(?:yellow|blue|pink|none)", "u-(?:solid|dashed|dotted)",
-    // fmt() block containers
-    "fmt-(?:blank|bullets|caption|passage-label|quote|table|tnote)",
-    // KaTeX: measured vocabulary, widened to the neighbouring families
-    "katex(?:-display|-html|-mathml)?", "base", "strut", "pstrut",
-    "vlist(?:-r|-s|-t|-t2)?", "m(?:ord|bin|rel|open|close|punct|inner|op|frac|spuub|space|tight)",
-    "msupsub", "frac-line", "sqrt", "root", "overline(?:-line)?", "underline(?:-line)?",
-    "delimsizing", "delimcenter", "nulldelimiter", "sizing", "reset-size\\d+", "size\\d+",
-    "math(?:normal|it|bf|rm|sf|tt|cal|scr|frak|bb|default)", "boldsymbol", "amsrm",
-    "text(?:bf|it)?", "hide-tail", "svg-align", "accent(?:-body)?", "op-(?:symbol|limits)",
-    "large-op", "small-op", "mtable", "col-align-[a-z]", "arraycolsep", "stretchy",
-    "x-arrow", "brace-[a-z]+", "halfarrow-[a-z]+", "rlap", "llap", "clap", "inner",
-    "fix", "newline", "eqn-num", "tag", "fbox", "boxpad", "mspace", "mtight"
+    // every class fmt() emits in a Reading and Writing field (measured, all 7)
+    "fmt-(?:blank|bullets|caption|passage-label|quote|table|tnote)"
   ].join("|") + ")$");
+
   /* The style ATTRIBUTE is filtered by an ALLOWLIST of properties. It used to
      be three banned substrings (url(, expression(, javascript:) and that lost,
      twice over: `background-image:\000075rl(https://host/p)` and
@@ -2765,6 +2769,24 @@
      math is ordinary. */
   const STRUCTURAL_BLOCKS = "div,p,table,thead,tbody,tfoot,tr,td,th,ul,ol,li," +
                             "blockquote,figure,figcaption,hr,pre,h1,h2,h3,h4,h5,h6";
+  /* Chrome puts a caret INSIDE a childless inline-block, and fmt() renders a
+     text-completion blank as exactly that: <span class="fmt-blank"></span>.
+     A drag that starts or ends on the blank therefore leaves a range boundary
+     inside the empty span, and extractContents() SHALLOW-CLONES a partially
+     contained element — so the blank is duplicated and the student sees two
+     52px blanks in a question that has one. Then it is saved. Pulling the
+     boundary outside the empty element makes it wholly contained, so it moves
+     instead of cloning. */
+  function normalizeRangeBoundaries(range){
+    try{
+      const s = range.startContainer;
+      if(s.nodeType === 1 && !s.firstChild) range.setStartBefore(s);
+      const e = range.endContainer;
+      if(e.nodeType === 1 && !e.firstChild) range.setEndAfter(e);
+    }catch(err){ /* leave the range as it was */ }
+    return range;
+  }
+
   function crossesBlock(range, root){
     try{
       if(blockAncestor(range.startContainer, root) !== blockAncestor(range.endContainer, root)) return true;
@@ -2793,6 +2815,7 @@
        band) yields null and is refused here. */
     const host = annotationHost(range.commonAncestorContainer);
     if(!host){ hideHlPopup(); return false; }
+    normalizeRangeBoundaries(range);   // see the .fmt-blank note above
     /* A selection that crosses a BLOCK boundary cannot become one span. The
        wrap below is extractContents() + insertNode(), which splits every
        partially-selected block ancestor on the way — drag from one table cell
