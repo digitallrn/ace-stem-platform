@@ -138,17 +138,44 @@
        from holding; without a gesture flag the popup opens on whichever span
        the pointer resolves to and the next swatch or trash hits the wrong one. */
     await setHlMode(true); dismissPopup();
-    const outer = document.querySelector("#passageText .hl");
-    if(outer && outer.firstChild && outer.firstChild.nodeType === 3){
+    /* Build a FRESH outer highlight rather than reusing whichever .hl happens
+       to be first. On a resumed sitting that span may already have been split
+       by an earlier nested highlight, leaving a firstChild text node one
+       character long — the sub-range below then collapses, handleSelection
+       bails at its isCollapsed guard, no highlight is created, the gesture
+       flag is never set, and the trailing click correctly opens click-to-edit.
+       That is a harness artifact which reads EXACTLY like the bug this case
+       exists to catch, so the case asserts its own preconditions: an unsplit
+       text node to nest in, and a nested highlight actually created. A pass
+       must not be obtainable from nothing happening. */
+    await drag("#passageText", 18);
+    const outers = [...document.querySelectorAll("#passageText .hl")]
+      .filter(s => s.firstChild && s.firstChild.nodeType === 3 && s.firstChild.nodeValue.length >= 8);
+    const outer = outers[outers.length - 1];
+    if(!outer){
+      ok("nested drag in highlight mode does not open the edit popup", false,
+         "precondition: no highlight with an unsplit text node to nest inside");
+    } else {
       const t = outer.firstChild;
+      const hlBefore = probe().passageHl;
       const r = document.createRange();
       r.setStart(t, 1); r.setEnd(t, Math.min(t.nodeValue.length, 6));
-      await dragRange(r);
-      ok("nested drag in highlight mode does not open the edit popup",
-         !probe().popup, probe().popup ? "popup opened — it will act on the wrong span" : "suppressed");
-      ok("nested drag still leaves the outer highlight intact",
-         !!document.querySelector("#passageText .hl"), "outer span present");
-    } else ok("nested drag in highlight mode does not open the edit popup", false, "no outer highlight to nest inside");
+      if(r.collapsed){
+        ok("nested drag in highlight mode does not open the edit popup", false,
+           "precondition: the nested sub-range came out collapsed");
+      } else {
+        await dragRange(r);
+        const made = probe().passageHl > hlBefore;
+        const popped = probe().popup;
+        ok("nested drag in highlight mode does not open the edit popup",
+           made && !popped,
+           !made ? "precondition: the nested drag created no highlight"
+                 : (popped ? "popup opened — it will act on the wrong span"
+                           : "suppressed, and the nested highlight was created"));
+        ok("nested drag still leaves the outer highlight intact",
+           document.body.contains(outer), "outer span still in the document");
+      }
+    }
 
     /* 4 — refusals */
     await setHlMode(false); dismissPopup();
