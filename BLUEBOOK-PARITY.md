@@ -175,6 +175,23 @@ paths (prose numerator 13.23px = 0.70 script; choices full-size 18.9px;
 lead-in full-size 20.65px). David ruled: no change — parity holds and the
 tests match each other. Do not re-litigate without new reference material.
 
+**A third confirmation, of a different kind (2026-08-12).** 202509asiav4's
+Stage-3 read flagged fraction sizing three times on ONE form, in BOTH
+directions: m1-q17 as "slightly big", m2-q11 and m2-q14 as "a bit small".
+Measured live in `window.fmt` at the shipped 17.5px stem size, all three render
+at **13.23px over a full digit of 18.9px = 0.70** — the same value, the same
+path, no difference between them.
+
+A single measured value drawing opposite complaints from the same reader on the
+same form is evidence that the value is at the neutral point. Reader reports
+that disagree with each other cannot both be describing the render; they are
+describing context — a fraction next to a long integer reads small, one in a
+short choice reads large. That is exactly what the reference measurement
+already said, and it is the strongest argument yet for leaving it alone: there
+is no setting that satisfies both flags, and 0.70 is the one that satisfies
+neither more than the other.
+
+
 ## Measured call: lead-in display equations stay at 1.18em (2026-08-04)
 
 Flag was "a touch too big". Measured the other way: reference 35's display

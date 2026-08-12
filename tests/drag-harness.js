@@ -170,6 +170,42 @@
       ok("the header band is not highlightable", !probe().popup, "no popup on Mark for Review");
     } else ok("the header band is not highlightable", true, "band has no selectable text node");
 
+    /* 4b — a drag that crosses a BLOCK boundary must be refused. Wrapping such
+       a range splits every partially-selected block ancestor, which used to
+       rebuild a 4x5 table as six rows with numbers torn across them, save that
+       markup, and lose the highlight anyway. Only runs on a table-bearing
+       passage; skipped elsewhere rather than silently passing. */
+    await setHlMode(true); dismissPopup();
+    const table = document.querySelector("#passageText table");
+    if(table){
+      const rows = [...table.querySelectorAll("tr")];
+      const shape = () => [...table.querySelectorAll("tr")].map(r => r.children.length).join(",");
+      const before = shape(), beforeHl = probe().passageHl;
+      const a = rows[1] && freeTextNode(rows[1].children[1], 2);
+      const b = rows[2] && freeTextNode(rows[2].children[2], 2);
+      if(a && b){
+        const r = document.createRange();
+        r.setStart(a, 0); r.setEnd(b, Math.min(3, b.nodeValue.length));
+        await dragRange(r);
+        ok("a drag across two table cells is refused, table intact",
+           shape() === before && probe().passageHl === beforeHl,
+           shape() === before ? `table still ${before}` : `table SHREDDED: ${before} -> ${shape()}`);
+      } else ok("a drag across two table cells is refused, table intact", false, "could not build a cross-cell range");
+      // and a drag INSIDE one cell must still highlight
+      const c = freeTextNode(rows[1].children[1], 2);
+      if(c){
+        const h0 = probe().passageHl;
+        const r2 = document.createRange();
+        r2.setStart(c, 0); r2.setEnd(c, Math.min(4, c.nodeValue.length));
+        await dragRange(r2);
+        ok("a drag inside one table cell still highlights",
+           probe().passageHl > h0, `${h0} -> ${probe().passageHl}`);
+      }
+    } else {
+      results.push({ case: "a drag across two table cells is refused, table intact",
+        pass: true, note: "SKIPPED — this passage has no table (open a table question to cover it)" });
+    }
+
     /* 5 — click-to-edit still works outside highlight mode (the gesture flag
        must not swallow an ordinary click on an existing highlight) */
     await setHlMode(false); dismissPopup();

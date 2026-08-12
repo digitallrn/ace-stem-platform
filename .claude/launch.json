@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dist-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8931", "--directory", "dist"],
+      "port": 8931
+    },
+    {
+      "name": "pre3-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8935", "--directory",
+        "C:/Users/LEEDA/AppData/Local/Temp/claude/C--Users-LEEDA-OneDrive-Desktop-SAT-Simulator-platform-repo/e3f8953f-7b60-47d2-880e-95eef4ea31c2/scratchpad/pre3/dist"],
+      "port": 8935
+    }
+  ]
+}

@@ -401,6 +401,62 @@
           note: bad.length ? bad.join(" | ") : `${Object.keys(battery).length} vectors defused, all stable on re-sanitize` });
       }
 
+      /* The style ATTRIBUTE, which until 2026-08-09 was filtered by banning
+         three substrings (url(, expression(, javascript:). That lost twice:
+         an escaped `\000075rl(...)` and `image-set('...' 1x)` both reached
+         Chrome as real requests, and a position:fixed full-viewport overlay
+         planted in one choice made every click in the sitting answer that
+         choice. It is an allowlist of properties now, so these assert on the
+         SURVIVING declarations rather than on a banned-substring list. */
+      {
+        const S = window.AppSanitize && window.AppSanitize.html;
+        const styleCases = [
+          { name: "position:fixed viewport overlay",
+            html: '<span style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;background:rgba(255,255,255,0.01)">x</span>',
+            banned: /position|z-index|background|vw|vh/i },
+          { name: "escaped url() in background-image",
+            html: '<span style="background-image:' + String.fromCharCode(92) + '000075rl(https://evil.example/p)">x</span>',
+            banned: /background|url|000075/i },
+          { name: "image-set()",
+            html: '<span style="background-image:image-set(&quot;https://evil.example/p&quot; 1x)">x</span>',
+            banned: /background|image-set|evil/i },
+          { name: "calc() smuggling",
+            html: '<span style="height:calc(100vh - 1px)">x</span>', banned: /calc|vh/i },
+          { name: "transform blow-up",
+            html: '<span style="transform:scale(400);opacity:0.01">x</span>', banned: /transform|opacity/i },
+          { name: "pointer-events + display:block",
+            html: '<span style="pointer-events:auto;display:block">x</span>', banned: /pointer-events|display/i },
+          { name: "offset beyond the cap",
+            html: '<span class="katex vlist" style="top:-9999em">x</span>', banned: /top/i },
+          { name: "size beyond the cap",
+            html: '<span style="min-width:400em">x</span>', banned: /min-width/i }
+        ];
+        const styleBad = [];
+        if(!S){ styleBad.push("AppSanitize.html not exposed"); }
+        else styleCases.forEach(c => {
+          const d = document.createElement("div");
+          d.innerHTML = S(c.html);            // inert: already defused
+          const el = d.querySelector("[style]");
+          const surviving = el ? el.getAttribute("style") : "";
+          if(c.banned.test(surviving)) styleBad.push(`${c.name}: kept "${surviving}"`);
+        });
+        /* and the other half of the contract: KaTeX's own declarations, which
+           restored math depends on, must come through untouched. */
+        const katexDecl = 'height:2.7em;margin-right:0.05em;vertical-align:-0.25em;top:-4.2029em;' +
+                          'border-bottom-width:0.04em;padding-left:0.833em;min-width:0.853em';
+        if(S){
+          const d = document.createElement("div");
+          d.innerHTML = S('<span style="' + katexDecl + '">m</span>');
+          const kept = d.querySelector("[style]");
+          const got = kept ? kept.getAttribute("style") : "(dropped)";
+          if(got !== katexDecl) styleBad.push(`KaTeX declarations altered: "${got}"`);
+        }
+        results.push({ surface: "Style attribute: property allowlist holds, KaTeX declarations survive",
+          pass: styleBad.length === 0 && !window.__XSS_FIRED,
+          note: styleBad.length ? styleBad.join(" | ")
+                                : `${styleCases.length} style vectors defused, all 7 KaTeX properties preserved` });
+      }
+
       const rail = $("notesCards");
       results.push(audit("Review Mode notes rail (hostile note id/snippet/text)", rail));
       const card = rail.querySelector(".note-card");

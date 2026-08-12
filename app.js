@@ -171,6 +171,59 @@
      dropped outright above; these class tokens are dropped individually so that
      KaTeX's large, version-dependent class vocabulary keeps working. */
   const DROP_CLASSES = /^(passage-text|passageText|q-text|q-stimulus|ctext|choice|choices|q-lead)$/;
+  /* The style ATTRIBUTE is filtered by an ALLOWLIST of properties. It used to
+     be three banned substrings (url(, expression(, javascript:) and that lost,
+     twice over: `background-image:\000075rl(https://host/p)` and
+     `background-image:image-set('https://host/p' 1x)` both walked past the
+     `url(` test and Chrome issued the requests; and
+     `position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647`
+     planted in one choice covered the viewport at 1% opacity, so every click
+     anywhere in the sitting bubbled to that choice's handler — answering it,
+     and making Next, Back and the other choices unreachable. That is exactly
+     the harm cited above as the reason to drop the <style> ELEMENT, and the
+     attribute was still doing both. A fourth banned substring would have lost
+     to a fifth encoding; enumerating what is allowed cannot.
+     Only KaTeX legitimately needs this attribute. Measured across the whole
+     shipped library — 3048 rendered fields, 7088 elements carrying a style —
+     exactly SEVEN properties ever appear (height, margin-right,
+     vertical-align, top, border-bottom-width, padding-left, min-width), every
+     value is a plain signed number in em or px, and the largest magnitude
+     anywhere is 4.2029. The list below is that set widened to the neighbouring
+     lengths KaTeX emits for constructs this library happens not to contain, so
+     a KaTeX upgrade cannot silently drop a fraction bar.
+     Everything else goes — position, display, z-index, transform, opacity,
+     background, pointer-events — and those are what the overlay needed.
+     A value must be a BARE LENGTH: no parentheses, no functions, no escapes,
+     so url()/image-set()/calc() have nowhere left to hide regardless of
+     spelling. The magnitude caps bound what is left. OFFSETS
+     (top/left/bottom/right) get the tighter one, because they are the only
+     lengths that can MOVE a span: KaTeX's own stylesheet makes .vlist children
+     position:relative, and a crafted record may carry those classes, so an
+     unbounded `top` could slide an inline span over a different choice and
+     make a click there answer the wrong one. KaTeX's largest offset anywhere
+     in the library is 4.2029em, so 10 leaves ample room while holding any
+     displacement below a single choice's height. Sizes keep the looser cap —
+     with position and display gone they cannot reposition anything. */
+  const STYLE_ALLOW = /^(height|width|min-width|max-width|vertical-align|top|left|bottom|right|margin-(top|right|bottom|left)|padding-(top|right|bottom|left)|border-(top|right|bottom|left)-width)$/;
+  const STYLE_VALUE = /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:em|ex|rem|px|pt|%)?$/;
+  const STYLE_OFFSETS = /^(top|left|bottom|right)$/;
+  const STYLE_MAX = 50;          // sizes: >10x the library's largest
+  const STYLE_OFFSET_MAX = 10;   // offsets: the only lengths that can move a span
+  function sanitizeStyle(value){
+    const kept = [];
+    String(value == null ? "" : value).split(";").forEach(decl => {
+      const i = decl.indexOf(":");
+      if(i < 0) return;
+      const prop = decl.slice(0, i).trim().toLowerCase();
+      const val  = decl.slice(i + 1).trim();
+      if(!STYLE_ALLOW.test(prop)) return;
+      if(!STYLE_VALUE.test(val)) return;
+      const cap = STYLE_OFFSETS.test(prop) ? STYLE_OFFSET_MAX : STYLE_MAX;
+      if(Math.abs(parseFloat(val)) > cap) return;
+      kept.push(prop + ":" + val);
+    });
+    return kept.join(";");
+  }
   function sanitizeOnce(html){
     // a <template>'s content is inert: parsing here runs no script and fetches
     // nothing, so the payload is defused before it is ever examined
@@ -181,7 +234,10 @@
       Array.prototype.slice.call(node.attributes).forEach(at => {
         const n = at.name.toLowerCase();
         if(n.indexOf("on") === 0 || DROP_ATTRS.test(n)){ node.removeAttribute(at.name); return; }
-        if(n === "style" && /url\s*\(|expression\s*\(|javascript:/i.test(at.value)) node.removeAttribute(at.name);
+        if(n === "style"){
+          const safe = sanitizeStyle(at.value);
+          if(safe) node.setAttribute("style", safe); else node.removeAttribute(at.name);
+        }
         if(n === "class"){
           const kept = String(at.value).split(/\s+/).filter(c => c && !DROP_CLASSES.test(c));
           if(kept.length !== String(at.value).split(/\s+/).filter(Boolean).length){
@@ -2646,6 +2702,26 @@
 
   /* Returns true when it turned the selection into a highlight (highlight
      mode); false otherwise, including every refusal. */
+  /* Nearest ancestor of `node` (up to but excluding `root`) that is not
+     inline-level. Resolved from COMPUTED display rather than a tag list, so it
+     covers table-cell, list-item and anything a future render surface adds
+     without needing to be kept in sync. inline-block counts as inline: KaTeX
+     is built from them and a highlight inside math must still work. */
+  function blockAncestor(node, root){
+    let e = node && node.nodeType === 1 ? node : (node && node.parentElement);
+    while(e && e !== root){
+      const d = getComputedStyle(e).display || "";
+      if(d.indexOf("inline") !== 0) return e;
+      e = e.parentElement;
+    }
+    return root;
+  }
+  function crossesBlock(range, root){
+    try{
+      return blockAncestor(range.startContainer, root) !== blockAncestor(range.endContainer, root);
+    }catch(err){ return false; }
+  }
+
   function handleSelection(){
     if(el("screen-test").classList.contains("hidden")) return false;
     if(state.reviewMode) return false;   // annotations replay read-only in review — no new highlights
@@ -2658,6 +2734,20 @@
        band) yields null and is refused here. */
     const host = annotationHost(range.commonAncestorContainer);
     if(!host){ hideHlPopup(); return false; }
+    /* A selection that crosses a BLOCK boundary cannot become one span. The
+       wrap below is extractContents() + insertNode(), which splits every
+       partially-selected block ancestor on the way — drag from one table cell
+       to another and the table is rebuilt with the cells torn in half
+       ("6,837,474" becomes "6," in one row and "837,474" in the next). That
+       shredded markup is then SAVED, so it is what the student reads for the
+       rest of the sitting and what Review Mode replays; the highlight itself
+       is lost anyway, because a <span> serialised inside a <tr> is
+       foster-parented out of the table on the next parse. Refusing is strictly
+       better than the corruption, and it costs nothing real: prose paragraphs
+       here are separated by <br>, not blocks, so ordinary multi-paragraph
+       highlighting is unaffected. Tables and lists appear in 12 RW passages
+       across the shipped library. */
+    if(crossesBlock(range, host.el)){ hideHlPopup(); return false; }
     if(state.hlMode){
       // highlight mode: releasing the drag highlights instantly, no popup (19-20)
       hideHlPopup();

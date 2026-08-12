@@ -898,15 +898,26 @@
     line-height:1.3;
   }
   .fmt-caption + .fmt-table{ margin-top:2px; }
-  /* Paired-passage "Text 1" / "Text 2" headers. Bold, and a generous top rule
-     gives the clear vertical break between the two blocks that real Bluebook
-     shows; the label swallows the {{br}}s around it so this margin is the only
-     spacing. The first label needs no rule above it. */
+  /* Paired-passage "Text 1" / "Text 2" headers. Bold, at body size, separated
+     from the preceding text by WHITESPACE ONLY.
+     Measured against reference/bluebook-screenshots/42.png, a real cross-text
+     question — the capture 36fbcd9 was built without. That commit added a top
+     rule and said it matched Bluebook; it does not. In the capture every pixel
+     between Text 1's last line and the "Text 2" label is pure white, and no
+     horizontal run of 150px or more exists anywhere in the passage column even
+     at a near-white threshold, which would have caught a rule far lighter than
+     the #D9D9D9 we were drawing. There is no rule.
+     The two gaps are set from that capture, in multiples of the body line
+     pitch so the numbers survive a font-size change:
+       last body baseline -> next label baseline = 2.464x  (69px / 28px there)
+       label baseline -> its own first body line = 1.232x  (34.5px / 28px)
+     Our pitch is 28.69px, so these land at 70.7px and 35.3px; the margins
+     below measure 2.464x and 1.229x. The label swallows the {{br}}s around it,
+     so these margins are the only spacing. */
   .fmt-passage-label{
-    font-weight:700; font-size:1.02em; margin:26px 0 10px; padding-top:18px;
-    border-top:1px solid var(--line);
+    font-weight:700; font-size:1.02em; margin:42px 0 6px;
   }
-  .fmt-passage-label:first-child{ margin-top:0; padding-top:0; border-top:none; }
+  .fmt-passage-label:first-child{ margin-top:0; }
 
   .fmt-table{ border-collapse:collapse; margin:12px auto; background:#fff; }
   .fmt-table th, .fmt-table td{
