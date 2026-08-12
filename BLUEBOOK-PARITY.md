@@ -322,3 +322,49 @@ is the whole mechanism. A drag harness must emit the full sequence **and
 resolve each event's target at dispatch time** — resolving it up front hands
 the click a node the new highlight span has since detached, which silently
 swallows the answer-selection half and looks like a regression that isn't one.
+
+## Fraction size: prose matches, choices over-shoot by ~13% (2026-08-09)
+
+`d814cb0` promoted fractions in answer choices to `\displaystyle`, taking the
+numerator from 13.23px to 18.9px inside a 17.5px choice. That number was
+measured, but only against ourselves — no reference capture was consulted,
+because none showed a fraction in a choice. Measured now against
+`reference/bluebook-screenshots/35.png`, the SPR directions panel, which
+contains a fraction in **two different contexts**.
+
+The comparable quantity is scale-free: the height of a fraction's numerator
+digit divided by the height of a full-size digit **in the same context**.
+
+| context | Bluebook (35.png) | ours | verdict |
+|---|---|---|---|
+| inline in prose | 11px / 16px = **0.688** | text style, 13.23/18.9 = **0.700** | **match** (1.7% apart) |
+| standalone value | 11.5px / 13px = **0.885** | choice, displaystyle, 18.9/18.9 = **1.000** | **over-shoot, ~13%** |
+
+**Bluebook uses different proportions by context.** Its inline prose fraction
+is set noticeably smaller than its standalone one — 0.688 against 0.885 — which
+is the thing `d814cb0` intuited without evidence. **The direction of that split
+is vindicated: prose and choices should NOT share a fraction size.** Only the
+magnitude is wrong. We went to 1.000 where the reference sits at 0.885, so a
+choice fraction reads about 13% larger than Bluebook's.
+
+**Caveat, and it is a real one.** 0.885 is measured from a **table cell** in the
+Examples table, not from an answer choice. **No capture in the reference set
+contains a choice-level fraction** — 42.png is Reading and Writing (prose
+choices), 35.png is an SPR question (no choices at all), and a fraction-bar scan
+of all 37 captures returns only two right-pane candidates, both false positives
+(12.png's Assistive Technology icon, 42.png's dashed rule under Mark for
+Review). So "standalone value" is the nearest available proxy for "answer
+choice", and the 13% figure rests on that proxy. **Settling it properly needs a
+new capture: a Math multiple-choice question with a fraction in its choices.**
+Until then this is evidence of an over-shoot, not proof of its exact size, and
+no change has been made on the strength of it.
+
+**A wrong number was published here first — do not re-derive it.** The initial
+figure for the prose case was 0.846, and it was wrong: it divided the prose
+fraction's numerator (11px) by the **Examples table's** plain digit (13px). Those
+are two different contexts at two different text sizes — the prose digit is
+16px, the table's is 13px. Comparing a fraction in one context against a
+reference digit from another inflates the ratio and made prose look like an
+under-shoot when it matches. **Always take the full-size reference digit from
+the same line as the fraction being measured**; in 35.png that is the whole
+number "3" of the mixed number "3 1/2", which sits immediately before it.

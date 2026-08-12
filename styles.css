@@ -86,7 +86,26 @@
   #screen-home{ min-height:100vh; }
   /* Persistent bar (screenshot 29): pinned while scrolling home and Score
      Details. Opaque background so content scrolls under it, not through it. */
-  .home-top{
+  /* ---------------------------------------------------------------------
+     FLOATING LAYERS ARE ID-SCOPED (2026-08-09).
+     Every rule below creates a position:fixed / sticky layer, and each was
+     previously reachable from a BARE CLASS TOKEN. That is what made
+     class="qnav-overlay" — with no style attribute at all — render a
+     full-viewport z-index:50 sheet out of a crafted attempt record: planted in
+     a choice, every click on screen bubbled to that choice and answered it;
+     planted in the passage it swallowed clicks and, because .t-footer is
+     unpositioned, Next and Back could not be reached until the timer expired.
+     The sanitizer's class allowlist now blocks that particular route, but the
+     hazard belonged to the CSS: any FUTURE sink that renders untrusted markup
+     would have inherited it, whether or not it used the same sanitizer. So the
+     capability is removed at the source — these rules now require the specific
+     element, and a stray class token cannot summon a floating layer.
+     :where() is used rather than a plain #id prefix because it contributes ZERO
+     specificity: the selectors keep the exact weight they had, so nothing
+     downstream that overrides them changes behaviour. All eight fixed/sticky
+     class rules in this file are covered; there are no others.
+     --------------------------------------------------------------------- */
+  :where(#appTopBar).home-top{
     display:flex; align-items:center; justify-content:space-between; padding:18px 42px;
     position:sticky; top:0; z-index:60; background:#fff;
   }
@@ -307,7 +326,7 @@
 
   /* ================= PHASE F components ================= */
   /* generic modal (device check, bug report, save-fail guard) */
-  .modal-overlay{
+  :where(#deviceModal, #bugModal, #tutorAuthModal, #saveFailModal).modal-overlay{
     position:fixed; inset:0; z-index:120; background:rgba(40,40,40,.5);
     display:flex; align-items:center; justify-content:center; padding:20px;
   }
@@ -562,7 +581,7 @@
     background:#1E1E1E; color:#fff; border:none; border-radius:22px; padding:10px 20px;
     font-size:14.5px; font-weight:700; margin-top:28px; display:inline-flex; gap:8px; align-items:center;
   }
-  .keypad{
+  :where(#keypad).keypad{
     position:fixed; z-index:90; background:#fff; border-radius:12px;
     box-shadow:0 10px 30px rgba(0,0,0,.35); width:276px;
   }
@@ -696,8 +715,8 @@
   .u-menu .u-dotted{ text-decoration:underline; text-decoration-style:dotted; }
 
   /* Question navigator popup */
-  .qnav-overlay{ position:fixed; inset:0; z-index:50; }
-  .qnav-popup{
+  :where(#qnavOverlay).qnav-overlay{ position:fixed; inset:0; z-index:50; }
+  :where(#qnavPopup).qnav-popup{
     position:fixed; bottom:84px; left:50%; transform:translateX(-50%); z-index:55;
     background:#fff; border-radius:12px; box-shadow:0 8px 34px rgba(0,0,0,.32);
     padding:22px 30px 24px; width:min(640px, 92vw);
@@ -777,7 +796,7 @@
   #screen-break .brk-name{ position:absolute; bottom:26px; left:30px; font-size:19px; font-weight:700; }
 
   /* ================= CALCULATOR PANEL (Desmos) ================= */
-  .calc-panel{
+  :where(#calcPanel).calc-panel{
     position:fixed; top:92px; left:14px; width:480px; height:560px; min-width:330px; min-height:380px;
     background:#fff; border-radius:8px; box-shadow:0 10px 34px rgba(0,0,0,.35); z-index:80;
     display:flex; flex-direction:column; resize:both; overflow:hidden;
@@ -864,7 +883,7 @@
      student has asked for a closer look. */
   .fig-imgwrap img{ width:auto; max-width:100%; max-height:300px; }
   .fig-caption{ font-family:var(--serif); text-align:center; padding:0 12px 14px; font-size:15.5px; }
-  .fig-overlay{
+  :where(#figOverlay).fig-overlay{
     position:fixed; inset:0; background:rgba(40,40,40,.55); z-index:120;
     display:flex; align-items:center; justify-content:center;
   }
@@ -1065,7 +1084,7 @@
   .ditem-stats{ font-size:12.5px; color:var(--ink-soft); margin-left:auto; }
   .ditem-q{ font-size:13.5px; font-family:var(--serif); }
 
-  .dash-detail{ position:fixed; inset:0; background:rgba(20,24,48,.45); z-index:60;
+  :where(#dashDetail).dash-detail{ position:fixed; inset:0; background:rgba(20,24,48,.45); z-index:60;
     display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow:auto; }
   .dash-detail-card{ background:#fff; border-radius:14px; max-width:900px; width:100%;
     padding:26px 30px; position:relative; }
