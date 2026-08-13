@@ -939,6 +939,20 @@
   .fmt-passage-label:first-child{ margin-top:0; }
 
   .fmt-table{ border-collapse:collapse; margin:12px auto; background:#fff; }
+  /* Fraction size inside a table cell, measured against reference 35 (the SPR
+     directions' Examples table, whose Answer column stacks 2/3 beside a plain
+     3.5). Bluebook sets the fraction's digits to 0.885 of a full-size digit in
+     the same cell; ours rendered 0.704 through the inline path — a 20% under-
+     shoot in a context nobody had checked. render.js now pins table cells to
+     display style, which alone lands 1.005; this brings it to a measured 0.884.
+     Scoped to .fmt-table, so prose (0.700, matching Bluebook's 0.688) and
+     answer choices (1.000) are untouched — neither is inside a table.
+     CONFIDENCE: 0.885 is ONE fraction, measured at +/-0.5px on an 11.5/13 ink
+     ratio, so the defensible band is about 0.85-0.92 and any value from 0.86em
+     to 0.90em sits inside it. 0.88em is the midpoint, not a precise target. A
+     second capture containing a table-cell fraction would firm this up — that
+     is a standing job for the next reference screenshot. */
+  .fmt-table .mfrac{ font-size:0.88em; }
   .fmt-table th, .fmt-table td{
     border:1px solid #8a8a8a; padding:7px 14px; text-align:center;
     white-space:normal; font-size:inherit; line-height:1.4;

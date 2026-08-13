@@ -357,11 +357,24 @@ function escapeHtml(str){
       }
       curCell().push(p);                                     // u/i opens & closes flow through
     }
+    /* A cell does NOT inherit bigInline from the field the table happens to sit
+       in. It used to: opts flowed straight through, so the same table rendered
+       its fractions at two different sizes depending on whether it appeared in
+       a passage (text style) or in an answer choice (display style, because the
+       choice call site opts in). Measured on 202603asiav1 — ma1-q13/passage at
+       0.704 of the cell's text, ma2-q3/c1 and c2 at 1.005 — for markup that is
+       otherwise identical. A cell is its own context, so it is pinned here.
+       Display style is the right pin: a table cell holds a standalone value,
+       the same kind of thing an answer choice holds, and Bluebook sets those
+       larger than a fraction running inside a sentence. The remaining gap to
+       the reference is closed by .fmt-table .mfrac in styles.css, which is
+       where the measured number lives. */
+    const cellOpts = Object.assign({}, opts, { bigInline: true });
     let html = '<table class="fmt-table">';
     for(let r = 0; r < rows.length; r++){
       const tag = r === 0 ? "th" : "td";
       html += "<tr>" + rows[r].map(cellParts =>
-        "<" + tag + ">" + fmtRenderParts(cellParts, { i:0 }, null, opts).trim() + "</" + tag + ">"
+        "<" + tag + ">" + fmtRenderParts(cellParts, { i:0 }, null, cellOpts).trim() + "</" + tag + ">"
       ).join("") + "</tr>";
     }
     return html + "</table>";

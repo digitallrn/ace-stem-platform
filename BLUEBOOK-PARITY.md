@@ -368,3 +368,59 @@ reference digit from another inflates the ratio and made prose look like an
 under-shoot when it matches. **Always take the full-size reference digit from
 the same line as the fraction being measured**; in 35.png that is the whole
 number "3" of the mixed number "3 1/2", which sits immediately before it.
+
+### Table cells: the third context, and the one measured against a like-for-like reference (2026-08-09)
+
+Prose and choices had been measured; table cells had not, and they turned out to
+be wrong in **two** directions at once.
+
+A fraction in a `{{table}}` cell went through the inline path at **0.704** of the
+cell's own text — a 20% under-shoot against ref 35's **0.885**. And because
+`fmtRenderTable` passed the caller's `opts` straight into cell rendering, a cell
+inherited `bigInline` from whatever field the table sat in: the *same table*
+rendered its fractions at 0.704 inside a passage and **1.005** inside an answer
+choice. Both live: `202603asiav1` `ma1-q13/passage` and `ma2-q3/c1`,`c2`.
+
+Fixed in two places. `render.js` pins a cell's math style at the cell boundary —
+a cell is its own context and does not inherit from its enclosing field.
+`styles.css` carries the measured number, `.fmt-table .mfrac{font-size:0.88em}`.
+Measured after: both contexts **0.884**, against a target of 0.885.
+
+This is the one context with a genuine like-for-like reference. Our plain digit
+in a table cell inks at 13px and ref 35's does too, so the numerator heights
+compare head-on — **ours 9px before, Bluebook's 11.5px** — with no scaling
+assumption in between. Contrast the choice case, where the nearest reference is
+this same table cell standing in for an answer choice.
+
+**CONFIDENCE — read this before treating 0.88em as exact.** 0.885 is **one
+fraction**, the `2/3` in ref 35's Examples table, measured at ±0.5px on an
+11.5/13 ink ratio. That puts the defensible band at roughly **0.85–0.92**, and
+every value from 0.86em to 0.90em lands inside it (measured: 0.864, 0.884,
+0.905). **0.88em is the midpoint of that band, not a precise target.** One
+sample is thin for a number that now shapes two files.
+
+**So the next reference screenshot has a job:** a capture containing a
+table-cell fraction — ideally a second, independent one — would firm this up or
+move it. Until then, do not tighten this number on reasoning alone; it needs
+another measurement, not another argument.
+
+Side effects, measured across all 52 math occurrences in table cells in the
+seven shipped tests. Only **25 distinct expressions** appear there and the only
+style-sensitive constructs among them are the 3 fractions — no `\sum`, `\int`,
+`\lim` or `\binom` — so pinning to display style changes glyph rendering for
+those 3 and nothing else. Ten further fields shift by 2px of header-row height
+(33 → 35) purely from KaTeX's taller display-mode strut, with identical font
+sizes; three tables also widen by 1–6px. Prose (13.23px, 0.700) and choices
+(18.9px, 1.000) are untouched — neither is inside `.fmt-table`.
+
+**Open alternative worth a decision.** Pinning cells to TEXT style instead would
+reach the same 0.885 with `1.26em`, and would disturb less: the nine
+passage-side tables would not move at all, and the only fields changing would be
+the choice-embedded ones — which would then render identically to the same table
+in a passage. It is also the better pin for content this library does not yet
+contain: a `\sum` or `\lim` in a cell renders compactly in text style and tall
+in display style, and a table cell is a place where tall is wrong. Display style
+was chosen here on the reasoning that a cell holds a standalone value like a
+choice does; with the size now set explicitly by CSS in either case, that
+reasoning no longer carries much weight. Switching is a two-character change in
+`render.js` plus the CSS number.
