@@ -2012,6 +2012,12 @@
   let navLocked = false;
   function navigate(fn){
     if(navLocked) return;                       // discarded, not queued
+    /* Any navigation dismisses the question navigator. The footer now sits above
+       the navigator's scrim, so Next and Back are reachable while it is open —
+       without this they would move the student on and leave the popup hanging
+       over the new screen. Together the two changes make one click do what one
+       click should: dismiss AND advance. Cheap no-op when it is already shut. */
+    closeQnav();
     navLocked = true;
     const back = el("btnBack"), next = el("btnNext");
     back.disabled = next.disabled = true;
@@ -2063,7 +2069,13 @@
   }
 
   /* ================= QUESTION NAVIGATOR POPUP ================= */
-  el("qnavBtn").addEventListener("click", openQnav);
+  /* Toggle, not open. The button lives in the footer, which now sits above the
+     navigator's scrim, so it is clickable while the navigator is open — where
+     it previously fell to the scrim and closed it. Re-opening on a second press
+     would leave the chevron flipped and nothing apparently happening. */
+  el("qnavBtn").addEventListener("click", ()=>{
+    if(el("qnavPopup").classList.contains("hidden")) openQnav(); else closeQnav();
+  });
   el("qnavClose").addEventListener("click", closeQnav);
   el("qnavOverlay").addEventListener("click", closeQnav);
   el("gotoReviewBtn").addEventListener("click", ()=>{
