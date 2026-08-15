@@ -985,7 +985,35 @@
      to 0.90em sits inside it. 0.88em is the midpoint, not a precise target. A
      second capture containing a table-cell fraction would firm this up — that
      is a standing job for the next reference screenshot. */
+  /* Fraction size in an ANSWER CHOICE, measured from reference 43 — a Math
+     multiple-choice item whose choice A is a stacked fraction, 2(n+p) over 7,
+     with choices B/C/D carrying full-size digits in the same boxes. That makes
+     it a genuine like-for-like: fraction digits 11px against full-size digits
+     15px, both readings doubled and both agreeing exactly (numerator 2 and
+     denominator 7 at 11px; B's 2 and C's 7 at 15px).
+       measured ratio 0.733, band 0.677-0.793 at +/-0.5px
+     It REPLACES the 0.885 proxy, which came from a table cell in reference 35
+     standing in for a choice. That proxy is now known to be wrong: 0.885 falls
+     OUTSIDE this band, while Bluebook's own inline prose value (0.688) and ours
+     (0.700) fall inside it. A choice fraction is set essentially like a prose
+     fraction, NOT like a standalone table value — so d814cb0's promotion of
+     choices to display style was in the wrong direction, and 1.000 over-shoots
+     by 1.36x rather than the 1.13x the proxy implied.
+     0.733 is the measured value and is used as measured; it is not rounded to
+     the prose 0.700, though the two are indistinguishable inside the band.
+     A table cell nested inside a choice keeps the table value — the rule below
+     is one step more specific so it wins regardless of source order. */
+  .ctext .mfrac{ font-size:0.733em; }
+  /* Applied ONCE per fraction, not once per level. Without this reset an em
+     multiplier compounds through nesting: a fraction inside a fraction took
+     0.733 twice and landed at 0.376, which also ate into the \textstyle fix
+     that keeps a fraction in a superscript from rendering at scriptscript size.
+     TeX's own script-size reduction still applies to the inner one, so it comes
+     out at 0.733 x 0.7. Two instances library-wide — 202606asiav1/ma1-q7/c1 and
+     ma2-q7/c1 — but the semantics are what matter, not the count. */
+  .ctext .mfrac .mfrac{ font-size:1em; }
   .fmt-table .mfrac{ font-size:0.88em; }
+  .ctext .fmt-table .mfrac{ font-size:0.88em; }
   .fmt-table th, .fmt-table td{
     border:1px solid #8a8a8a; padding:7px 14px; text-align:center;
     white-space:normal; font-size:inherit; line-height:1.4;

@@ -470,3 +470,81 @@ reference 35 standing in for an answer choice, and the same caveat recorded
 there applies here with one more step of inference. A reference capture of a
 Math multiple-choice question with a fraction in its choices would settle both
 at once, and remains the most valuable single screenshot to add.
+
+### Reference 43 settles the choice-fraction value — and the 0.885 proxy was wrong (2026-08-15)
+
+Reference 43 is the capture this file had been asking for: a Math
+multiple-choice item (Section 2 Module 1, Q3 of 22) whose choice A is a
+**stacked** fraction, 2(n+p) over 7, with choices B, C and D carrying full-size
+digits in the same answer boxes. Stacked matters — a slashed fraction would have
+made the ratio question inapplicable.
+
+That makes it a true like-for-like, with no proxy in the middle: fraction digits
+against full-size digits **in the same context**, same font, same size, inches
+apart on the same screen.
+
+    numerator '2'    11px      full-size '2' (choice B)   15px
+    denominator '7'  11px      full-size '7' (choice C)   15px
+    RATIO = 0.733       band 0.677 - 0.793 at +/-0.5px
+
+Both readings were taken twice and both pairs agree exactly, which is as clean
+as this measurement gets.
+
+**The 0.885 target was wrong, and this file said so at the time.** It came from a
+table cell in reference 35 standing in for a choice, flagged there as resting on
+a proxy. It is now falsified: **0.885 falls outside the measured band.** What
+falls inside is Bluebook's own inline prose value (0.688) and ours (0.700).
+
+So a choice fraction is set essentially like a PROSE fraction, not like a
+standalone table value. Two consequences worth stating plainly:
+
+- **d814cb0's promotion of choices to display style was in the wrong direction.**
+  It was made to stop choice fractions "reading small"; the reference says they
+  are meant to read small, at roughly the prose proportion.
+- **The over-shoot was worse than believed** — 1.000 against 0.733 is **1.36x**,
+  not the 1.13x the proxy implied.
+
+Applied: `.ctext .mfrac{ font-size:0.733em }`, the measured value used as
+measured rather than rounded to the prose 0.700, though the two are
+indistinguishable inside the band. Measured after: 167 choices with fractions,
+top-level ratio 0.733, **zero row heights changed, zero reflow, zero clipping,
+zero overflow** — the nil cost this file predicted. A table cell nested inside a
+choice keeps 0.88 via a more specific rule, and nesting no longer compounds the
+multiplier (see the reset in styles.css).
+
+Updated picture:
+
+| context | ours | Bluebook | source |
+|---|---|---|---|
+| inline prose (stems) | 0.700 | 0.688 | ref 35, inline mixed number |
+| answer choice | **0.733** | **0.733** | **ref 43, like-for-like** |
+| table cell | 0.884 | 0.885 | ref 35 table cell (still a real table-cell reading) |
+
+The stem/choice contrast that prompted this is now 0.700 against 0.733 — a gap
+of 0.033 where it was 0.300. It should stop being reported.
+
+**What 43 does NOT settle.** It contains no data table and no figure, so it adds
+nothing to the table-cell value and nothing to the caption-placement question.
+Where the shell places a figure caption remains unobserved across all 38
+captures; every figure title seen so far is baked into the raster.
+
+### Figure width: the frame, not the pane, is the binding constraint
+
+`.fig-frame` is `max-width:470px`, leaving about 440px of content width, and that
+— not the passage pane — is what limits a wide figure. Raising the HEIGHT cap
+does nothing for anything wider than ~440px: `202511asiav1/ma1-q14` is 901x334
+native and renders 440x163 both before and after the 300 -> 560 change, at 0.49
+of natural size. Four of the eight figures whose natural height is already under
+the cap are width-limited in the same way, at 0.63-0.97.
+
+For scale, reference 33's figure container is **574px wide** against our 470px
+frame, so there is room to widen if a figure ever needs it — but that is a
+separate change from the height cap and has not been made.
+
+**Correction to earlier measurements in this file.** Figure sizes reported before
+2026-08-15 as rendering "in a 560px pane" were measured by placing the image in a
+bare `.passage-text` container WITHOUT `.fig-frame`. They were wrong on the
+constraint: the real limit is the 470px frame, not the 560px pane. The affected
+numbers were re-measured inside the real frame markup and the corrected values
+are the ones above. When measuring a figure, render the full `figureFrameHtml`
+structure — the frame is load-bearing.
