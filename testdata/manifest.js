@@ -171,7 +171,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202503usv1",
   "testName": "2025 March US v1",
-  "testVersion": "2026-08-14-a",
+  "testVersion": "2026-08-14-b",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
