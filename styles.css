@@ -889,14 +889,33 @@
   }
   .fig-toolbar button{ background:none; border:none; font-size:14px; font-weight:700; }
   .fig-toolbar .sep{ width:1px; height:16px; background:#ccc; }
-  .fig-imgwrap{ overflow:auto; max-height:380px; padding:14px; text-align:center; }
+  .fig-imgwrap{ overflow:auto; max-height:640px; padding:14px; text-align:center; }
   /* Fit on first view: at 100% the whole diagram is visible inside the frame,
      no scrolling. width:auto with both caps keeps the aspect ratio rather than
      letterboxing. Zooming past 100% sets an explicit width and clears the
      height cap (attachFigureHandlers), so the frame scrolls only once the
      student has asked for a closer look. */
-  .fig-imgwrap img{ width:auto; max-width:100%; max-height:300px; }
+  /* Height cap raised 300 -> 560 (2026-08-15). Measured against reference 33,
+     whose figure container runs 613px tall by 574px wide — 21.9 lines of body
+     text where our 300px cap allowed 10.5, so Bluebook shows a figure about
+     twice as tall relative to the prose. The two data charts that prompted this
+     were both cap-limited with resolution to spare, not starved of pixels:
+     202503usv1/re1-q10 is 683x698 natural and was rendering at 0.43 scale,
+     202506asiav2/re1-q13 is 356x379 and was rendering at 0.79. Nothing is
+     upscaled — width:auto with both caps only ever shrinks, so the 8 figures
+     whose natural height is already under the cap are untouched.
+     The wrapper's max-height moves with it (380 -> 640, the same ~80px of
+     padding headroom) so "fit on first view, no scrolling" still holds; leaving
+     it at 380 would have turned the extra height straight into a scrollbar.
+     .fig-frame's max-width:470px is now the binding constraint for anything
+     wider than about 440px of content — raising this cap does not widen those. */
+  .fig-imgwrap img{ width:auto; max-width:100%; max-height:560px; }
   .fig-caption{ font-family:var(--serif); text-align:center; padding:0 12px 14px; font-size:15.5px; }
+  /* A figure TITLE sits above the image (see figureFrameHtml for what that
+     placement rests on). It takes the padding on the other side so the gap
+     lands between title and plot, not under the toolbar. Weight follows the
+     table caption, which is the closest established surface. */
+  .fig-caption.fig-title{ padding:12px 12px 0; font-weight:700; }
   :where(#figOverlay).fig-overlay{
     position:fixed; inset:0; background:rgba(40,40,40,.55); z-index:120;
     display:flex; align-items:center; justify-content:center;

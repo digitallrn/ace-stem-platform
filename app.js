@@ -1589,6 +1589,30 @@
      in Math it belongs with the question. */
   function figureFrameHtml(q){
     if(!q.figure) return "";
+    /* figureCaption is TWO different things wearing one field name, so where it
+       goes depends on which. A caption starting "Note:" is an annotation about
+       the drawing ("Note: Figure not drawn to scale.") and sits BELOW it, where
+       it has always sat. Anything else is the figure's TITLE and goes ABOVE.
+       WHAT THIS RESTS ON, so a future change knows what it is overriding:
+       - The field is 20:2 notes-to-titles across the shipped library — 20 are
+         "Note: Figure(s) not drawn to scale.", and exactly 2 are real titles
+         (202506asiav2/re1-q13, 202503usv1/re1-q10). The discriminator therefore
+         reproduces existing behaviour for 20 of 22 uses and moves 2.
+       - The title-above half rests on ONE screenshot, reference 33, where the
+         title sits inside the bordered figure container directly above the plot.
+         That is n=1, and weaker than it sounds: in that capture the title is
+         BAKED INTO THE RASTER — it scales with the zoom chrome — so it is
+         evidence about how College Board authors the image, not about where the
+         Bluebook shell puts a caption element. Across all 37 reference captures
+         there is not one app-rendered figure caption to observe.
+       - It was still worth doing, because the competing option (title below) has
+         no supporting evidence at all, and our two titled images carry no baked
+         title of their own — checked; they are plot, axes and legend only. One
+         observation beats none, and the blast radius is two questions.
+       If a later capture shows a titled figure with the title below, this is the
+       line to change, and it is a one-line revert. */
+    const cap = q.figureCaption;
+    const capIsNote = /^\s*note\s*:/i.test(String(cap || ""));
     return `
       <div class="fig-frame">
         <div class="fig-toolbar">
@@ -1599,8 +1623,9 @@
           <span class="sep"></span>
           <button id="figExpand" title="Expand">⛶</button>
         </div>
+        ${cap && !capIsNote ? `<div class="fig-caption fig-title">${fmt(cap)}</div>` : ""}
         <div class="fig-imgwrap"><img id="figImg" src="${escapeHtml(q.figure)}" alt="Question figure"></div>
-        ${q.figureCaption ? `<div class="fig-caption">${fmt(q.figureCaption)}</div>` : ""}
+        ${cap && capIsNote ? `<div class="fig-caption">${fmt(cap)}</div>` : ""}
       </div>`;
   }
   function figureGoesLeft(mod, q){

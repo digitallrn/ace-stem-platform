@@ -424,3 +424,49 @@ was chosen here on the reasoning that a cell holds a standalone value like a
 choice does; with the size now set explicitly by CSS in either case, that
 reasoning no longer carries much weight. Switching is a two-character change in
 `render.js` plus the CSS number.
+
+### The stem-versus-choice fraction contrast, and what closing it would cost (2026-08-15)
+
+"Stems look small" has now been reported several times. It is worth stating
+plainly that **the stem is not the end that is wrong**, so the next report can be
+answered without re-measuring.
+
+A fraction in inline prose — including inside function notation, which is how it
+usually reaches a stem — renders at **0.700** of the surrounding math. That is
+the value BLUEBOOK-PARITY already records as MATCHING: Bluebook's inline prose
+fraction measures 0.688. Verified across every instance in the library: all
+**15** inline-prose fractions in function notation sit at exactly 0.700, no
+outliers (`f(x) = \frac{1}{8x}`, `f(x) = \frac{1}{2}(x + 11)`,
+`y=\left(\frac{1}{6}\right)^x+1`, and so on).
+
+The same construct renders at **1.000** in an answer choice and **1.000** in a
+`{{mm}}` lead-in. So a student reads a 0.700 fraction in the stem directly above
+a 1.000 fraction in the answers, and the stem looks shrunken by comparison. The
+contrast is real; the diagnosis "the stem is too small" is not.
+
+| context | ours | Bluebook | |
+|---|---|---|---|
+| inline prose (stems) | **0.700** | 0.688 | matches |
+| answer choice | **1.000** | 0.885 (table-cell proxy) | **over-shoot ~13%** |
+| table cell | 0.884 | 0.885 | matches (set 2026-08-09) |
+
+**Closing the contrast means bringing CHOICES down, not stems up.** Moving
+choices to 0.885 would both correct the recorded over-shoot and shrink the gap
+against stems from 0.300 to 0.185.
+
+Measured cost of doing that, across every choice in the library that contains a
+fraction — **167 of them** — with `.ctext .mfrac{ font-size:0.885em }` layered
+over the existing display-style promotion:
+
+- **153 of 167 fractions shrink**, mean rendered height 20.9px → 18.0px (~14%).
+- **Zero choice rows change height.** All 167 deltas are 0px.
+- **Zero reflow, zero clipping, zero overflow**, before or after. The `.katex`
+  line box stays 21px and `.ctext` height is unchanged, because the row is sized
+  by the choice's line box rather than by the fraction, which has headroom.
+
+So the layout cost is nil; the change is purely typographic. It has NOT been
+applied — the 0.885 target still rests on a single table-cell fraction in
+reference 35 standing in for an answer choice, and the same caveat recorded
+there applies here with one more step of inference. A reference capture of a
+Math multiple-choice question with a fraction in its choices would settle both
+at once, and remains the most valuable single screenshot to add.
