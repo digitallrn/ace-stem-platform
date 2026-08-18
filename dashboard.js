@@ -1049,10 +1049,11 @@ window.Dashboard = (function(){
       </div>`;
     }).join("");
     // §6: jump to the student-facing Score Details page (admin-only, works
-    // regardless of release). Only when this build carries the matching test.
-    // (reuses `test` declared above.)
-    const canOpen = source === "storage" && test &&
-      (test.testVersion || "unversioned") === r.testVersion;
+    // regardless of release). Offered when this build can SERVE the attempt's
+    // version — current or archived; the student view loads the pinned build,
+    // so the tutor sees exactly what the student sat on. (reuses `test`.)
+    const canOpen = source === "storage" && test && window.AppTestLoader &&
+      AppTestLoader.canServe(test, r.testVersion);
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
       <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>

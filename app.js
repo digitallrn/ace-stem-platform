@@ -519,7 +519,8 @@
       // a negative or non-numeric clock would hand back an unlimited module
       if(cp.timeRemainingSeconds !== undefined &&
          (typeof cp.timeRemainingSeconds !== "number" || cp.timeRemainingSeconds < 0)) continue;
-      // testVersion is already matched by findInProgress
+      // testVersion is already vetted by attemptResumable (current or
+      // archived); resumeTestFlow pins the load to the record's version
       return { test, record: rec };
     }
     return null;
@@ -727,6 +728,29 @@
   const TESTCACHE_PREFIX = "acestem:testcache:";
   function cacheKey(entry){ return TESTCACHE_PREFIX + entry.testId + ":" + (entry.testVersion || "unversioned"); }
 
+  /* Superseded builds live on as testdata/archive/<testId>@<testVersion>.js
+     (written by archive-testdata.js, shipped by build-site.js), so a version
+     bump never revokes review or breaks resume: an attempt opens on the exact
+     build it was sat on. testdata/archive/index.js (tiny, loaded at startup)
+     says which builds exist — a version outside it gets the honest
+     "unavailable" screen rather than a retry loop, since a script tag cannot
+     tell a 404 from a dead connection. */
+  function archivedVersions(testId){
+    const ix = window.TEST_ARCHIVE_INDEX;
+    const list = ix && ix[testId];
+    return Array.isArray(list) ? list : [];
+  }
+  /* Can this build serve `version` of the entry's test — as the current file
+     or from the archive? `version` is record-derived and therefore untrusted:
+     it is only ever compared against our own trusted strings, and the pinned
+     loader below fetches by the MATCHED trusted value, never by the raw one. */
+  function canServeVersion(entry, version){
+    if(!entry) return false;
+    const v = version || "unversioned";
+    if((entry.testVersion || "unversioned") === v) return true;
+    return archivedVersions(entry.testId).indexOf(v) !== -1;
+  }
+
   function readCachedTest(entry){
     try{
       const raw = localStorage.getItem(cacheKey(entry));
@@ -760,7 +784,9 @@
      deadline the loading screen would sit there forever with no message and no
      way out, which is the exact silent-blank this is supposed to prevent. */
   const TEST_FETCH_TIMEOUT_MS = 20000;
-  function fetchTestFile(testId){
+  /* archiveVersion, when given, must already be validated against
+     archivedVersions() — the caller passes the matched trusted string. */
+  function fetchTestFile(testId, archiveVersion){
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
       let done = false;
@@ -772,7 +798,9 @@
         fn(arg);
       };
       const timer = setTimeout(() => finish(reject, new Error("timed out")), TEST_FETCH_TIMEOUT_MS);
-      s.src = "testdata/" + encodeURIComponent(testId) + ".js";
+      s.src = archiveVersion
+        ? "testdata/archive/" + encodeURIComponent(testId) + "@" + encodeURIComponent(archiveVersion) + ".js"
+        : "testdata/" + encodeURIComponent(testId) + ".js";
       s.async = true;
       s.onload = () => {
         // look the test up BY THE ID WE ASKED FOR: a file that registers some
@@ -785,53 +813,101 @@
     });
   }
 
-  /* Resolves to the full test object, or throws. Callers show the retry. */
-  async function loadTest(entryOrId){
+  /* Resolves to the full test object, or throws. Callers show the retry.
+     `pinVersion` (optional) asks for the build an ATTEMPT was sat on: absent
+     or equal to the manifest's current version, this is the unchanged current
+     path; a superseded version is served from the archive (same cache, same
+     verification). Review Mode and resume pin; a new sitting never does. */
+  async function loadTest(entryOrId, pinVersion){
     const entry = (typeof entryOrId === "string") ? testById(entryOrId) : entryOrId;
     if(!entry) throw new Error("unknown test");
+    if(pinVersion == null || pinVersion === (entry.testVersion || "unversioned")){
+      const inMemory = (window.__TESTDATA__ || {})[entry.testId];
+      if(inMemory && (inMemory.testVersion || "unversioned") === (entry.testVersion || "unversioned")){
+        writeCachedTest(entry, inMemory);
+        return inMemory;
+      }
+      const cached = readCachedTest(entry);
+      if(cached){
+        window.__TESTDATA__ = window.__TESTDATA__ || {};
+        window.__TESTDATA__[entry.testId] = cached;
+        return cached;
+      }
+      const fetched = await fetchTestFile(entry.testId);
+      if((fetched.testVersion || "unversioned") !== (entry.testVersion || "unversioned")){
+        /* manifest and content disagree: refuse rather than run a sitting whose
+           version cannot be trusted for review-matching later (ATTEMPTS-SPEC §9).
+           Flagged as permanent — retrying re-downloads the same mismatched file
+           forever, so the UI must not offer Retry as if it were a blip. */
+        const e = new Error("version mismatch");
+        e.permanent = true;
+        throw e;
+      }
+      writeCachedTest(entry, fetched);
+      return fetched;
+    }
+    /* ---- pinned to a superseded version ----
+       Memory and cache first, exactly like the current path: both were
+       version-verified when written, so they may serve this build even if a
+       later deploy lost its archive listing. The availability check guards
+       only the NETWORK step — it exists because a script-tag 404 is
+       indistinguishable from a dead connection, and a miss must read as
+       honest unavailability, not an endless Retry. */
+    const want = { testId: entry.testId, testName: entry.testName, testVersion: pinVersion };
     const inMemory = (window.__TESTDATA__ || {})[entry.testId];
-    if(inMemory && (inMemory.testVersion || "unversioned") === (entry.testVersion || "unversioned")){
-      writeCachedTest(entry, inMemory);
+    if(inMemory && (inMemory.testVersion || "unversioned") === pinVersion){
+      writeCachedTest(want, inMemory);
       return inMemory;
     }
-    const cached = readCachedTest(entry);
+    const cached = readCachedTest(want);
     if(cached){
       window.__TESTDATA__ = window.__TESTDATA__ || {};
       window.__TESTDATA__[entry.testId] = cached;
       return cached;
     }
-    const fetched = await fetchTestFile(entry.testId);
-    if((fetched.testVersion || "unversioned") !== (entry.testVersion || "unversioned")){
-      /* manifest and content disagree: refuse rather than run a sitting whose
-         version cannot be trusted for review-matching later (ATTEMPTS-SPEC §9).
-         Flagged as permanent — retrying re-downloads the same mismatched file
-         forever, so the UI must not offer Retry as if it were a blip. */
+    const idx = archivedVersions(entry.testId).indexOf(pinVersion);
+    if(idx === -1){
+      /* not archived (predates the archive, or the record is lying): honest
+         unavailable, permanent — no amount of retrying can produce content
+         this deployment does not carry. */
+      const e = new Error("version not archived");
+      e.permanent = true;
+      e.unavailable = true;
+      throw e;
+    }
+    const pin = archivedVersions(entry.testId)[idx];   // the TRUSTED string
+    const fetched = await fetchTestFile(entry.testId, pin);
+    if((fetched.testVersion || "unversioned") !== pin){
+      // same refusal as above: never serve content whose version cannot be
+      // trusted to be the build this attempt was sat on
       const e = new Error("version mismatch");
       e.permanent = true;
       throw e;
     }
-    writeCachedTest(entry, fetched);
+    writeCachedTest(want, fetched);
     return fetched;
   }
 
-  // the dashboard needs full content for item analysis; same loader, same cache
-  window.AppTestLoader = { load: loadTest, byId: testById };
+  // the dashboard needs full content for item analysis; same loader, same
+  // cache — and canServe for its own version gate, so the two apps cannot
+  // disagree about which attempts are openable
+  window.AppTestLoader = { load: loadTest, byId: testById, canServe: canServeVersion };
 
   /* Shared loading/retry gate. Never leaves a blank screen: on failure the
      student gets a message and a Retry, and can always get back home. */
   const LOADING_DEFAULT_MSG = "This may take up to a minute. Please don't refresh this page or quit the app.";
-  async function withTestContent(entry, onReady, origin){
+  async function withTestContent(entry, onReady, origin, pinVersion){
     showOnly("screen-loading");
     el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + (entry ? entry.testName : "test") + "…");
     try{
-      const full = await loadTest(entry);
+      const full = await loadTest(entry, pinVersion);
       // restore the standing instruction: this screen is reused by the normal
       // start/resume beat, which must not inherit a stale "Loading X…"
       el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
       onReady(full);
     }catch(e){
       el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
-      showTestLoadError(entry, () => withTestContent(entry, onReady, origin), origin, e);
+      showTestLoadError(entry, () => withTestContent(entry, onReady, origin, pinVersion), origin, e);
     }
   }
   /* `origin` decides where the escape hatch goes. A tutor who opened this from
@@ -842,7 +918,11 @@
     const toDashboard = origin === "dashboard";
     const permanent = !!(err && err.permanent);
     el("loadErrTitle").textContent = "Couldn't load " + name;
-    el("loadErrBody").textContent = permanent
+    el("loadErrBody").textContent = (err && err.unavailable)
+      // the build this attempt was sat on isn't archived here: honest and
+      // final, never a retry loop and never someone else's content
+      ? "This attempt was taken on an earlier version of this test that isn't available here, so it can't be opened. The attempt record and its scores are unaffected — tell your tutor."
+      : permanent
       // a mismatch re-downloads identically forever; say so instead of
       // blaming the connection and inviting an endless retry
       ? "This test's content doesn't match the version on record, so it can't be opened safely. Retrying won't help — tell your tutor."
@@ -872,14 +952,15 @@
   function attemptCompleted(rec){
     return !!rec && (rec.status === "completed" || rec.status === "timed-out");
   }
-  /* A resumable attempt: in-progress with a resume/checkpoint blob, and the
-     SAME test build it was recorded under (ids/annotations only line up within
-     a version — ATTEMPTS-SPEC §9). */
+  /* A resumable attempt: in-progress with a resume/checkpoint blob, and a
+     build this deployment can still SERVE — current, or archived (ids/
+     annotations only line up within a version — ATTEMPTS-SPEC §9 — so resume
+     loads the pinned build, never the bumped one). */
   function attemptResumable(rec){
     if(!rec || rec.status !== "in-progress" || !(rec.resume || rec.checkpoint)) return false;
     const entry = testById(rec.testId);
     if(!entry) return false;
-    return (rec.testVersion || "unversioned") === (entry.testVersion || "unversioned");
+    return canServeVersion(entry, rec.testVersion);
   }
   function canonTestId(testId){ const e = testById(testId); return e ? e.testId : testId; }
   const byStartDesc = (a, b) => (b.startedAt || "").localeCompare(a.startedAt || "");
@@ -1162,10 +1243,12 @@
     list.forEach(record => {
       const released = record.released === true;
       const test = testById(record.testId);   // resolves legacy ids too
-      // reviewing against a different test build would mislabel questions
-      // (ATTEMPTS-SPEC §9) — the tutor dashboard remains the archive view
-      const canView = released && test &&
-        (test.testVersion || "unversioned") === record.testVersion;
+      /* Reviewing against a different test build would mislabel questions
+         (ATTEMPTS-SPEC §9) — so Score Details loads the build the attempt was
+         SAT on: the current file, or its archived twin after a version bump
+         (canServeVersion). Only a build this deployment genuinely cannot
+         serve keeps the "ask your tutor" fallback. */
+      const canView = released && test && canServeVersion(test, record.testVersion);
       /* §6: released cards show the scaled TOTAL, or a raw fallback.
          The scaled figure needs the questions, which are lazy-loaded — and the
          home screen must not pull a test file just to draw a card. So use the
@@ -1182,7 +1265,15 @@
          figure still needs the test for its scoring table, but its INPUTS now
          come from record.score.byModule, so both branches describe the stored
          attempt. Score Details remains the one surface that re-grades. */
-      const loadedTest = canView ? (window.__TESTDATA__ || {})[test.testId] : null;
+      /* Memory holds ONE build per testId, and with the archive that build
+         may not be this record's (review an old attempt, come home, and the
+         superseded build is what's loaded). The scoring table must come from
+         the build the attempt was sat on, so only a version-matched loaded
+         test may feed scaledScores — otherwise the raw fallback line. */
+      const inMemory = canView ? (window.__TESTDATA__ || {})[test.testId] : null;
+      const loadedTest = (inMemory &&
+        (inMemory.testVersion || "unversioned") === (record.testVersion || "unversioned"))
+        ? inMemory : null;
       let scoreLine = "";
       const c = num(record.score && record.score.correct);
       const g = num(record.score && record.score.graded);
@@ -1348,6 +1439,11 @@
      so a failed fetch never leaves a blank test. */
   function resumeTestFlow(entry, record){
     if(!entry || !record) return false;
+    /* Pinned to the record's version: a sitting resumes on the exact build it
+       began on, even after a bump replaced the current file (ATTEMPTS-SPEC
+       §9). Attempts.resume keeps the record's own testVersion, and checkpoint
+       writes stamp from state.currentTest — the pinned build — so the record
+       stays on its version for its whole life. */
     withTestContent(entry, full => {
       /* Content arrived but the RECORD itself is unrestorable. Nothing else
          acts on that false, so land them home with the In Progress card rather
@@ -1357,7 +1453,7 @@
         renderHome();
         showOnly("screen-home");
       }
-    });
+    }, undefined, record.testVersion);
     return true;
   }
   function resumeTestFlowLoaded(test, record){
@@ -3363,8 +3459,17 @@
      without a fetch — but a student reviewing on a different device still gets
      the loading state and the retry rather than an empty report. */
   function openScoreDetails(entryOrTest, record, origin){
-    if(entryOrTest && entryOrTest.modules) return openScoreDetailsLoaded(entryOrTest, record, origin);
-    withTestContent(entryOrTest, full => openScoreDetailsLoaded(full, record, origin), origin);
+    /* A pre-loaded test may be handed in, but only the build the attempt was
+       SAT on is acceptable here — anything else goes through the pinned
+       loader, which serves the record's version from the archive if the
+       current file has moved past it (ATTEMPTS-SPEC §9). */
+    if(entryOrTest && entryOrTest.modules){
+      if((entryOrTest.testVersion || "unversioned") === (record && record.testVersion || "unversioned"))
+        return openScoreDetailsLoaded(entryOrTest, record, origin);
+      entryOrTest = testById(entryOrTest.testId) || entryOrTest;
+    }
+    withTestContent(entryOrTest, full => openScoreDetailsLoaded(full, record, origin), origin,
+      record && record.testVersion);
   }
   function openScoreDetailsLoaded(test, record, origin){
     const built = buildScoreRows(test, record);

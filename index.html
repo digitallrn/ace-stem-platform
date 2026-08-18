@@ -494,8 +494,11 @@
      leaves the app in local mode. The extra attribute keeps assemble.py from
      inlining it, so keys never enter dist/index-live.html. -->
 <script src="config.js" data-no-inline></script>
-<!-- only the manifest loads at startup; testdata/<testId>.js arrives on demand -->
+<!-- only the manifest and the tiny archive index load at startup;
+     testdata/<testId>.js — and any archived build a pinned attempt needs —
+     arrives on demand -->
 <script src="testdata/manifest.js"></script>
+<script src="testdata/archive/index.js"></script>
 <script src="skilldomains.js"></script>
 <script src="render.js"></script>
 <script src="grading.js"></script>

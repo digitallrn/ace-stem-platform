@@ -6,8 +6,12 @@ hand-written.
 
 ```
 testdata/manifest.js       loaded at startup; one entry per test
+testdata/archive/index.js  loaded at startup; which superseded builds exist
 testdata/202606asiav1.js   the full test, fetched only when a sitting
 testdata/202606asiav2.js   starts or resumes
+testdata/archive/<testId>@<testVersion>.js
+                           a superseded build, fetched only when reviewing
+                           or resuming an attempt sat on that version
 ```
 
 1. Run the app: serve the folder over HTTP (`python3 -m http.server`) and
@@ -17,7 +21,8 @@ testdata/202606asiav2.js   starts or resumes
 2. `python3 assemble.py` builds `dist/index-live.html`: one self-contained
    file with all test content inlined, for the claude.ai preview panel.
 3. `node build-site.js` assembles the deploy directory `_site/`. It ships
-   only the allowlisted app files plus every test the manifest lists.
+   only the allowlisted app files, every test the manifest lists, and every
+   archived build `testdata/archive/index.js` lists.
 
 ## Adding a test
 
@@ -36,6 +41,28 @@ testdata/202606asiav2.js   starts or resumes
 Renaming a test's `testId` orphans existing attempt records, which are keyed
 `attempt:<testId>:…`. If you must rename one, list the old id in that test's
 `legacyIds` so records, resume-lookup and the dashboard still resolve.
+
+## Updating a test (a `testVersion` bump)
+
+1. Regenerate through the test-bank repo's `export_to_platform.py` with a NEW
+   `--test-version` (ATTEMPTS-SPEC §9: any content change after students have
+   taken a test needs one — never hand-edit, never reuse a version).
+2. **Run `node archive-testdata.js`.** It pins the build you just replaced
+   into `testdata/archive/<testId>@<oldVersion>.js` (byte-identical to the
+   committed file), and regenerates `testdata/archive/index.js` +
+   `ARCHIVE.md`. Idempotent — re-running is always safe, and a forgotten run
+   can be done later: every committed build stays reachable in git history.
+3. Commit the regenerated test, the manifest, and the archive files together.
+
+Completed attempts open Review Mode — and in-progress sittings resume — on
+the exact build they were sat on, served from the archive once the current
+file has moved past it. A bump therefore no longer revokes anyone's review,
+and releasing scores before or after a bump makes no difference to review.
+An attempt on a version the archive genuinely lacks (only the pre-archive
+single-file era qualifies) gets an honest "this version isn't available"
+screen, never mismatched content. `build-site.js` fails the deploy if the
+archive index and the files on disk disagree, so a missed step 2 is a red
+build, not a student-facing hole.
 
 ---
 
