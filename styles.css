@@ -348,7 +348,7 @@
     background:none; border:none; font-size:13.5px; color:var(--cb-blue);
     text-decoration:underline; padding:4px;
   }
-  .home-footer{ margin-top:48px; display:flex; justify-content:center; }
+  .home-footer{ margin-top:48px; display:flex; justify-content:center; gap:22px; }
   .home-signout{ margin-left:12px; font-size:12.5px; }
 
   /* device-check rows */
@@ -1198,6 +1198,42 @@
   .sd-hero-actions .pill{ background:var(--cb-yellow); color:var(--ink); }
   .sd-hero-actions .pill.ghost{ background:transparent; color:#fff; border:1.5px solid #fff; }
   .sd-body{ padding:32px 42px 80px; }
+
+  /* ===== Score Calculator (reporting layer) =====
+     Deliberately built from the Score Details vocabulary — same hero band,
+     same Est. treatment, same Back affordance — because it is the same kind of
+     surface and should not read as a different product. */
+  .scalc-root{ max-width:1080px; margin:0 auto; }
+  .scalc-hero{ background:var(--cb-blue); color:#fff; padding:30px 42px 30px; }
+  .scalc-hero-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:20px; }
+  .scalc-hero h1{ margin:0; font-size:40px; font-weight:400; }
+  .scalc-sub{ font-size:15px; margin-top:6px; color:#DCE4F8; max-width:70ch; }
+  .scalc-out{ display:flex; gap:60px; align-items:flex-end; margin-top:24px; flex-wrap:wrap; }
+  .scalc-lbl{ font-size:14px; font-weight:700; letter-spacing:.5px; }
+  .scalc-num{ font-size:66px; font-weight:800; line-height:1; }
+  .scalc-range{ font-size:13px; color:#DCE4F8; margin-top:4px; }
+  .scalc-sections{ display:flex; gap:40px; }
+  .scalc-sec-lbl{ font-size:15px; font-weight:700; }
+  .scalc-sec-range{ font-size:12px; color:#DCE4F8; }
+  .scalc-sec-num{ font-size:34px; font-weight:800; }
+  .scalc-sec-raw{ font-size:12.5px; color:#DCE4F8; }
+  .scalc-body{ padding:32px 42px 80px; }
+  .scalc-panel{ margin-bottom:30px; }
+  .scalc-panel h2{ font-size:22px; font-weight:400; margin:0 0 14px; }
+  .scalc-row{ margin-bottom:18px; max-width:620px; }
+  .scalc-row-head{ display:flex; justify-content:space-between; align-items:baseline; gap:16px; }
+  .scalc-row-head label{ font-size:15px; font-weight:700; }
+  .scalc-val{ font-size:15px; font-variant-numeric:tabular-nums; }
+  .scalc-of{ color:var(--ink-soft); font-weight:400; margin-left:3px; }
+  /* the track is positioned so the "you are here" marker can sit on it */
+  .scalc-track{ position:relative; margin-top:6px; }
+  .scalc-track input[type=range]{ width:100%; display:block; }
+  .scalc-mark{ position:absolute; top:-3px; width:2px; height:18px; background:var(--cb-blue);
+    border-radius:1px; pointer-events:none; opacity:.55; transform:translateX(-1px); }
+  .scalc-note{ color:var(--ink-soft); font-size:13.5px; max-width:80ch; margin:6px 0 0; }
+  .scalc-actions{ margin-top:18px; }
+  .scalc-unavailable{ color:var(--ink-soft); font-size:14.5px; max-width:80ch; }
+  .scalc-hero .scalc-unavailable{ color:#DCE4F8; }
   .sd-muted{ color:var(--ink-soft); font-size:14px; }
   .sd-ks h2, .sd-questions h2{ font-size:26px; font-weight:400; margin:0 0 4px; }
   .sd-ks-section{ margin-top:22px; }
@@ -1208,6 +1244,14 @@
   .sd-bar{ display:flex; gap:4px; }
   .sd-bar span{ flex:1; height:12px; border-radius:2px; background:#E3E6EE; }
   .sd-bar span.on{ background:var(--cb-blue); }
+  /* Fine skills beneath a domain (2026-08-18): a subtle indented list under the
+     domain's bar. Only shows for tagged questions; a fully untagged test has
+     none. Kept quiet so the domain remains the headline of each card. */
+  .sd-ks-skills{ list-style:none; margin:10px 0 0; padding:0; border-top:1px solid var(--line); }
+  .sd-ks-skills li{ display:flex; justify-content:space-between; gap:12px; align-items:baseline;
+    padding:5px 0 0; font-size:12.5px; }
+  .sd-ks-skills .sk-name{ color:var(--ink-soft); }
+  .sd-ks-skills .sk-count{ color:var(--ink-soft); font-variant-numeric:tabular-nums; white-space:nowrap; }
   .sd-questions{ margin-top:44px; }
   .sd-tabs{ display:flex; gap:8px; border-bottom:1px solid var(--line); margin:14px 0 0; flex-wrap:wrap; }
   .sd-tab{ background:none; border:none; border-bottom:3px solid transparent; padding:12px 18px;

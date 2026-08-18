@@ -50,14 +50,14 @@
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-scoredetails","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-scoredetails","screen-scorecalc","screen-dashboard"];
   // body-level overlays that live outside the SCREENS set — a screen change
   // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
   // them floating as a full-screen click blocker over the next screen
   const FLOATING_OVERLAYS = ["saveFailModal","bugModal","deviceModal"];
   /* The persistent bar belongs to the signed-in non-test screens. In-test
      screens keep their own header, and sign-in has its own branding. */
-  const TOPBAR_SCREENS = ["screen-home", "screen-scoredetails"];
+  const TOPBAR_SCREENS = ["screen-home", "screen-scoredetails", "screen-scorecalc"];
   function showOnly(id){
     SCREENS.forEach(s => s===id ? show(s) : hide(s));
     FLOATING_OVERLAYS.forEach(o => hide(o));
@@ -3220,13 +3220,24 @@
     "Reading and Writing": ["Information and Ideas", "Craft and Structure", "Expression of Ideas", "Standard English Conventions"],
     "Math": ["Algebra", "Advanced Math", "Problem-Solving and Data Analysis", "Geometry and Trigonometry"]
   };
+  /* A question's skill string -> its reporting group.
+     - empty/absent skill -> "Other". UNCHANGED behaviour: today every shipped
+       question is untagged, so everything maps to "Other" and the grid
+       collapses to one muted line exactly as it does now.
+     - a recognised fine skill -> its domain, via the single source in
+       skilldomains.js. This is the rollup: many fine skills fold into eight
+       domains.
+     - an unrecognised NON-empty skill -> its own raw string as its group,
+       NEVER silently dropped (§4): a typo or out-of-vocabulary tag shows as a
+       visible line rather than vanishing. If skilldomains.js failed to load,
+       every tagged skill takes this path (rollup absent, nothing lost) — which
+       is also the control-experiment behaviour.
+     `section` is kept for the call signature but no longer needed to resolve
+     the group; fine skills are globally unique across the two sections. */
   function mapDomain(section, skill){
-    const list = CB_DOMAINS[section] || [];
-    if(skill){
-      const s = String(skill).toLowerCase();
-      for(const d of list){ if(s.indexOf(d.toLowerCase()) !== -1) return d; }
-    }
-    return "Other";   // unmapped/keyless skills; shown only if non-empty (§4)
+    if(skill == null || String(skill).trim() === "") return "Other";
+    const d = window.SKILL_DOMAINS && window.SKILL_DOMAINS.domainOf(skill);
+    return d || String(skill).trim();
   }
 
   /* §3: scaled scores only when the test carries a scoring table; otherwise
@@ -3290,8 +3301,17 @@
         }
         if(!noKey){
           const dd = (domains[mod.section] = domains[mod.section] || {});
-          const de = (dd[domain] = dd[domain] || {correct:0, graded:0});
+          const de = (dd[domain] = dd[domain] || {correct:0, graded:0, skills:{}});
           de.graded++; if(correct) de.correct++;
+          /* Fine-skill breakdown beneath the domain. Only a TAGGED (non-empty)
+             skill gets a sub-row; an untagged question still counts toward its
+             domain ("Other") total but adds no skill line — so a fully untagged
+             test has no sub-rows and the block collapses as before. */
+          const sk = (q.skill == null) ? "" : String(q.skill).trim();
+          if(sk){
+            const se = (de.skills[sk] = de.skills[sk] || {correct:0, graded:0});
+            se.graded++; if(correct) se.correct++;
+          }
         }
         /* Numbering is MODULE-LOCAL on every student-facing surface (RW M1
            1-27, RW M2 1-27, Math M1 1-22, Math M2 1-22) — matching what the
@@ -3331,6 +3351,7 @@
     if(el("screen-scoredetails").classList.contains("hidden")) return;
     leaveScoreDetails();
   });
+  el("homeScoreCalcBtn").addEventListener("click", ()=> openScoreCalc("home"));
 
   /* Reviewing needs the questions too, so it goes through the same gate. In
      practice the content is already cached from the sitting, so this resolves
@@ -3429,15 +3450,35 @@
       ["Reading and Writing", "Math"].forEach(section => {
         const dd = domains[section];
         if(!dd) return;
-        const order = CB_DOMAINS[section].concat(["Other"]).filter(d => dd[d]);
+        /* Domain order: the four for this section in parent-report order, then
+           "Other", then anything else present that neither lists — an
+           out-of-vocabulary skill grouped under its own raw string, or a
+           cross-section mistag. The extras are APPENDED, never dropped (§4). */
+        const known = CB_DOMAINS[section].concat(["Other"]);
+        const extras = Object.keys(dd).filter(d => known.indexOf(d) === -1).sort();
+        const order = known.concat(extras).filter(d => dd[d]);
         if(!order.length) return;
         ks += `<div class="sd-ks-section"><h3>${escapeHtml(section)}</h3><div class="sd-ks-grid">` +
           order.map(d => {
             const e = dd[d];
+            /* Fine skills beneath the domain: contract order first, then any
+               present-but-unlisted skill appended (again, never dropped). */
+            const present = e.skills || {};
+            const canon = (window.SKILL_DOMAINS ? window.SKILL_DOMAINS.skillsFor(d) : [])
+              .filter(sk => present[sk]);
+            const rest = Object.keys(present).filter(sk => canon.indexOf(sk) === -1).sort();
+            const skillNames = canon.concat(rest);
+            const sub = skillNames.length
+              ? '<ul class="sd-ks-skills">' + skillNames.map(sk => {
+                  const se = present[sk];
+                  return `<li><span class="sk-name">${escapeHtml(sk)}</span><span class="sk-count">${se.correct}/${se.graded}</span></li>`;
+                }).join("") + "</ul>"
+              : "";
             return `<div class="sd-ks-item">
               <div class="sd-ks-name">${escapeHtml(d)}</div>
               <div class="sd-ks-count">${e.correct}/${e.graded} correct</div>
               ${domainBar(e.correct, e.graded)}
+              ${sub}
             </div>`;
           }).join("") + "</div></div>";
       });
@@ -3456,6 +3497,7 @@
         <div class="sd-hero-actions">
           <button class="pill" id="sdReviewAllBtn">Review All Questions</button>
           <button class="pill ghost" id="sdDownloadBtn">Download Score Report</button>
+          <button class="pill ghost" id="sdCalcBtn">Score Calculator</button>
         </div>
       </div>
       <div class="sd-body">
@@ -3480,6 +3522,7 @@
       openReviewMode(parseInt(chip.dataset.mi, 10), parseInt(chip.dataset.qi, 10));
     });
     el("sdDownloadBtn").addEventListener("click", ()=> window.print());
+    el("sdCalcBtn").addEventListener("click", ()=> openScoreCalc("scoredetails"));
     renderQuestionsOverview();
   }
 
@@ -3649,6 +3692,202 @@
   /* ================= INIT ================= */
   // §6: dashboard "Open student view" bridges into the Score Details page,
   // regardless of release (admin-only path). Guards a missing/mismatched test.
+  /* ================= SCORE CALCULATOR (reporting layer) =================
+     Sliders over per-module RAW counts, showing the estimated scaled score
+     live. It exists because students ask "what would I need for a 1400?", and
+     the honest answer depends on the SPLIT: the curve is per-module, so the
+     same section raw distributed differently across the two modules converts
+     differently. One slider per module is the only shape that can say that.
+
+     It computes through scaledScores() — the SAME function Score Details and
+     the home cards use, called directly rather than exported, because a second
+     scoring implementation is the drift hazard this page is most likely to
+     introduce. Nothing here knows what a curve looks like; the numbers come
+     from the loaded test's own scoring sidecar.
+
+     Reporting-layer only: never reachable from inside a sitting, reads nothing
+     from unreleased or in-progress attempts, and writes nothing anywhere. */
+  const SC_MAX = { rw: 27, math: 22 };
+  let scCtx = null;   // { test, raw:{rw:[a,b],math:[a,b]}, prefill, origin }
+
+  /* The test whose curve the calculator uses. Prefer the one belonging to the
+     prefilled attempt (so the page matches that attempt's Score Details
+     exactly); otherwise the default sidecar — the first manifest entry whose
+     content is already loaded, else the first entry, loaded through the same
+     loader Score Details uses. */
+  function scDefaultEntry(){
+    const loaded = (window.__TESTDATA__ || {});
+    return state.tests.find(t => loaded[t.testId]) || state.tests[0] || null;
+  }
+
+  /* Most recent attempt this student may actually see: completed AND released
+     AND version-matched — the identical gate Score Details and the Past cards
+     apply. An in-progress or unreleased attempt is invisible here, exactly as
+     it is everywhere else in the student app. */
+  function scPrefillSource(){
+    const list = (state.pastAttempts || []).filter(r => {
+      if(r.released !== true) return false;
+      if(r.status !== "completed" && r.status !== "timed-out") return false;
+      const t = testById(r.testId);
+      if(!t) return false;
+      return (t.testVersion || "unversioned") === r.testVersion;
+    });
+    return list.length ? list[0] : null;   // pastAttempts is already newest-first
+  }
+
+  function scClamp(v, max){
+    const n = Math.round(Number(v));
+    if(!isFinite(n)) return 0;
+    return Math.max(0, Math.min(max, n));
+  }
+
+  function openScoreCalc(origin){
+    const src = scPrefillSource();
+    const entry = src ? testById(src.testId) : scDefaultEntry();
+    if(!entry){ scRenderUnavailable(origin, "No practice test is available on this device yet."); return; }
+    withTestContent(entry, full => {
+      let raw = { rw: [0, 0], math: [0, 0] }, prefill = null;
+      if(src){
+        /* Per-module raws for the prefill come from the SAME builder Score
+           Details uses, so the two surfaces cannot drift: same record, same
+           grading, same module ordering. */
+        const built = buildScoreRows(full, src);
+        if(built && built.moduleRaw){
+          raw = { rw: built.moduleRaw.rw.slice(0, 2), math: built.moduleRaw.math.slice(0, 2) };
+          prefill = { record: src, raw: { rw: raw.rw.slice(), math: raw.math.slice() } };
+        }
+      }
+      scCtx = { test: full, raw, prefill, origin: origin || "home" };
+      renderScoreCalc();
+      showOnly("screen-scorecalc");
+      window.scrollTo(0, 0);
+    }, origin);
+  }
+
+  function scRenderUnavailable(origin, why){
+    scCtx = { test: null, raw: { rw: [0, 0], math: [0, 0] }, prefill: null, origin: origin || "home" };
+    el("scRoot").innerHTML = `
+      <div class="scalc-hero">
+        <div class="scalc-hero-top">
+          <div><h1>Score Calculator</h1>
+            <div class="scalc-sub">Estimate a scaled score from raw correct counts.</div></div>
+          <button class="sd-home" id="scBackBtn">Back</button>
+        </div>
+      </div>
+      <div class="scalc-body">
+        <p class="scalc-unavailable">Score estimates are unavailable — ${escapeHtml(why)}</p>
+      </div>`;
+    el("scBackBtn").addEventListener("click", leaveScoreCalc);
+    showOnly("screen-scorecalc");
+  }
+
+  function leaveScoreCalc(){
+    if(scCtx && scCtx.origin === "scoredetails" && sdCtx){ renderScoreDetails(); showOnly("screen-scoredetails"); return; }
+    if(scCtx && scCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }
+    renderHome(); showOnly("screen-home");
+  }
+
+  function scSliderRow(key, idx, label, max){
+    const val = scCtx.raw[key][idx];
+    const pre = scCtx.prefill ? scCtx.prefill.raw[key][idx] : null;
+    /* "you are here" marker: where the prefilled attempt actually landed, so a
+       student moving the slider can see the distance from their own result. */
+    const markPct = (pre === null) ? null : (max ? (pre / max) * 100 : 0);
+    return `
+      <div class="scalc-row" data-key="${key}" data-idx="${idx}">
+        <div class="scalc-row-head">
+          <label for="sc-${key}-${idx}">${escapeHtml(label)}</label>
+          <span class="scalc-val" id="scVal-${key}-${idx}">${val}<span class="scalc-of">/ ${max}</span></span>
+        </div>
+        <div class="scalc-track">
+          <input type="range" id="sc-${key}-${idx}" min="0" max="${max}" step="1" value="${val}"
+                 aria-label="${escapeHtml(label)} raw correct out of ${max}">
+          ${markPct === null ? "" : `<span class="scalc-mark" style="left:${markPct.toFixed(2)}%" title="Your most recent released result: ${pre}/${max}"></span>`}
+        </div>
+      </div>`;
+  }
+
+  function renderScoreCalc(){
+    const { test, prefill } = scCtx;
+    const sub = prefill
+      ? `Prefilled from your most recent released result — ${escapeHtml(testById(prefill.record.testId) ? testById(prefill.record.testId).testName : test.testName)}. Move a slider to explore.`
+      : "Move the sliders to see the estimated score for a set of raw counts.";
+    el("scRoot").innerHTML = `
+      <div class="scalc-hero">
+        <div class="scalc-hero-top">
+          <div><h1>Score Calculator</h1><div class="scalc-sub">${sub}</div></div>
+          <button class="sd-home" id="scBackBtn">Back</button>
+        </div>
+        <div class="scalc-out" id="scOut"></div>
+      </div>
+      <div class="scalc-body">
+        <section class="scalc-panel">
+          <h2>Reading and Writing</h2>
+          ${scSliderRow("rw", 0, "Module 1", SC_MAX.rw)}
+          ${scSliderRow("rw", 1, "Module 2", SC_MAX.rw)}
+        </section>
+        <section class="scalc-panel">
+          <h2>Math</h2>
+          ${scSliderRow("math", 0, "Module 1", SC_MAX.math)}
+          ${scSliderRow("math", 1, "Module 2", SC_MAX.math)}
+        </section>
+        <p class="scalc-note">Scores are estimated with this practice test's conversion table. The split between modules matters: the same section total can convert differently depending on how the correct answers fall across the two modules.${prefill ? " The marker on each slider shows your most recent released result." : ""}</p>
+        ${prefill ? '<div class="scalc-actions"><button class="pill ghost" id="scResetBtn">Reset to my result</button></div>' : ""}
+      </div>`;
+
+    el("scBackBtn").addEventListener("click", leaveScoreCalc);
+    const resetBtn = el("scResetBtn");
+    if(resetBtn) resetBtn.addEventListener("click", ()=>{
+      scCtx.raw = { rw: prefill.raw.rw.slice(), math: prefill.raw.math.slice() };
+      renderScoreCalc();
+    });
+    [["rw",0],["rw",1],["math",0],["math",1]].forEach(([key, idx])=>{
+      const input = el("sc-" + key + "-" + idx);
+      if(!input) return;
+      const onMove = ()=>{
+        scCtx.raw[key][idx] = scClamp(input.value, SC_MAX[key]);
+        el("scVal-" + key + "-" + idx).innerHTML =
+          scCtx.raw[key][idx] + '<span class="scalc-of">/ ' + SC_MAX[key] + "</span>";
+        scPaintOut();
+      };
+      input.addEventListener("input", onMove);
+      input.addEventListener("change", onMove);
+    });
+    scPaintOut();
+  }
+
+  /* The only place a number is produced — and it produces none of its own:
+     scaledScores() owns the conversion, reading the loaded test's sidecar. */
+  function scPaintOut(){
+    const { test, raw } = scCtx;
+    const rawRw = raw.rw[0] + raw.rw[1];
+    const rawMath = raw.math[0] + raw.math[1];
+    const scaled = test ? scaledScores(test, rawRw, rawMath,
+      { rw: raw.rw.slice(), math: raw.math.slice() }) : null;
+    const out = el("scOut");
+    if(!out) return;
+    if(!scaled){
+      // no usable curve: say so rather than showing a number we cannot support
+      out.innerHTML = `<p class="scalc-unavailable">Estimated scores are unavailable for this test — its conversion table is missing, so only raw counts can be shown (${rawRw + rawMath} correct).</p>`;
+      return;
+    }
+    const est = scaled.estimated ? EST : "";
+    out.innerHTML = `
+      <div class="scalc-total">
+        <div class="scalc-lbl">ESTIMATED TOTAL</div>
+        <div class="scalc-num" id="scTotal">${scaled.total}${est}</div>
+        <div class="scalc-range">400–1600</div>
+      </div>
+      <div class="scalc-sections">
+        <div><div class="scalc-sec-lbl">Reading and Writing</div><div class="scalc-sec-range">200–800</div>
+          <div class="scalc-sec-num" id="scRw">${scaled.rw}${est}</div>
+          <div class="scalc-sec-raw">${rawRw} raw</div></div>
+        <div><div class="scalc-sec-lbl">Math</div><div class="scalc-sec-range">200–800</div>
+          <div class="scalc-sec-num" id="scMath">${scaled.math}${est}</div>
+          <div class="scalc-sec-raw">${rawMath} raw</div></div>
+      </div>`;
+  }
+
   window.AppScoreView = {
     open(testId, record){
       const test = testById(testId);          // resolves legacy ids too

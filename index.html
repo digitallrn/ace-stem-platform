@@ -141,7 +141,10 @@
     </div>
     <div class="practice-cards" id="practiceCards"></div>
 
-    <div class="home-footer"><button class="linklike" id="homeBugBtn">Report a bug</button></div>
+    <div class="home-footer">
+      <button class="linklike" id="homeScoreCalcBtn">Score Calculator</button>
+      <button class="linklike" id="homeBugBtn">Report a bug</button>
+    </div>
   </div>
 </div>
 
@@ -392,6 +395,17 @@
   <div class="sd-root" id="sdRoot"></div>
 </div>
 
+<!-- ============ SCORE CALCULATOR (reporting layer, never in a sitting) ====
+     Sliders over per-module RAW counts show the estimated scaled score live.
+     Per-module because the curve is per-module and the split matters: the same
+     section raw split differently across the two modules yields different
+     scaled scores. Reachable from home and from Score Details only — never
+     from inside a module, where it would be an aid the real app does not have.
+     Renders no stored value and writes nothing. -->
+<div id="screen-scorecalc" class="hidden">
+  <div class="scalc-root" id="scRoot"></div>
+</div>
+
 <!-- ============ TUTOR DASHBOARD (admin sign-in only) ============ -->
 <div id="screen-dashboard" class="hidden">
   <div class="dash-top">
@@ -482,6 +496,7 @@
 <script src="config.js" data-no-inline></script>
 <!-- only the manifest loads at startup; testdata/<testId>.js arrives on demand -->
 <script src="testdata/manifest.js"></script>
+<script src="skilldomains.js"></script>
 <script src="render.js"></script>
 <script src="grading.js"></script>
 <script src="attempts.js"></script>
