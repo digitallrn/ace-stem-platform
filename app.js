@@ -3277,7 +3277,12 @@
     const ms = buildModuleStateFromRecord(test, record);
     const rows = [];
     const tally = { "Reading and Writing": {correct:0, graded:0}, "Math": {correct:0, graded:0} };
-    const domains = {};    // section -> domain -> {correct, graded}
+    /* null-prototype: these are keyed by DOMAIN and SKILL strings, which come
+       from test data. On a plain object a skill of "__proto__" makes
+       dd[domain] read back Object.prototype — truthy, so the ||-initialiser
+       keeps it and the ++ below writes onto Object.prototype, polluting every
+       object on the page. Object.create(null) has no such keys to inherit. */
+    const domains = Object.create(null);    // section -> domain -> {correct, graded, skills}
     /* per-module raw correct, in document order within each section — feeds
        the per-module scoring form. Index = which module of its section. */
     const SEC_KEY = { "Reading and Writing": "rw", "Math": "math" };
@@ -3300,8 +3305,8 @@
           }
         }
         if(!noKey){
-          const dd = (domains[mod.section] = domains[mod.section] || {});
-          const de = (dd[domain] = dd[domain] || {correct:0, graded:0, skills:{}});
+          const dd = (domains[mod.section] = domains[mod.section] || Object.create(null));
+          const de = (dd[domain] = dd[domain] || {correct:0, graded:0, skills:Object.create(null)});
           de.graded++; if(correct) de.correct++;
           /* Fine-skill breakdown beneath the domain. Only a TAGGED (non-empty)
              skill gets a sub-row; an untagged question still counts toward its

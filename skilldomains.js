@@ -90,7 +90,12 @@ window.SKILL_DOMAINS = (function(){
   /* Ordered fine skills for a domain (contract order), so the render can list a
      domain's skills canonically instead of in test order. Unknown domain -> []. */
   function skillsFor(domain){
-    return GROUPS[domain] ? GROUPS[domain].slice() : [];
+    /* hasOwnProperty, not a truthiness test: GROUPS is a plain object, so
+       GROUPS["__proto__"] / ["constructor"] / ["toString"] return INHERITED
+       values that are truthy but have no .slice — which threw, and the caller
+       passes a raw skill string here whenever one is out of vocabulary. */
+    return Object.prototype.hasOwnProperty.call(GROUPS, domain)
+      ? GROUPS[domain].slice() : [];
   }
 
   return { skillToDomain: skillToDomain, domainOf: domainOf, skillsFor: skillsFor };
