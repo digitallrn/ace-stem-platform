@@ -3712,8 +3712,35 @@
 
      Reporting-layer only: never reachable from inside a sitting, reads nothing
      from unreleased or in-progress attempts, and writes nothing anywhere. */
+  /* Fallback only, for a test whose content is not loaded. Real maxima come
+     from scMaxes() below — the shipped library is not uniformly 27/27/22/22
+     (202509asiav2 serves 21 in Math Module 2), and a fixed 22 there let the
+     slider reach a raw count that test cannot produce, reporting Math 800
+     where 790 is the ceiling, while Score Details showed the same module as
+     "/21". Two student-visible surfaces disagreeing about one module is the
+     drift this page exists to avoid. */
   const SC_MAX = { rw: 27, math: 22 };
-  let scCtx = null;   // { test, raw:{rw:[a,b],math:[a,b]}, prefill, origin }
+  let scCtx = null;   // { test, raw:{rw:[a,b],math:[a,b]}, max, prefill, origin }
+
+  /* Per-module maxima straight from the loaded test, counted with the SAME
+     predicate Score Details' module strips use (hasKey), so the denominators
+     on the two surfaces are the same number by construction. */
+  function scMaxes(test){
+    const out = { rw: [SC_MAX.rw, SC_MAX.rw], math: [SC_MAX.math, SC_MAX.math] };
+    if(!test || !Array.isArray(test.modules)) return out;
+    /* local: buildScoreRows' SEC_KEY is a const inside that function, not a
+       shared binding — referencing it from here is a ReferenceError. */
+    const secKey = { "Reading and Writing": "rw", "Math": "math" };
+    const seen = { rw: 0, math: 0 };
+    test.modules.forEach(mod => {
+      const key = secKey[mod.section];
+      if(!key || seen[key] > 1) return;
+      const graded = (mod.questions || []).filter(hasKey).length;
+      if(graded > 0) out[key][seen[key]] = graded;
+      seen[key]++;
+    });
+    return out;
+  }
 
   /* The test whose curve the calculator uses. Prefer the one belonging to the
      prefilled attempt (so the page matches that attempt's Score Details
@@ -3762,7 +3789,7 @@
           prefill = { record: src, raw: { rw: raw.rw.slice(), math: raw.math.slice() } };
         }
       }
-      scCtx = { test: full, raw, prefill, origin: origin || "home" };
+      scCtx = { test: full, raw, max: scMaxes(full), prefill, origin: origin || "home" };
       renderScoreCalc();
       showOnly("screen-scorecalc");
       window.scrollTo(0, 0);
@@ -3770,7 +3797,7 @@
   }
 
   function scRenderUnavailable(origin, why){
-    scCtx = { test: null, raw: { rw: [0, 0], math: [0, 0] }, prefill: null, origin: origin || "home" };
+    scCtx = { test: null, raw: { rw: [0, 0], math: [0, 0] }, max: scMaxes(null), prefill: null, origin: origin || "home" };
     el("scRoot").innerHTML = `
       <div class="scalc-hero">
         <div class="scalc-hero-top">
@@ -3814,6 +3841,7 @@
 
   function renderScoreCalc(){
     const { test, prefill } = scCtx;
+    const mx = scCtx.max || scMaxes(test);
     const sub = prefill
       ? `Prefilled from your most recent released result — ${escapeHtml(testById(prefill.record.testId) ? testById(prefill.record.testId).testName : test.testName)}. Move a slider to explore.`
       : "Move the sliders to see the estimated score for a set of raw counts.";
@@ -3828,13 +3856,13 @@
       <div class="scalc-body">
         <section class="scalc-panel">
           <h2>Reading and Writing</h2>
-          ${scSliderRow("rw", 0, "Module 1", SC_MAX.rw)}
-          ${scSliderRow("rw", 1, "Module 2", SC_MAX.rw)}
+          ${scSliderRow("rw", 0, "Module 1", mx.rw[0])}
+          ${scSliderRow("rw", 1, "Module 2", mx.rw[1])}
         </section>
         <section class="scalc-panel">
           <h2>Math</h2>
-          ${scSliderRow("math", 0, "Module 1", SC_MAX.math)}
-          ${scSliderRow("math", 1, "Module 2", SC_MAX.math)}
+          ${scSliderRow("math", 0, "Module 1", mx.math[0])}
+          ${scSliderRow("math", 1, "Module 2", mx.math[1])}
         </section>
         <p class="scalc-note">Scores are estimated with this practice test's conversion table. The split between modules matters: the same section total can convert differently depending on how the correct answers fall across the two modules.${prefill ? " The marker on each slider shows your most recent released result." : ""}</p>
         ${prefill ? '<div class="scalc-actions"><button class="pill ghost" id="scResetBtn">Reset to my result</button></div>' : ""}
@@ -3850,9 +3878,9 @@
       const input = el("sc-" + key + "-" + idx);
       if(!input) return;
       const onMove = ()=>{
-        scCtx.raw[key][idx] = scClamp(input.value, SC_MAX[key]);
+        scCtx.raw[key][idx] = scClamp(input.value, mx[key][idx]);
         el("scVal-" + key + "-" + idx).innerHTML =
-          scCtx.raw[key][idx] + '<span class="scalc-of">/ ' + SC_MAX[key] + "</span>";
+          scCtx.raw[key][idx] + '<span class="scalc-of">/ ' + mx[key][idx] + "</span>";
         scPaintOut();
       };
       input.addEventListener("input", onMove);
