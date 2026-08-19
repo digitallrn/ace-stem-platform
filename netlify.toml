@@ -31,8 +31,12 @@
 
 [build]
   # archive-testdata.js --verify writes nothing; it fails the deploy when a
-  # version bump was committed without its archive step (the replaced build
-  # sits in the immediately preceding commits, so even a shallowish clone
-  # sees it) or when the archive index is stale. See that script's header.
+  # version bump was committed without its archive step, or (on a full-
+  # history checkout) when the archive index is stale or an archive's bytes
+  # stopped matching its source commit. On a SHALLOW checkout it skips the
+  # history-dependent checks rather than failing on commits it cannot see —
+  # it never reds a healthy deploy — and still catches a forgotten bump
+  # whose replaced build is inside the visible history. See the script's
+  # header for the full contract.
   command = "node archive-testdata.js --verify && node gen-config.js && node build-site.js"
   publish = "_site"

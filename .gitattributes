@@ -1,6 +1,14 @@
-# Test content is byte-exact by contract: archived builds must stay
-# byte-identical to the committed blobs they came from (archive-testdata.js
-# verifies provenance with a byte compare), so no checkout may ever smudge
-# them to CRLF. -text disables all line-ending conversion in BOTH directions
-# for these paths, on every machine, regardless of core.autocrlf.
-testdata/** -text
+# Archived builds are byte-exact by contract: archive-testdata.js verifies
+# each file byte-for-byte against the committed blob it came from, so no
+# checkout may ever smudge them to CRLF. -text disables all line-ending
+# conversion in BOTH directions for this directory, on every machine,
+# regardless of core.autocrlf.
+#
+# Deliberately NOT applied to testdata/ as a whole: the current test files
+# are written CRLF by export_to_platform.py on Windows and normalized to LF
+# blobs by autocrlf at commit — pinning them -text would flip future commits
+# to CRLF blobs and bury real content changes under whole-file EOL diffs.
+# Nothing byte-compares the current files against blobs (the archiver reads
+# them only for their testVersion string), so autocrlf's behavior is right
+# for them and load-bearing for the archive's.
+testdata/archive/** -text

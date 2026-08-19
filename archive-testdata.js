@@ -37,12 +37,15 @@
  * `node archive-testdata.js --verify` writes NOTHING and exits non-zero if
  * anything a normal run would write is missing or stale — a superseded
  * committed build with no archive file, or an out-of-date index/listing.
- * netlify.toml runs it before every deploy, so a forgotten archive run after
- * a version bump fails the build WHEN THE DEPLOY CHECKOUT CAN SEE THE
- * HISTORY (a shallow clone sees less; even depth 2 catches the common case,
- * since the replaced build sits in the immediately preceding commits). The
- * definitive step remains running this script after every export — the
- * build check is a net, not the procedure.
+ * netlify.toml runs it before every deploy. On a SHALLOW checkout (truncated
+ * history) --verify skips the provenance and index-staleness checks — they
+ * need commits the checkout cannot see, and failing on that would red every
+ * deploy for a phantom cause — and still catches a recently forgotten bump,
+ * whose replaced build sits in the visible history. A full checkout checks
+ * everything. The definitive step remains running this script after every
+ * export — the build check is a net, not the procedure. Normal (writing)
+ * mode REFUSES a shallow checkout outright: extraction and provenance need
+ * real history, so run it from a full clone (the authoring machine).
  *
  * WHEN TO RUN: after every export_to_platform.py run that changes a
  * testVersion, BEFORE committing — the replaced build is still at HEAD, so
@@ -87,6 +90,24 @@ function gitText(args){ return git(args).toString("utf8").trim(); }
 function versionOf(text){
   const m = text.match(/"testVersion":\s*"([^"]+)"/);
   return m ? m[1] : null;
+}
+
+/* A shallow checkout cannot prove provenance (the source commits are beyond
+   the clone boundary) and must not be treated as if the archives were bad. */
+let SHALLOW = false;
+try{ SHALLOW = gitText(["rev-parse", "--is-shallow-repository"]) === "true"; }
+catch(e){ /* very old git: assume full */ }
+if(SHALLOW && !VERIFY){
+  console.error("This checkout is SHALLOW — git history is truncated, so archives can be\n"
+    + "neither extracted nor provenance-verified here. Run from a full clone\n"
+    + "(the authoring machine). `--verify` does run on shallow checkouts, with\n"
+    + "the history-dependent checks skipped.");
+  process.exit(1);
+}
+if(SHALLOW){
+  console.log("NOTE: shallow checkout — provenance and index-staleness checks skipped\n"
+    + "(they need history this clone does not have); superseded-build detection\n"
+    + "covers only the visible history.");
 }
 function stripCr(buf){ return Buffer.from(buf.toString("latin1").replace(/\r\n/g, "\n"), "latin1"); }
 
@@ -151,10 +172,15 @@ for(const entry of manifest){
 /* ---- B. verify every existing archive file (nothing written yet) ---- */
 const listing = [];   // {file, id, ver, commit, retired}
 const byId = {};      // id -> [versions]
+const onDiskVers = {};   // id -> [versions] from FILENAMES, pass or fail —
+                         // a version whose file exists must never be re-
+                         // planned as "missing" (that second message would
+                         // contradict the real failure and give dead advice)
 for(const f of files){
   const m = f.match(/^(.+)@(.+)\.js$/);
   if(!m){ fail(f + ": name is not <testId>@<testVersion>.js"); continue; }
   const [, id, ver] = m;
+  (onDiskVers[id] = onDiskVers[id] || []).push(ver);
   const bytes = fs.readFileSync(path.join(ARCHIVE, f));
   const src = bytes.toString("utf8");
   const reg = src.match(/window\.__TESTDATA__\[\"([^\"]+)\"\]\s*=\s*(\{[\s\S]*\});/);
@@ -173,11 +199,18 @@ for(const f of files){
      newest such commit is "the commit it came from" */
   const src2 = (history[id] || []).find(h => Buffer.compare(h.bytes, bytes) === 0);
   if(!src2){
+    if(SHALLOW){
+      // the source commit may simply be beyond the clone boundary — count
+      // the file as present (so nothing re-plans it) and move on
+      (byId[id] = byId[id] || []).push(ver);
+      continue;
+    }
     const crlfTwin = (history[id] || []).find(h => Buffer.compare(stripCr(h.bytes), stripCr(bytes)) === 0);
     fail(f + ": bytes match NO committed build of " + id + " — archives may only come from git history."
       + (crlfTwin
         ? " (The difference is ONLY line endings: this checkout smudged the file to CRLF —"
-          + " core.autocrlf without the repo's .gitattributes. Re-materialize the file, e.g."
+          + " core.autocrlf overriding the repo's `testdata/archive/** -text` attribute, or a"
+          + " checkout that predates it. Re-materialize, e.g. delete the files and"
           + " `git checkout -- testdata/archive/`, and re-run.)"
         : ""));
     continue;
@@ -191,7 +224,10 @@ const planned = [];   // {id, ver, bytes, commit}
 for(const entry of manifest){
   const current = currentOf[entry.testId];
   if(!current) continue;               // already failed above with a clear cause
-  const seen = new Set((byId[entry.testId] || []));
+  // seed from FILENAMES on disk, not just verified files: a build whose file
+  // exists but failed verification already has its own failure line — a
+  // second "NO archive file" message would be false and its advice a no-op
+  const seen = new Set((onDiskVers[entry.testId] || []));
   for(const h of history[entry.testId]){
     if(h.ver === current || seen.has(h.ver)) continue;
     seen.add(h.ver);        // newest blob of each version wins (walk is newest-first)
@@ -260,23 +296,34 @@ renamed to match (a manual step of any rename, done alongside \`legacyIds\`).
 `;
 
 let wrote = 0;
-for(const [p, content] of [[INDEX_JS, indexJs], [ARCHIVE_MD, archiveMd]]){
-  const prev = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
-  if(prev === content) continue;
-  if(VERIFY){
-    fail(p + " is stale — run `node archive-testdata.js` and commit its output.");
-    continue;
+if(SHALLOW){
+  /* the listing's provenance column needs commits this clone cannot see, so
+     the regenerated content would be wrong — comparing against it would call
+     a perfectly current index "stale". Skipped, as announced above. */
+}else{
+  for(const [p, content] of [[INDEX_JS, indexJs], [ARCHIVE_MD, archiveMd]]){
+    const prev = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
+    if(prev === content) continue;
+    if(VERIFY){
+      fail(p + " is stale — run `node archive-testdata.js` and commit its output.");
+      continue;
+    }
+    fs.writeFileSync(p, content);
+    wrote++;
+    console.log("wrote " + p);
   }
-  fs.writeFileSync(p, content);
-  wrote++;
-  console.log("wrote " + p);
 }
 if(failures) bail();
 
+const counted = SHALLOW
+  ? Object.keys(byId).reduce((n, id) => n + byId[id].length, 0)
+  : listing.length;
 console.log("archive-testdata.js" + (VERIFY ? " --verify" : "") + ": "
-  + listing.length + " archived build(s) across " + ids.length + " test(s); "
+  + counted + " archived build(s) across " + Object.keys(byId).length + " test(s); "
   + (VERIFY
-    ? "archive complete and index/listing current."
+    ? (SHALLOW
+      ? "no forgotten bump in the VISIBLE history (shallow checkout — provenance and staleness not checkable)."
+      : "archive complete and index/listing current.")
     : planned.length + " newly extracted"
       + (planned.length ? " (" + planned.map(p => p.id + "@" + p.ver + ".js").join(", ") + ")" : "")
       + "; index/listing " + (wrote ? "updated" : "unchanged") + "."));

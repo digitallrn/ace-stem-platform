@@ -64,14 +64,17 @@ holds that build's verified offline cache keeps opening it regardless).
 
 Two nets stand behind step 2, with different coverage. The deploy runs
 `node archive-testdata.js --verify` (netlify.toml), which fails the build
-when a superseded committed build has no archive file or the index is
-stale — this is what catches a FORGOTTEN step 2, provided the deploy
-checkout can see the git history (even a shallow clone usually can: the
-replaced build sits in the immediately preceding commits). Separately,
-`build-site.js` fails on any disagreement between the index and the files
-on disk, which catches hand-edits of `testdata/archive/`. Neither net
-replaces step 2 — and a missed run is always healable after the fact by
-running the script and redeploying, since every build stays in history.
+when a superseded committed build has no archive file, and — on a checkout
+with full history — when the index/listing is stale or an archive's bytes
+stopped matching its source commit. On a SHALLOW deploy checkout the
+history-dependent checks are skipped rather than failed (they would
+otherwise red every deploy over commits the clone cannot see), so the
+forgotten-bump net there covers only the visible history — which is where
+a just-replaced build sits. Separately, `build-site.js` fails on any
+disagreement between the index and the files on disk, which catches
+hand-edits of `testdata/archive/`. Neither net replaces step 2 — and a
+missed run is always healable after the fact by running the script and
+redeploying, since every build stays in history.
 
 ---
 

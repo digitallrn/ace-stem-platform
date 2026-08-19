@@ -754,11 +754,39 @@
      by the raw one. */
   function canServeVersion(entry, version){
     if(!entry) return false;
+    /* a non-string version (hostile or corrupt record) must fail HERE: the
+       loader's checks are all strict, so a value that only string-COERCES to
+       a real version (e.g. ["2026-08-14-b"]) would otherwise open a gate the
+       load behind it can never satisfy — a button that always dead-ends */
+    if(version != null && typeof version !== "string") return false;
     const v = version || "unversioned";
     if((entry.testVersion || "unversioned") === v) return true;
     if(archivedVersions(entry.testId).indexOf(v) !== -1) return true;
+    /* the loader serves memory first, then cache — the gate must agree with
+       both, or a build the loader would serve instantly gets withdrawn */
+    const inMemory = (window.__TESTDATA__ || {})[entry.testId];
+    if(inMemory && (inMemory.testVersion || "unversioned") === v) return true;
     try{ return localStorage.getItem(TESTCACHE_PREFIX + entry.testId + ":" + v) !== null; }
     catch(e){ return false; }
+  }
+
+  /* Every build an in-progress attempt on this test is pinned to, from the
+     state the home screen already maintains (resumeRecords + the per-
+     assignment resumables). writeCachedTest consults this so no cache write
+     can evict the entry a live sitting's offline resume depends on. */
+  function resumableVersionsFor(testId){
+    const out = [];
+    const push = rec => {
+      if(rec && rec.status === "in-progress" && typeof rec.testVersion === "string"
+         && canonTestId(rec.testId) === canonTestId(testId)
+         && out.indexOf(rec.testVersion) === -1) out.push(rec.testVersion);
+    };
+    try{
+      push((state.resumeRecords || {})[canonTestId(testId)]);
+      const idx = state.assignAttempts || {};
+      Object.keys(idx).forEach(k => push(idx[k] && idx[k].resumable));
+    }catch(e){ /* never let bookkeeping break a cache write */ }
+    return out;
   }
 
   function readCachedTest(entry){
@@ -784,6 +812,14 @@
       const cur = testById(entry.testId);
       const keep = [cacheKey(entry)];
       if(cur) keep.push(cacheKey(cur));
+      /* ...and any build an IN-PROGRESS attempt on this test is pinned to: a
+         sitting that spans a version bump resumes on its archived build, and
+         its offline resume depends on that entry surviving unrelated loads
+         (a Score Details open, the calculator, a second assignment of the
+         same test). Still bounded: current + written + the handful of live
+         resumable versions. */
+      resumableVersionsFor(entry.testId).forEach(v =>
+        keep.push(TESTCACHE_PREFIX + entry.testId + ":" + v));
       const stale = [];
       for(let i = 0; i < localStorage.length; i++){
         const k = localStorage.key(i);
