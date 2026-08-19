@@ -770,14 +770,24 @@
     catch(e){ return false; }
   }
 
-  /* Every build an in-progress attempt on this test is pinned to, from the
-     state the home screen already maintains (resumeRecords + the per-
-     assignment resumables). writeCachedTest consults this so no cache write
-     can evict the entry a live sitting's offline resume depends on. */
+  /* Every build an in-progress attempt on this test is pinned to.
+     writeCachedTest consults this so no cache write can evict the entry a
+     live sitting's offline resume depends on. DEVICE-scoped, not just
+     session-scoped: the cache is shared by every session on this device — a
+     tutor's acestem-admin dashboard, a sibling signing in on a shared
+     laptop — and an eviction from any of them would break another student's
+     offline resume. So beyond the signed-in student's own state
+     (resumeRecords + per-assignment resumables — also the only source in
+     artifact mode, whose records live in async shared storage), scan the
+     device's records directly: local AND remote modes both keep every
+     attempt at devstore:attempt:<id>:* in localStorage (remote is
+     local-first). Only records of THIS test parse — a handful, and only on
+     the infrequent cache-write path. */
   function resumableVersionsFor(testId){
     const out = [];
     const push = rec => {
-      if(rec && rec.status === "in-progress" && typeof rec.testVersion === "string"
+      if(rec && rec.status === "in-progress" && (rec.resume || rec.checkpoint)
+         && typeof rec.testVersion === "string"
          && canonTestId(rec.testId) === canonTestId(testId)
          && out.indexOf(rec.testVersion) === -1) out.push(rec.testVersion);
     };
@@ -785,6 +795,13 @@
       push((state.resumeRecords || {})[canonTestId(testId)]);
       const idx = state.assignAttempts || {};
       Object.keys(idx).forEach(k => push(idx[k] && idx[k].resumable));
+      const prefixes = testIdAliases(testById(testId) || { testId: testId })
+        .map(id => "devstore:attempt:" + id + ":");
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(!k || !prefixes.some(p => k.indexOf(p) === 0)) continue;
+        try{ push(JSON.parse(localStorage.getItem(k))); }catch(e){}
+      }
     }catch(e){ /* never let bookkeeping break a cache write */ }
     return out;
   }
