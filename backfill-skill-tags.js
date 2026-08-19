@@ -51,7 +51,12 @@ const ROOT = __dirname;
 const TESTDATA = path.join(ROOT, "testdata");
 const ARCHIVE = path.join(TESTDATA, "archive");
 const MANIFEST_PATH = path.join(ARCHIVE, "skill-backfills.json");
-const REG_RE = /window\.__TESTDATA__\[\"([^\"]+)\"\]\s*=\s*(\{[\s\S]*\});\s*$/;
+/* Deliberately the SAME pattern archive-testdata.js uses to parse this exact
+   registration shape (no trailing-$ anchor) — two independently-anchored
+   copies of "what counts as a valid testdata registration" is exactly the
+   kind of drift skill-patch.js exists to prevent for the patch logic; kept
+   consistent here for the same reason even though it isn't in that module. */
+const REG_RE = /window\.__TESTDATA__\[\"([^\"]+)\"\]\s*=\s*(\{[\s\S]*\});/;
 
 function sha256(buf){ return crypto.createHash("sha256").update(buf).digest("hex"); }
 
@@ -84,11 +89,17 @@ function loadSkillVocab(){
 
 function gitHistoryFor(testId){
   const rel = "testdata/" + testId + ".js";
-  let commitsText;
-  try{
-    commitsText = cp.execFileSync("git", ["log", "--format=%H", "HEAD", "--", rel],
-      { cwd: ROOT, maxBuffer: 1 << 26 }).toString("utf8").trim();
-  }catch(e){ return []; }
+  /* NOT wrapped in try/catch — matches archive-testdata.js's own convention
+     for this identical call. `git log -- <path>` with no matching commits
+     exits 0 with empty output (not a throw), so there is no legitimate case
+     where this call fails; letting a REAL failure (git missing, corrupt
+     repo, permissions) propagate loudly is correct — swallowing it here
+     would silently return [] and make a downstream "could not resolve to a
+     real git blob" message lie about the actual cause. Only the per-commit
+     rev-parse below has an expected failure mode (a commit that deleted the
+     file), which is what that catch is scoped to. */
+  const commitsText = cp.execFileSync("git", ["log", "--format=%H", "HEAD", "--", rel],
+    { cwd: ROOT, maxBuffer: 1 << 26 }).toString("utf8").trim();
   const out = [];
   for(const c of commitsText ? commitsText.split("\n") : []){
     let blobSha;
@@ -100,7 +111,11 @@ function gitHistoryFor(testId){
   return out;
 }
 
-function isBlank(v){ return v == null || v === ""; }
+/* Matches app.js's mapDomain blank-check exactly (skill == null ||
+   String(skill).trim() === "" -> "Other") — a whitespace-only skill value
+   must be judged blank here the same way the renderer judges it blank,
+   or the two would disagree on which archived values are "already tagged". */
+function isBlank(v){ return v == null || String(v).trim() === ""; }
 
 /* ---- load inputs ---- */
 const vocab = loadSkillVocab();
@@ -117,7 +132,12 @@ if(fs.existsSync(MANIFEST_PATH)){
 
 const mappingReport = [];
 const patchPlans = [];
-let abort = null;
+/* An array, not a single slot: if two DIFFERENT files in the same run each
+   hit their own STOP condition (one a mapping mismatch, another a real
+   vocabulary conflict), a single overwritten string would only ever report
+   the last one — silently dropping the first file's diagnostic even though
+   the run still correctly aborts with nothing written either way. */
+const abortReasons = [];
 
 for(const id of Object.keys(archiveIndex).sort()){
   const currentFile = path.join(TESTDATA, id + ".js");
@@ -150,10 +170,10 @@ for(const id of Object.keys(archiveIndex).sort()){
       setMatches, orderMatches, modOrderMatches, onlyInArch, onlyInCurrent });
 
     if(!clean){
-      abort = "STOP: " + file + " does not map 1:1 onto its tagged source (setMatches=" + setMatches
+      abortReasons.push("STOP: " + file + " does not map 1:1 onto its tagged source (setMatches=" + setMatches
         + " orderMatches=" + orderMatches + " modOrderMatches=" + modOrderMatches + "). onlyInArch="
-        + JSON.stringify(onlyInArch) + " onlyInCurrent=" + JSON.stringify(onlyInCurrent);
-      continue; // keep building the report for every other file before aborting
+        + JSON.stringify(onlyInArch) + " onlyInCurrent=" + JSON.stringify(onlyInCurrent));
+      continue; // keep building the report (and checking every other file) before aborting
     }
 
     const patches = [], junkOverwrites = [], leftoverJunk = [], conflicts = [];
@@ -175,9 +195,9 @@ for(const id of Object.keys(archiveIndex).sort()){
     });
 
     if(conflicts.length){
-      abort = "STOP: " + file + " has " + conflicts.length
+      abortReasons.push("STOP: " + file + " has " + conflicts.length
         + " question(s) with an existing valid-vocabulary skill that disagrees with the tagged source — "
-        + "never overwritten: " + JSON.stringify(conflicts);
+        + "never overwritten: " + JSON.stringify(conflicts));
       continue;
     }
 
@@ -194,9 +214,9 @@ const allClean = mappingReport.length > 0 && mappingReport.every(r => r.setMatch
 console.log(mappingReport.filter(r => r.setMatches && r.orderMatches && r.modOrderMatches).length
   + "/" + mappingReport.length + " files clean on ids+ordering; all clean: " + allClean);
 
-if(abort){
-  console.error("\n" + abort);
-  console.error("\nABORTING — nothing written.");
+if(abortReasons.length){
+  console.error("\n" + abortReasons.join("\n\n"));
+  console.error("\n" + abortReasons.length + " file(s) blocked this run — ABORTING, nothing written.");
   process.exit(1);
 }
 
@@ -221,10 +241,53 @@ if(CHECK){ console.log("\n--check: no files written."); process.exit(0); }
 const historyCache = {};
 function historyFor(id){ return historyCache[id] || (historyCache[id] = gitHistoryFor(id)); }
 
+/* Kept generic on purpose (not tied to one date/commit/test-count): this
+   header is regenerated and rewritten on EVERY run that writes anything, so
+   if this tool is ever reused for a later, different backfill event, a
+   narrative pinned to today's event would then misdescribe that later run.
+   The one-time story (what happened on 2026-08-19-a, which ten forms, why)
+   belongs in the commit message, not in runtime-regenerated JSON. */
+manifest._header = {
+  purpose: "Records skill-tag backfills applied to archived testdata builds so that Score Details "
+    + "on a historical attempt can group by domain even though the attempt is pinned to a build "
+    + "from before its test's `skill` field was ever populated. Each entry lets archive-testdata.js "
+    + "--verify re-derive a backfilled file's exact bytes from its real pre-backfill git blob plus "
+    + "this recorded patch list, since a legitimate skill-only edit can never satisfy a direct byte "
+    + "match against history. Written/updated by every run of backfill-skill-tags.js that changes "
+    + "anything; see git history for which run did what and why.",
+  mappingResult: mappingReport.filter(r => r.setMatches && r.orderMatches && r.modOrderMatches).length
+    + "/" + mappingReport.length + " archived files matched their current tagged source 1:1 on "
+    + "question ids, per-module question order, and module order on THIS run — clean, no "
+    + "id-mismatch/reordering STOP condition triggered. (A test whose current build carries no "
+    + "skill tags of its own — e.g. 202603asiav1 as of 2026-08-19 — produces zero patches for its "
+    + "archives and needs no entry below; that is expected, not an omission.)",
+  vocabularySource: "skilldomains.js SKILL_DOMAINS (fine-skill strings). skill_vocabulary.py does "
+    + "not exist in this repo; a pre-existing non-blank skill value is treated as a real prior "
+    + "tagging decision (never overwritten) when it is a member of this vocabulary, and as "
+    + "corrupt/junk (overwrite allowed) when it isn't.",
+  generatedBy: "backfill-skill-tags.js"
+};
+/* Written now, before the apply loop, so the header (and any manifest
+   entries already on disk from a PRIOR run) are current even on a run that
+   ends up applying zero patches — then re-flushed after every successful
+   file below, so the manifest on disk never lags behind the archive files
+   already written when this run does apply patches. */
+fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
+
 let wrote = 0;
 for(const p of patchPlans){
   if(!p.patches.length) continue;
-  const result = applyPatches(p.archBytes, p.patches);
+
+  /* Guarded (unlike a bare call): a patch whose recorded `before` doesn't
+     byte-match what's actually in the file — corrupt data, or a future
+     patch value containing characters JSON.stringify wouldn't round-trip
+     identically — must abort with a clear cause, not an unhandled crash. */
+  let result;
+  try{ result = applyPatches(p.archBytes, p.patches); }
+  catch(e){
+    console.error("ABORT " + p.file + ": could not apply its patches (" + e.message + ")");
+    process.exit(1);
+  }
 
   const oldObj = JSON.parse(p.archBytes.toString("utf8").match(REG_RE)[2]);
   const newObj = JSON.parse(result.toString("utf8").match(REG_RE)[2]);
@@ -255,27 +318,16 @@ for(const p of patchPlans){
     patches: p.patches,
     junkOverwrites: p.junkOverwrites
   };
+  /* Flushed after EVERY successful file, not once at the end: if a LATER
+     file in this same run then hits one of the aborts above (a corrupt
+     patch, drift, or an unresolvable source blob) and the process exits,
+     every file already written to disk must already have its manifest
+     entry on disk too — otherwise archive-testdata.js --verify would find
+     bytes on disk with nothing to explain them, hard-failing files that
+     were actually written correctly, with no recovery but a manual
+     `git checkout -- testdata/archive/`. */
+  fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
   console.log("wrote " + p.file + " (" + p.patches.length + " patch(es))");
 }
 
-manifest._header = {
-  purpose: "Records skill-tag backfills applied to archived testdata builds after testVersion "
-    + "2026-08-19-a shipped skill on ten current forms (CLAUDE.md, c873f37). Each entry lets "
-    + "archive-testdata.js --verify re-derive a backfilled file's exact bytes from its real "
-    + "pre-backfill git blob plus this recorded patch list, since a legitimate skill-only edit "
-    + "can never satisfy a direct byte match against history.",
-  mappingResult: mappingReport.filter(r => r.setMatches && r.orderMatches && r.modOrderMatches).length
-    + "/" + mappingReport.length + " archived files across the tagged tests matched their current "
-    + "tagged source 1:1 on question ids, per-module question order, and module order — clean, no "
-    + "id-mismatch/reordering STOP condition triggered. (202603asiav1's one archived build has no "
-    + "tagged source — its TSV is regressed and it was excluded from the c873f37 tagging pass — so "
-    + "it produced zero patches and needed no entry here.)",
-  vocabularySource: "skilldomains.js SKILL_DOMAINS (30 fine-skill strings). skill_vocabulary.py does "
-    + "not exist in this repo; a pre-existing non-blank skill value is treated as a real prior "
-    + "tagging decision (never overwritten) when it is a member of this vocabulary, and as "
-    + "corrupt/junk (overwrite allowed) when it isn't.",
-  generatedBy: "backfill-skill-tags.js"
-};
-
-fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
 console.log("\nwrote " + wrote + " archive file(s); updated " + MANIFEST_PATH);
