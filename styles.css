@@ -109,7 +109,7 @@
     display:flex; align-items:center; justify-content:space-between; padding:18px 42px;
     position:sticky; top:0; z-index:60; background:#fff;
   }
-  .home-top .bb-logo-sm{ color:var(--cb-blue); font-size:22px; font-weight:800; display:flex; align-items:center; gap:6px; }
+  .home-top .bb-logo-sm{ color:var(--cb-blue); font-size:22px; font-weight:800; display:flex; align-items:center; gap:6px; cursor:pointer; }
   /* sync indicator (Phase H §1) — same quiet treatment as the local pill */
   .sync-dot{
     width:8px; height:8px; border-radius:50%; background:#1E7A43; flex-shrink:0;
@@ -1103,6 +1103,10 @@
     border:1.5px solid var(--cb-blue); background:#fff; color:var(--cb-blue);
   }
   .dash-rel.rel-on{ background:#E3F3E8; border-color:#1E7A43; color:#1E7A43; }
+  /* delete-an-attempt (dashboard.js deleteAttempt) — same pill, red instead
+     of blue, matching the .dstatus.to "timed-out" red already in this file */
+  .dash-rel.dash-danger{ border-color:var(--cb-red); color:var(--cb-red); }
+  .dash-rel.dash-danger:hover{ background:#FBE9EB; }
   /* Phase F §3: assignment panel */
   .assign-form{ margin-bottom:22px; }
   .af-grid{

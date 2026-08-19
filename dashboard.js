@@ -138,6 +138,14 @@ window.Dashboard = (function(){
     const n = nameFor(c);
     return n ? `<b>${esc(n)}</b> <span class="dcode">${esc(c)}</span>` : esc(c);
   }
+  /* Plain-text name+code for a <select><option> — option text can't carry
+     studentCell()'s <b>/<span> markup, so this is the same join flattened to
+     one string. Falls back to the bare code when there's no profile row. */
+  function codeOptionLabel(code){
+    const c = String(code || "?");
+    const n = nameFor(c);
+    return n ? n + " (" + c + ")" : c;
+  }
 
   function givenLabel(entry, q){
     if(entry.given === null || entry.given === undefined) return "—";
@@ -316,7 +324,7 @@ window.Dashboard = (function(){
     $("dashFilterTest").innerHTML = '<option value="">All tests</option>' +
       tests.map(t => `<option value="${escAttr(t)}">${esc((recs.find(r=>r.testId===t)||{}).testName || t)}</option>`).join("");
     $("dashFilterStudent").innerHTML = '<option value="">All students</option>' +
-      students.map(s => `<option value="${escAttr(s)}">${esc(s)}</option>`).join("");
+      students.map(s => `<option value="${escAttr(s)}">${esc(codeOptionLabel(s))}</option>`).join("");
     $("dashFilterTest").value = keepT; $("dashFilterStudent").value = keepS;
     render();
   }
@@ -721,7 +729,7 @@ window.Dashboard = (function(){
           <h3>New assignment</h3>
           <div class="af-grid">
             <label>Student codes (seen in storage)
-              <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></label>
+              <select id="afCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(codeOptionLabel(c))}</option>`).join("")}</select></label>
             <label>More codes (comma-separated)
               <span class="af-codegen">
                 <input id="afFree" placeholder="AS-XXXXXXXX, AS-XXXXXXXX" autocomplete="off">
@@ -768,7 +776,7 @@ window.Dashboard = (function(){
             <h3>Clear a student's assignments</h3>
             <p class="dash-hint">Removes every assignment for that student. Their home screen goes empty until something new is assigned; recorded attempts are untouched.</p>
             <div class="af-actions">
-              <select id="afResetCode">${assignedCodes.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select>
+              <select id="afResetCode">${assignedCodes.map(c => `<option value="${escAttr(c)}">${esc(codeOptionLabel(c))}</option>`).join("")}</select>
               <button class="pill ghost" id="afResetBtn" style="padding:9px 22px;">Clear all assignments</button>
             </div>
           </div>` : ""}
@@ -1054,6 +1062,12 @@ window.Dashboard = (function(){
     // so the tutor sees exactly what the student sat on. (reuses `test`.)
     const canOpen = source === "storage" && test && window.AppTestLoader &&
       AppTestLoader.canServe(test, r.testVersion);
+    /* Delete is finished-attempts only — never in-progress. That is what
+       guarantees it's never offered mid-sitting (a live sitting is always
+       "in-progress" until the student submits), and it's also what keeps a
+       resumable record from ever being deleted out from under a student who
+       could still resume into it. */
+    const canDelete = source === "storage" && (r.status === "completed" || r.status === "timed-out");
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
       <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
@@ -1061,7 +1075,8 @@ window.Dashboard = (function(){
       ${canOpen ? '<p><button class="dash-rel" id="dashStudentView">Open student view →</button></p>' : ""}
       ${versionNote}
       ${(r.modules||[]).map(m => `<span class="dmod">${esc(m.section)} ${esc(m.moduleLabel)}: ${mmss(m.timeSpentSeconds)} (${esc(m.endedBy||"?")})</span>`).join(" ")}
-      <div class="dash-qlist">${qRows || '<p class="dash-empty">No answers recorded.</p>'}</div>`;
+      <div class="dash-qlist">${qRows || '<p class="dash-empty">No answers recorded.</p>'}</div>
+      ${canDelete ? '<p><button class="dash-rel dash-danger" id="dashDeleteAttemptBtn">Delete this attempt</button></p>' : ""}`;
     if(canOpen){
       const btn = $("dashStudentView");
       if(btn) btn.addEventListener("click", ()=>{
@@ -1069,7 +1084,44 @@ window.Dashboard = (function(){
         if(window.AppScoreView) AppScoreView.open(r.testId, r);
       });
     }
+    if(canDelete){
+      const db = $("dashDeleteAttemptBtn");
+      if(db) db.addEventListener("click", ()=> deleteAttempt(r.attemptId));
+    }
     $("dashDetail").classList.remove("hidden");
+  }
+
+  /* Tutor-only, finished attempts only (openDetail's canDelete gate — never
+     offered while a status is "in-progress", so this never touches a live
+     sitting). The assignment this attempt belonged to stays "Completed":
+     assignRowStatus and the student-side assignmentComplete() both OR the
+     derived-from-records signal with the persisted completedAttemptId hint
+     written on the assignment row itself at finalize, and deleting an
+     attempt record never touches that row. Losing the record therefore
+     drops it from history without reopening its assignment for a retake. */
+  async function deleteAttempt(attemptId){
+    const r = recs.find(x => x.attemptId === attemptId);
+    if(!r || source !== "storage") return;
+    if(r.status !== "completed" && r.status !== "timed-out") return;   // belt and braces
+    const who = nameFor(r.student && r.student.key) || (r.student && r.student.code) || "?";
+    const msg = "Delete this attempt?\n\n" +
+      "Student: " + who + "\nTest: " + (r.testName || r.testId) + "\nDate: " + fmtDate(r.startedAt) +
+      "\n\nThis permanently removes the attempt record. Its assignment (if any) stays marked " +
+      "Completed — deleting the record does not reopen it for a retake.";
+    if(!window.confirm(msg)) return;
+    let ok = await AttemptStore.remove(attemptId);
+    if(ok && AttemptStore.isRemote()){
+      try{ await AttemptStore.adminDelete(attemptId); }
+      catch(e){ ok = false; }
+    }
+    if(!ok){
+      $("dashStatus").textContent = "Delete didn't save — storage unavailable. Try again.";
+      return;
+    }
+    openAttemptId = null;
+    $("dashDetail").classList.add("hidden");
+    $("dashStatus").textContent = "Deleted the attempt for " + who + ".";
+    loadFromStorage();
   }
 
   /* ---------- events ---------- */

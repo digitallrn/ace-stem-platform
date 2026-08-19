@@ -17,6 +17,15 @@
     timerInterval: null,
     timeRemainingSec: 0,
     timerHidden: false,
+    /* Countdown/elapsed are anchored to absolute epoch timestamps (below),
+       not decremented per tick, so a throttled hidden tab can't drift the
+       clock — see startTimer(). timerRunning is a real "a live timer owns
+       the display right now" flag; timerInterval alone doesn't work for that
+       because every clearInterval() site leaves the (now-dead) id sitting in
+       state rather than nulling it. */
+    timerRunning: false,
+    timerEndAt: null,            // countdown: epoch ms the module hits 0:00
+    timerAnchorMs: null,         // untimed: epoch ms elapsedSec=0 corresponds to
     elimMode: false,
     hlTarget: null,              // existing .hl span being edited, or null (new selection)
     hlHost: null,                // which annotatable region the popup is acting on
@@ -1634,42 +1643,87 @@
     hide("fiveMinPopup");
     el("timerBtn").classList.toggle("hidden", state.fiveMinAlerted && !state.untimed);
     showOnly("screen-test");
+    /* moduleStart BEFORE renderTest: renderQuestionView()'s Attempts.questionShown()
+       call is what stamps question 1's reading clock, and moduleStart()
+       closes whatever clock is currently open (the previous module's last
+       question, or nothing). The reverse order used to open Q1's clock and
+       then immediately close it a tick later, so Q1 always recorded ~0
+       seconds — every subsequent second on Q1 had nothing open to accumulate
+       into until the student navigated away. Revisits still sum normally;
+       this only fixes the question a module opens on. */
+    Attempts.moduleStart(mod);
     renderTest();
     openDirections();
     startTimer();
-    Attempts.moduleStart(mod);
   }
 
+  /* Countdown/elapsed are anchored to an absolute epoch timestamp and
+     RECOMPUTED from Date.now() on every tick (and on visibilitychange/focus,
+     below) rather than decremented/incremented once per tick. A hidden or
+     minimized tab's setInterval is throttled by the browser — Chrome clamps
+     a hidden tab to roughly one tick a minute after ~5 minutes hidden, a
+     behavior this project has already hit during long proof runs — so a
+     tick-counted clock silently falls behind real elapsed time: it would
+     still show minutes left (and auto-submit late) after the real limit had
+     passed. Anchoring to an end/start timestamp means whichever tick DOES
+     fire — even just one, long after the fact — recomputes the correct
+     value immediately, and a resync on tab-return closes the gap without
+     waiting for the next lucky tick. */
   function startTimer(){
     clearInterval(state.timerInterval);
-    updateTimerDisplay();
+    state.timerRunning = true;
     if(state.untimed){
       // Phase G §1: count up, never auto-submit, no five-minute alert
-      state.timerInterval = setInterval(()=>{
-        state.elapsedSec++;
-        updateTimerDisplay();
-      }, 1000);
+      state.timerAnchorMs = Date.now() - state.elapsedSec * 1000;
+      updateTimerDisplay();
+      state.timerInterval = setInterval(tickUntimedTimer, 1000);
       return;
     }
-    state.timerInterval = setInterval(()=>{
-      state.timeRemainingSec--;
-      if(state.timeRemainingSec <= 0){
-        state.timeRemainingSec = 0;
-        updateTimerDisplay();
-        clearInterval(state.timerInterval);
-        submitModule("timer-expired");   // real Bluebook auto-advances at 0:00
-        return;
-      }
-      if(state.timeRemainingSec === 300 && !state.fiveMinAlerted){
-        state.fiveMinAlerted = true;
-        state.timerHidden = false;               // force-show the timer (§6)
-        el("timerBtn").textContent = "Hide";
-        el("timerBtn").classList.add("hidden");  // Hide control gone for the rest (22)
-        show("fiveMinPopup");                    // dark alert below the timer (23)
-      }
-      updateTimerDisplay();
-    }, 1000);
+    state.timerEndAt = Date.now() + state.timeRemainingSec * 1000;
+    updateTimerDisplay();
+    state.timerInterval = setInterval(tickCountdownTimer, 1000);
   }
+  function tickUntimedTimer(){
+    state.elapsedSec = Math.max(0, Math.floor((Date.now() - state.timerAnchorMs) / 1000));
+    updateTimerDisplay();
+  }
+  function tickCountdownTimer(){
+    state.timeRemainingSec = Math.max(0, Math.round((state.timerEndAt - Date.now()) / 1000));
+    if(state.timeRemainingSec <= 0){
+      state.timeRemainingSec = 0;
+      updateTimerDisplay();
+      clearInterval(state.timerInterval);
+      state.timerRunning = false;
+      submitModule("timer-expired");   // real Bluebook auto-advances at 0:00
+      return;
+    }
+    /* <=300, not ===300: a throttled tick can jump straight past the exact
+       second (e.g. 310 -> 240 in one recompute), and the alert still has to
+       fire the first tick that notices it's due. */
+    if(state.timeRemainingSec <= 300 && !state.fiveMinAlerted){
+      state.fiveMinAlerted = true;
+      state.timerHidden = false;               // force-show the timer (§6)
+      el("timerBtn").textContent = "Hide";
+      el("timerBtn").classList.add("hidden");  // Hide control gone for the rest (22)
+      show("fiveMinPopup");                    // dark alert below the timer (23)
+    }
+    updateTimerDisplay();
+  }
+  /* Resync the instant the tab comes back, rather than waiting for the next
+     (possibly still-throttled) tick — this is what keeps the DISPLAY honest
+     immediately on return, and lets a countdown that's actually already
+     expired auto-submit right away instead of on whatever delay the browser
+     un-throttles at. A no-op whenever no live module timer owns the display
+     (home, break, review, between modules — see every timerRunning=false
+     site). */
+  function resyncTimerOnReturn(){
+    if(!state.timerRunning) return;
+    if(state.untimed) tickUntimedTimer(); else tickCountdownTimer();
+  }
+  document.addEventListener("visibilitychange", ()=>{
+    if(document.visibilityState === "visible") resyncTimerOnReturn();
+  });
+  window.addEventListener("focus", resyncTimerOnReturn);
   el("fiveMinClose").addEventListener("click", ()=> hide("fiveMinPopup"));
 
   function updateTimerDisplay(){
@@ -2376,6 +2430,7 @@
   function submitModule(endedBy){
     if(state.reviewMode) return;   // review has no submit path, by construction and by guard
     clearInterval(state.timerInterval);
+    state.timerRunning = false;
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
     hide("fiveMinPopup");
@@ -2549,6 +2604,7 @@
   async function saveAndExit(){
     if(state.reviewMode) return;   // menu item is hidden in review; nothing to save either way
     clearInterval(state.timerInterval);           // timer pauses while exited
+    state.timerRunning = false;
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
     hide("fiveMinPopup");
@@ -3521,11 +3577,17 @@
     if(sdCtx && sdCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }
     renderHome(); showOnly("screen-home");
   }
-  el("userChipBtn").addEventListener("click", ()=>{
-    // showOnly disables the chip off Score Details; belt and braces
+  /* Both the name/avatar chip and the top-left wordmark are Score Details'
+     "back" affordance — same guard, same destination, so a tutor viewing a
+     student's Score Details via "Open student view" and a student on their
+     own never land anywhere but where the chip already took them. */
+  function handleTopbarBackClick(){
+    // showOnly disables both off Score Details; belt and braces
     if(el("screen-scoredetails").classList.contains("hidden")) return;
     leaveScoreDetails();
-  });
+  }
+  el("userChipBtn").addEventListener("click", handleTopbarBackClick);
+  el("appTopLogo").addEventListener("click", handleTopbarBackClick);
   el("homeScoreCalcBtn").addEventListener("click", ()=> openScoreCalc("home"));
 
   /* Reviewing needs the questions too, so it goes through the same gate. In
@@ -3820,6 +3882,7 @@
        hl-mode class, handleSelection returns early). Clearing it here silently
        turned the mode off for a sitting the student had left it on in. */
     clearInterval(state.timerInterval);
+    state.timerRunning = false;
     // "Review" where the clock was; no Hide toggle, no five-minute machinery
     el("timerDisplay").innerHTML = '<span class="timer-review">Review</span>';
     el("timerBtn").classList.add("hidden");
