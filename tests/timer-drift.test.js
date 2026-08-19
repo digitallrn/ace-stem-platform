@@ -1,12 +1,17 @@
 /* tests/timer-drift.test.js — run: node tests/timer-drift.test.js (from the repo root)
 
    Proves the module countdown/elapsed timers are anchored to an absolute
-   epoch timestamp and recomputed from Date.now() on every tick — not
+   performance.now() timestamp and recomputed on every tick — not
    decremented/incremented once per setInterval tick — so a hidden or
    minimized tab's THROTTLED timer (Chrome clamps a hidden tab to roughly one
    tick a minute after ~5 minutes hidden; this project has already hit that
    during long proof runs) cannot make the displayed time, or the auto-submit
-   trigger, drift behind real elapsed time.
+   trigger, drift behind real elapsed time. Also proves the anchor is immune
+   to the system clock changing mid-sitting (NTP resync on wake from sleep,
+   a manual clock change) — performance.now() is monotonic and untied to
+   wall-clock, which Date.now() is not; an earlier version of this fix used
+   Date.now() and a code review caught that it traded tab-throttling drift
+   for clock-skew drift, so case 8 below pins the distinction down.
 
    The real startTimer/tickCountdownTimer/tickUntimedTimer/resyncTimerOnReturn
    are pulled out of app.js by source text (app.js is a DOM-heavy single IIFE
@@ -16,32 +21,22 @@
    `hide`, `document`/`window` listener registration, a controllable
    `setInterval`/`clearInterval` (the test decides when a "tick" fires, so it
    can simulate a throttled tab by firing far fewer ticks than real seconds
-   elapsed), a controllable `Date.now()`, and a `submitModule` spy.
+   elapsed), independently controllable `performance.now()` and `Date.now()`
+   clocks (so a wall-clock skew can be simulated without moving the monotonic
+   one), and a `submitModule` spy.
 
-   The pre-fix shape (tick-decrement, no Date.now involved at all) is pinned
-   below VERBATIM as `oldStartTimer` — same technique tests/spr-grading.test.js
-   uses for its old-vs-new comparison — so the control is self-contained: this
-   file alone shows the replaced shape failing and the current shape passing,
-   without needing a second git checkout. */
+   The pre-fix shape (tick-decrement, no clock read at all) is pinned below
+   VERBATIM as the `OLD_FNS` startTimer — same technique
+   tests/spr-grading.test.js uses for its old-vs-new comparison — so the
+   control is self-contained: this file alone shows the replaced shape
+   failing and the current shape passing, without needing a second git
+   checkout. */
 
 const fs = require("fs");
 const path = require("path");
 const repo = path.join(__dirname, "..");
 const appSrc = fs.readFileSync(path.join(repo, "app.js"), "utf8");
-
-/* ---- pull a named top-level function's source out of app.js verbatim ---- */
-function extractFn(src, name){
-  const re = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{");
-  const m = re.exec(src);
-  if(!m) throw new Error("function not found in app.js: " + name);
-  let i = m.index + m[0].length, depth = 1;
-  while(depth > 0 && i < src.length){
-    if(src[i] === "{") depth++;
-    else if(src[i] === "}") depth--;
-    i++;
-  }
-  return src.slice(m.index, i);
-}
+const { extractFn } = require("./extract-helper");
 
 const NEW_FNS = ["startTimer", "tickUntimedTimer", "tickCountdownTimer", "resyncTimerOnReturn"]
   .map(n => extractFn(appSrc, n)).join("\n\n");
@@ -91,8 +86,12 @@ function makeWorld(fnSrc){
     fiveMinAlerted: false, timerHidden: false, timerRunning: false,
     timerEndAt: null, timerAnchorMs: null
   };
-  let nowMs = 1_700_000_000_000;   // arbitrary fixed epoch, advanced by the test
-  const FakeDate = { now: () => nowMs };
+  // two INDEPENDENT clocks: nowMs backs performance.now() (what the real
+  // code reads), wallMs backs Date.now() (kept only so a test can prove the
+  // real code never reads it — see case 8, the clock-skew immunity proof)
+  let nowMs = 1_700_000_000_000, wallMs = 1_700_000_000_000;
+  const FakePerformance = { now: () => nowMs };
+  const FakeDate = { now: () => wallMs };
   let registered = null, nextId = 1;
   const fakeSetInterval = (fn) => { registered = fn; return nextId++; };
   const fakeClearInterval = () => {};
@@ -102,17 +101,18 @@ function makeWorld(fnSrc){
   const submitModule = (reason) => calls.submit.push(reason);
   const factory = new Function(
     "state", "el", "show", "hide", "document", "window",
-    "clearInterval", "setInterval", "submitModule", "updateTimerDisplay", "Date",
+    "clearInterval", "setInterval", "submitModule", "updateTimerDisplay", "Date", "performance",
     fnSrc + "\nreturn { startTimer, tickUntimedTimer, tickCountdownTimer, resyncTimerOnReturn };"
   );
   const fns = factory(
     state, fakeEl, ()=>{}, ()=>{}, { addEventListener(){} }, { addEventListener(){} },
-    fakeClearInterval, fakeSetInterval, submitModule, ()=>{}, FakeDate
+    fakeClearInterval, fakeSetInterval, submitModule, ()=>{}, FakeDate, FakePerformance
   );
   return {
     state, calls,
     fns,
-    advance(ms){ nowMs += ms; },
+    advance(ms){ nowMs += ms; wallMs += ms; },     // real elapsed time: both clocks move together
+    skewWallClock(ms){ wallMs += ms; },            // ONLY the wall clock jumps — NTP resync / manual change, no real time passed
     fireTick(){ if(registered) registered(); }
   };
 }
@@ -246,6 +246,34 @@ const check = (ok, label, detail) => {
   check(w.state.timeRemainingSec === 530,
     "pause: resumed countdown continues from where it paused, not from a drifted value",
     "remaining=" + w.state.timeRemainingSec + " (want 530)");
+}
+
+/* ============ 8. clock-skew immunity: a system clock change mid-sitting
+   (NTP resync on wake from sleep, a manual clock change) must not move the
+   countdown — only real (monotonic) elapsed time may. An earlier version of
+   this fix anchored to Date.now(), which a code review caught trading
+   tab-throttling drift for exactly this: a wall-clock jump would read as
+   elapsed test time. ============ */
+{
+  const w = makeWorld(NEW_FNS);
+  w.state.timeRemainingSec = 600;
+  w.fns.startTimer();
+  w.advance(60 * 1000);                 // 60 REAL (monotonic) seconds pass
+  w.fireTick();
+  check(w.state.timeRemainingSec === 540,
+    "clock-skew: countdown correct before any skew", "remaining=" + w.state.timeRemainingSec);
+
+  w.skewWallClock(20 * 60 * 1000);      // system clock jumps 20 min forward — no real time passed
+  w.fireTick();
+  check(w.state.timeRemainingSec === 540 && w.calls.submit.length === 0,
+    "clock-skew: a 20-minute wall-clock jump does not move the countdown or auto-submit",
+    "remaining=" + w.state.timeRemainingSec + " submits=" + JSON.stringify(w.calls.submit));
+
+  w.advance(30 * 1000);                 // another 30 REAL seconds (both clocks move together again)
+  w.fireTick();
+  check(w.state.timeRemainingSec === 510,
+    "clock-skew: countdown still tracks real elapsed time correctly after the skew",
+    "remaining=" + w.state.timeRemainingSec + " (want 510)");
 }
 
 console.log(pass ? "\nALL TIMER-DRIFT CASES PASS" : "\nFAILURES PRESENT");

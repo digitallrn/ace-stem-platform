@@ -17,15 +17,16 @@
     timerInterval: null,
     timeRemainingSec: 0,
     timerHidden: false,
-    /* Countdown/elapsed are anchored to absolute epoch timestamps (below),
-       not decremented per tick, so a throttled hidden tab can't drift the
-       clock — see startTimer(). timerRunning is a real "a live timer owns
-       the display right now" flag; timerInterval alone doesn't work for that
-       because every clearInterval() site leaves the (now-dead) id sitting in
-       state rather than nulling it. */
+    /* Countdown/elapsed are anchored to absolute performance.now() timestamps
+       (below), not decremented per tick, so a throttled hidden tab can't
+       drift the clock and a system-clock change (NTP resync, sleep/wake)
+       can't skew it either — see startTimer(). timerRunning is a real "a
+       live timer owns the display right now" flag; timerInterval alone
+       doesn't work for that because every clearInterval() site leaves the
+       (now-dead) id sitting in state rather than nulling it. */
     timerRunning: false,
-    timerEndAt: null,            // countdown: epoch ms the module hits 0:00
-    timerAnchorMs: null,         // untimed: epoch ms elapsedSec=0 corresponds to
+    timerEndAt: null,            // countdown: performance.now() ms the module hits 0:00
+    timerAnchorMs: null,         // untimed: performance.now() ms elapsedSec=0 corresponds to
     elimMode: false,
     hlTarget: null,              // existing .hl span being edited, or null (new selection)
     hlHost: null,                // which annotatable region the popup is acting on
@@ -1657,38 +1658,48 @@
     startTimer();
   }
 
-  /* Countdown/elapsed are anchored to an absolute epoch timestamp and
-     RECOMPUTED from Date.now() on every tick (and on visibilitychange/focus,
-     below) rather than decremented/incremented once per tick. A hidden or
-     minimized tab's setInterval is throttled by the browser — Chrome clamps
-     a hidden tab to roughly one tick a minute after ~5 minutes hidden, a
-     behavior this project has already hit during long proof runs — so a
-     tick-counted clock silently falls behind real elapsed time: it would
-     still show minutes left (and auto-submit late) after the real limit had
-     passed. Anchoring to an end/start timestamp means whichever tick DOES
-     fire — even just one, long after the fact — recomputes the correct
-     value immediately, and a resync on tab-return closes the gap without
-     waiting for the next lucky tick. */
+  /* Countdown/elapsed are anchored to an absolute timestamp and RECOMPUTED
+     on every tick (and on visibilitychange/focus, below) rather than
+     decremented/incremented once per tick. A hidden or minimized tab's
+     setInterval is throttled by the browser — Chrome clamps a hidden tab to
+     roughly one tick a minute after ~5 minutes hidden, a behavior this
+     project has already hit during long proof runs — so a tick-counted
+     clock silently falls behind real elapsed time: it would still show
+     minutes left (and auto-submit late) after the real limit had passed.
+     Anchoring to an end/start timestamp means whichever tick DOES fire —
+     even just one, long after the fact — recomputes the correct value
+     immediately, and a resync on tab-return closes the gap without waiting
+     for the next lucky tick.
+     performance.now(), not Date.now(): both keep advancing correctly while
+     the tab is hidden (only the setInterval callback's FIRING is throttled,
+     never the clock itself), but Date.now() is wall-clock and jumps with
+     the system clock — an NTP resync after the laptop wakes from sleep, or
+     any manual clock change, would read as elapsed test time and could
+     auto-submit a module early (or hand out unearned extra time) with no
+     tab ever having been hidden at all. performance.now() is monotonic and
+     immune to that; it resets to ~0 on a fresh page load, which is exactly
+     right here since every anchor below is set fresh in the SAME load that
+     later reads it. */
   function startTimer(){
     clearInterval(state.timerInterval);
     state.timerRunning = true;
     if(state.untimed){
       // Phase G §1: count up, never auto-submit, no five-minute alert
-      state.timerAnchorMs = Date.now() - state.elapsedSec * 1000;
+      state.timerAnchorMs = performance.now() - state.elapsedSec * 1000;
       updateTimerDisplay();
       state.timerInterval = setInterval(tickUntimedTimer, 1000);
       return;
     }
-    state.timerEndAt = Date.now() + state.timeRemainingSec * 1000;
+    state.timerEndAt = performance.now() + state.timeRemainingSec * 1000;
     updateTimerDisplay();
     state.timerInterval = setInterval(tickCountdownTimer, 1000);
   }
   function tickUntimedTimer(){
-    state.elapsedSec = Math.max(0, Math.floor((Date.now() - state.timerAnchorMs) / 1000));
+    state.elapsedSec = Math.max(0, Math.floor((performance.now() - state.timerAnchorMs) / 1000));
     updateTimerDisplay();
   }
   function tickCountdownTimer(){
-    state.timeRemainingSec = Math.max(0, Math.round((state.timerEndAt - Date.now()) / 1000));
+    state.timeRemainingSec = Math.max(0, Math.round((state.timerEndAt - performance.now()) / 1000));
     if(state.timeRemainingSec <= 0){
       state.timeRemainingSec = 0;
       updateTimerDisplay();
@@ -3582,7 +3593,12 @@
      student's Score Details via "Open student view" and a student on their
      own never land anywhere but where the chip already took them. */
   function handleTopbarBackClick(){
-    // showOnly disables both off Score Details; belt and braces
+    /* showOnly() disables the CHIP (a real <button>) off Score Details, but
+       #appTopLogo is a <div> with no disabled state, so this guard is doing
+       the actual work for both — belt and braces for the chip, the only
+       thing stopping the wordmark. The wordmark's cursor:pointer is
+       separately scoped to .on-scoredetails in styles.css so it doesn't
+       look clickable where this guard would no-op it anyway. */
     if(el("screen-scoredetails").classList.contains("hidden")) return;
     leaveScoreDetails();
   }

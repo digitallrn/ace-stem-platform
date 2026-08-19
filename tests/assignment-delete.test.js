@@ -20,33 +20,7 @@ const fs = require("fs");
 const path = require("path");
 const repo = path.join(__dirname, "..");
 const appSrc = fs.readFileSync(path.join(repo, "app.js"), "utf8");
-
-function extractFn(src, name){
-  const re = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{");
-  const m = re.exec(src);
-  if(!m) throw new Error("function not found in app.js: " + name);
-  let i = m.index + m[0].length, depth = 1;
-  while(depth > 0 && i < src.length){
-    if(src[i] === "{") depth++;
-    else if(src[i] === "}") depth--;
-    i++;
-  }
-  return src.slice(m.index, i);
-}
-function extractConst(src, name){
-  const re = new RegExp("const\\s+" + name + "\\s*=\\s*");
-  const m = re.exec(src);
-  if(!m) throw new Error("const not found in app.js: " + name);
-  let i = m.index + m[0].length, depth = 0;
-  while(i < src.length){
-    const c = src[i];
-    if(c === "(" || c === "{" || c === "[") depth++;
-    else if(c === ")" || c === "}" || c === "]") depth--;
-    else if(c === ";" && depth === 0) break;
-    i++;
-  }
-  return src.slice(m.index, i + 1);
-}
+const { extractFn, extractConst } = require("./extract-helper");
 
 const FN_NAMES = ["archivedVersions", "canServeVersion", "testById", "attemptCompleted",
   "attemptResumable", "canonTestId", "isLegacyAssign", "categoryMatchesConditions",

@@ -146,6 +146,16 @@ window.Dashboard = (function(){
     const n = nameFor(c);
     return n ? n + " (" + c + ")" : c;
   }
+  /* Delete is finished-attempts only — never in-progress. That is what
+     guarantees it's never offered mid-sitting (a live sitting is always
+     "in-progress" until the student submits), and it's also what keeps a
+     resumable record from ever being deleted out from under a student who
+     could still resume into it. One rule, shared by the button's own gate
+     (openDetail) and deleteAttempt's belt-and-braces recheck, so the two
+     can never drift apart. */
+  function isDeletableAttempt(r){
+    return source === "storage" && !!r && (r.status === "completed" || r.status === "timed-out");
+  }
 
   function givenLabel(entry, q){
     if(entry.given === null || entry.given === undefined) return "—";
@@ -1062,12 +1072,7 @@ window.Dashboard = (function(){
     // so the tutor sees exactly what the student sat on. (reuses `test`.)
     const canOpen = source === "storage" && test && window.AppTestLoader &&
       AppTestLoader.canServe(test, r.testVersion);
-    /* Delete is finished-attempts only — never in-progress. That is what
-       guarantees it's never offered mid-sitting (a live sitting is always
-       "in-progress" until the student submits), and it's also what keeps a
-       resumable record from ever being deleted out from under a student who
-       could still resume into it. */
-    const canDelete = source === "storage" && (r.status === "completed" || r.status === "timed-out");
+    const canDelete = isDeletableAttempt(r);
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
       <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
@@ -1086,33 +1091,46 @@ window.Dashboard = (function(){
     }
     if(canDelete){
       const db = $("dashDeleteAttemptBtn");
-      if(db) db.addEventListener("click", ()=> deleteAttempt(r.attemptId));
+      if(db) db.addEventListener("click", ()=> deleteAttempt(r));
     }
     $("dashDetail").classList.remove("hidden");
   }
 
-  /* Tutor-only, finished attempts only (openDetail's canDelete gate — never
-     offered while a status is "in-progress", so this never touches a live
-     sitting). The assignment this attempt belonged to stays "Completed":
-     assignRowStatus and the student-side assignmentComplete() both OR the
-     derived-from-records signal with the persisted completedAttemptId hint
-     written on the assignment row itself at finalize, and deleting an
-     attempt record never touches that row. Losing the record therefore
-     drops it from history without reopening its assignment for a retake. */
-  async function deleteAttempt(attemptId){
-    const r = recs.find(x => x.attemptId === attemptId);
-    if(!r || source !== "storage") return;
-    if(r.status !== "completed" && r.status !== "timed-out") return;   // belt and braces
+  /* Tutor-only, finished attempts only (isDeletableAttempt — never offered
+     while a status is "in-progress", so this never touches a live sitting).
+     The assignment this attempt belonged to stays "Completed": assignRowStatus
+     and the student-side assignmentComplete() both OR the derived-from-records
+     signal with the persisted completedAttemptId hint written on the
+     assignment row itself at finalize, and deleting an attempt record never
+     touches that row. Losing the record therefore drops it from history
+     without reopening its assignment for a retake.
+     Takes the record itself, not an id — the only caller (openDetail's click
+     handler) already has it, and re-deriving it via recs.find() a second time
+     was pure waste. */
+  async function deleteAttempt(r){
+    if(!isDeletableAttempt(r)) return;   // belt and braces
     const who = nameFor(r.student && r.student.key) || (r.student && r.student.code) || "?";
     const msg = "Delete this attempt?\n\n" +
       "Student: " + who + "\nTest: " + (r.testName || r.testId) + "\nDate: " + fmtDate(r.startedAt) +
       "\n\nThis permanently removes the attempt record. Its assignment (if any) stays marked " +
       "Completed — deleting the record does not reopen it for a retake.";
     if(!window.confirm(msg)) return;
-    let ok = await AttemptStore.remove(attemptId);
+    let ok = await AttemptStore.remove(r.attemptId);
     if(ok && AttemptStore.isRemote()){
-      try{ await AttemptStore.adminDelete(attemptId); }
-      catch(e){ ok = false; }
+      try{ await AttemptStore.adminDelete(r.attemptId); }
+      catch(e){
+        /* remove() above only ever touches the LOCAL cache (backend() routes
+           remote mode through localBackend, same as every other mode except
+           "artifact" — see attempts.js), and unlike a write, a failed delete
+           has no sync-queue retry behind it. Left alone, the record would be
+           gone locally but still on the server, and the next pullAllForTutor()
+           (any future loadFromStorage()) would silently resurrect it — the
+           tutor would have no way to tell the delete "took" or not. Restore
+           the local copy so local and remote agree again, matching
+           toggleRelease's rollback on the same failure shape. */
+        try{ await AttemptStore.setLocal(r.attemptId, r); }catch(e2){}
+        ok = false;
+      }
     }
     if(!ok){
       $("dashStatus").textContent = "Delete didn't save — storage unavailable. Try again.";
@@ -1120,8 +1138,14 @@ window.Dashboard = (function(){
     }
     openAttemptId = null;
     $("dashDetail").classList.add("hidden");
+    // update in place rather than a full loadFromStorage(): the row is
+    // already confirmed gone from storage above, nothing else changed, and a
+    // full reload (pullAllForTutor + a get() per attempt key in remote mode)
+    // would both be pure waste and clobber this very status line with its
+    // own "Loading…" text before the tutor ever sees it
+    recs = recs.filter(x => x.attemptId !== r.attemptId);
+    renderAll();
     $("dashStatus").textContent = "Deleted the attempt for " + who + ".";
-    loadFromStorage();
   }
 
   /* ---------- events ---------- */

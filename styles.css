@@ -109,7 +109,11 @@
     display:flex; align-items:center; justify-content:space-between; padding:18px 42px;
     position:sticky; top:0; z-index:60; background:#fff;
   }
-  .home-top .bb-logo-sm{ color:var(--cb-blue); font-size:22px; font-weight:800; display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .home-top .bb-logo-sm{ color:var(--cb-blue); font-size:22px; font-weight:800; display:flex; align-items:center; gap:6px; }
+  /* wordmark shares the chip's Score-Details-only "back" affordance — same
+     scoping as .home-top.on-scoredetails .user-chip below, so it doesn't
+     look clickable on Home/Score Calculator, where the click is a no-op */
+  .home-top.on-scoredetails .bb-logo-sm{ cursor:pointer; }
   /* sync indicator (Phase H §1) — same quiet treatment as the local pill */
   .sync-dot{
     width:8px; height:8px; border-radius:50%; background:#1E7A43; flex-shrink:0;
