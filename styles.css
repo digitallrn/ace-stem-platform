@@ -753,18 +753,27 @@
   }
   .qnav-legend span{ display:flex; align-items:center; gap:7px; }
   .lg-pin, .lg-flag{ display:flex; align-items:center; }
-  /* screenshot 15: box outlines are ink-black (dashed = unanswered, solid =
-     answered); the number is always link-blue */
+  /* CORRECTED 2026-08-19 against reference/bluebook-screenshots/44.png (Check
+     Your Work, Math) and 45.png (in-test navigator popup, R&W) — screenshot
+     15 alone read as a border-style swap (dashed unanswered / solid
+     answered, numeral always blue), which is what this rule used to encode.
+     Pixel-sampled from 44 and 45: answered is a FILL INVERSION, not a border
+     swap — solid var(--cb-blue) fill, WHITE numeral, no visible border.
+     Measured colors: the unanswered numeral ink (#324DC7) and the answered
+     fill (#324DC7) are the exact same value in BOTH references, and it's
+     already our --cb-blue token — one color, inverted between text and fill,
+     nothing new to introduce. Cells also measure perfectly square (1:1) in
+     both refs, where ours was 38x34. */
   .lg-dash{ width:15px; height:15px; border:1.5px dashed var(--ink); display:inline-block; }
   .qnav-grid{
     display:grid; grid-template-columns:repeat(10, 1fr); gap:16px 10px; padding:16px 4px 6px; justify-items:center;
   }
   .qcell{
-    position:relative; width:38px; height:34px; font-size:15px; font-weight:700; cursor:pointer;
+    position:relative; width:38px; height:38px; font-size:15px; font-weight:700; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
     border:1.5px dashed var(--ink); color:var(--cb-blue); background:#fff;
   }
-  .qcell.answered{ border:1.5px solid var(--ink); }
+  .qcell.answered{ background:var(--cb-blue); border:1.5px solid var(--cb-blue); color:#fff; }
   .qcell.current{ text-decoration:underline; text-underline-offset:2px; }
   .qcell .cellpin{
     position:absolute; top:-20px; left:50%; transform:translateX(-50%); display:flex;

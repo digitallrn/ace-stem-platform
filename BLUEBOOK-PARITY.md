@@ -548,3 +548,97 @@ constraint: the real limit is the 470px frame, not the 560px pane. The affected
 numbers were re-measured inside the real frame markup and the corrected values
 are the ones above. When measuring a figure, render the full `figureFrameHtml`
 structure — the frame is load-bearing.
+
+## Navigator squares: answered is a fill inversion, not a border swap (2026-08-19)
+
+Two new references settle this: **44.png** (Section 2, Module 1: Math — Check
+Your Work) and **45.png** (Section 1, Module 1: Reading and Writing — the
+in-test navigator popup, open on question 27). Pixel-sampled with PIL directly
+against the PNGs (no eyeballing — see method note at the end of this section).
+
+**The bug.** Our `.qcell.answered` rule only swapped the border style
+(`dashed` → `solid`, both `var(--ink)`), leaving background `#fff` and text
+`var(--cb-blue)` unchanged for BOTH states — collapsing answered/unanswered
+onto a single visual channel (border) instead of the fill inversion real
+Bluebook uses. The stale in-code comment even recorded the wrong reading
+("screenshot 15: box outlines are ink-black... the number is always
+link-blue") — that conclusion came from a screenshot that didn't show a
+genuinely answered cell clearly enough to catch the fill change.
+
+**Measured, from squares 3/4 in 44.png and square 1 in 45.png (both answered,
+solid-filled):**
+
+| property | measured | ours (before) | ours (after) |
+|---|---|---|---|
+| answered fill | `rgb(50,77,199)` = **#324DC7** | `#fff` (unchanged) | `var(--cb-blue)` = `#324DC7` |
+| answered numeral | white | `var(--cb-blue)` (unchanged) | `#fff` |
+| answered border | none visible (flat fill edge, corner scan shows a sharp jump straight from `#fff` to the fill color with no intermediate stroke pixels) | `1.5px solid var(--ink)` | `1.5px solid var(--cb-blue)` (same as fill — a solid border-box footprint match, not a visible line) |
+| unanswered numeral | `rgb(50,77,199)` = **#324DC7** | `var(--cb-blue)` | unchanged (already correct) |
+| unanswered border | dashed, reads as pure black `(0,0,0)` at full opacity in the dash segments | `1.5px dashed var(--ink)` (`#1E1E1E`) | unchanged — the delta (`#000` vs `#1E1E1E`) is a few RGB units, inside our existing "ink" convention used everywhere else in the test chrome, and not worth a one-off token |
+| corner radius | 0 (sharp) in both states, both surfaces | 0 (unchanged) | unchanged — already correct |
+
+**The one color is doing double duty by design**: the unanswered numeral ink
+and the answered fill measure as the *exact same value*, #324DC7, in both
+references — and that value is already our `--cb-blue` token, so nothing new
+was introduced. Fixed by inverting fill/text between the two states instead of
+only swapping the border. Applies to `.qcell` in `styles.css`, which both
+surfaces already share (`buildQnavGrid()` in app.js builds `#qnavGrid` — the
+in-test popup — and `#reviewGrid` — Check Your Work — through the same
+function and the same class names), so one CSS change reaches both.
+
+**Square aspect ratio.** Both references measure the square as **1:1** — 44.png
+(Check Your Work): fill bbox 120×120 raw px. 45.png (in-test popup): fill bbox
+36×36 raw px. Ours was `width:38px;height:34px` — not square. Fixed to
+`38px × 38px` (kept the existing width, since it already fits two-digit
+numerals like "27"; only height changed) rather than adopting either
+reference's absolute px, for the reason in the next paragraph.
+
+**Deferred, not applied — differentiated size between the two surfaces.**
+44.png is 3840×2016 (Check Your Work); 45.png is 1920×1140 (the popup). If
+both screenshots share one capture DPI, the ratio of their raw square sizes
+(120:36 ≈ 3.3:1) is directly comparable and says Check Your Work's squares are
+markedly larger than the popup's. But nothing establishes the two screenshots
+were captured at the *same* DPI — worst case (44 at 2x, 45 at 1x) the honest
+comparison is 60 logical px vs 36 logical px, still different but a smaller
+gap. Either way the direction is consistent (review-page squares read larger
+than popup squares) and our current CSS uses one shared `.qcell` size for
+both surfaces with no differentiation. **Not changed here** — the scale
+uncertainty means picking an absolute target would be inventing a value this
+file's own rule says not to invent. If this is worth chasing, the needed
+capture is two screenshots of the SAME known-DPI session showing both
+surfaces, or a reference screenshot with a scale bar / known-size UI element
+common to both.
+
+**Legend and pin direction — already correct, no change.** The task brief that
+prompted this measurement pass described the current-question marker as "a
+location-pin marker *below* the square." The reference shows the opposite:
+in 45.png, the pin sits **above** cell 27 (current), point-down, touching the
+cell's top edge — which is what `.qcell .cellpin{top:-20px}` already does.
+Trusted the image over the prose per this file's own rule (see the
+2026-08-08 correction above) — no change made. Also already correct: the
+review-page legend shows only Unanswered + For Review (44.png, no Current —
+there's no "current" concept on that page) and the in-test popup legend shows
+Current + Unanswered + For Review (45.png) — both match the static markup in
+`index.html`/`app.js` exactly as shipped. Flag icon color measured at 44.png's
+legend swatch: `rgb(193,49,69)` ≈ **#C13145**, 1-4 RGB units from our shipped
+`#C23349` — inside antialiasing/PNG-compression tolerance, not changed.
+
+**Verified live** (not just measured): built a fresh attempt, answered Q1,
+flagged Q2 and left it as the current question, and read the popup's computed
+styles directly — `.qcell.answered` on cell 1 renders `background:#324DC7`,
+`color:#fff`, `38px×38px`; cell 2 carries `.current` (underline) with both a
+`.cellpin` and a `.cellflag` present in the same cell, independent of the fill
+state. Repeated on Check Your Work (`#reviewGrid`): same answered-fill
+result, and cell 2 there carries a flag with *no* pin (the review page has no
+current-question concept) — confirming the three dimensions render
+independently on both surfaces, and that whichever dimensions apply compose
+without fighting each other.
+
+**Method note on the pixel measurements above.** Both PNGs were loaded with
+Pillow and sampled programmatically (`elementFromPoint`-style bounding-box
+scans for fill regions, per-pixel color reads for the fill/numeral/border
+colors, and column/row scans across the dashed border to read its on/off
+segments) rather than eyeballed from a downscaled preview — the same
+discipline this file's fraction-sizing sections established for `window.fmt`
+measurements. Colors are reported as read; nothing here was rounded to a
+"nice" hex value that wasn't actually sampled.

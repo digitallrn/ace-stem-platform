@@ -1808,7 +1808,30 @@
     hide("dirOverlay");
     el("dirToggle").classList.remove("open");
   }
-  el("dirOverlay").addEventListener("click", e=>{ if(e.target.id === "dirOverlay") closeDirections(); });
+  /* Dismissible like any dropdown: a click anywhere outside the panel closes
+     it, not just a click on dir-overlay's own DOM — which only spans #tBody
+     (position:absolute inside it) and so never covered the header or footer,
+     leaving Directions the one overlay in this file that a click "elsewhere
+     on the page" couldn't dismiss.
+     MUST be "click", not "mousedown", and this is deliberate, not copied from
+     the moreMenu/hlPopup mousedown pattern below: dirOverlay is a full-pane
+     scrim laid OVER the live question/choices in #paneRight, not a small
+     anchored popup like those two. Closing on mousedown hides the scrim
+     mid-gesture, so the browser re-hit-tests the still-pending mouseup/click
+     against whatever is now exposed underneath — dispatching mousedown ->
+     mouseup -> click at a point over an answer choice, with Directions open
+     and covering it, measurably SELECTED that choice once the scrim closed
+     out from under the gesture. "click" avoids this: the browser resolves
+     the click's target while the scrim is still up (nothing has closed yet),
+     and closeDirections() only runs once that dispatch is already done, so
+     there is no exposed target left for this gesture to fall through to.
+     e.target.closest over an id check so the exemption covers descendants;
+     the toggle button stays exempt so clicking it while open still runs its
+     own single toggle-close instead of this listener closing it first. */
+  document.addEventListener("click", e=>{
+    if(!el("dirOverlay").classList.contains("hidden") &&
+       !e.target.closest("#dirPanel") && !e.target.closest("#dirToggle")) closeDirections();
+  });
 
   /* ================= RENDER TEST ================= */
   function renderTest(){
@@ -2272,12 +2295,14 @@
   let navLocked = false;
   function navigate(fn){
     if(navLocked) return;                       // discarded, not queued
-    /* Any navigation dismisses the question navigator. The footer now sits above
-       the navigator's scrim, so Next and Back are reachable while it is open —
-       without this they would move the student on and leave the popup hanging
-       over the new screen. Together the two changes make one click do what one
-       click should: dismiss AND advance. Cheap no-op when it is already shut. */
+    /* Any navigation dismisses the question navigator AND Directions. The
+       footer now sits above both overlays' scrims, so Next and Back are
+       reachable while either is open — without this they would move the
+       student on and leave the popup/dropdown hanging over the new screen.
+       Together the two changes make one click do what one click should:
+       dismiss AND advance. Cheap no-op when already shut. */
     closeQnav();
+    closeDirections();
     navLocked = true;
     const back = el("btnBack"), next = el("btnNext");
     back.disabled = next.disabled = true;
