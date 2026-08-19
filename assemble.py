@@ -43,6 +43,22 @@ LOCAL_JS_RE = re.compile(r'<script src="(?!https?://)([^"]+)"></script>')
 # skips — this list is the explicit, self-documenting guard.
 SKIP_INLINE = {"config.js"}
 
+# The archive index must not ride into the single file AS-IS: archived builds
+# themselves are never inlined (only manifest-listed current tests are), and a
+# single self-contained file has no origin to fetch them from — so an inlined
+# real index would advertise builds the artifact can never serve, turning the
+# designed honest "unavailable" state into an endless connection-blaming
+# Retry. Inline an EMPTY index instead: every superseded-version attempt gets
+# the same honest pre-archive labels, and the artifact still never fetches.
+REPLACE_INLINE = {
+    "testdata/archive/index.js":
+        "<script>\n/* single-file build: archived builds cannot be fetched "
+        "(no origin), so the\n   archive index is deliberately empty — see "
+        "assemble.py. Superseded-version\n   attempts show their honest "
+        "\"unavailable\" state here. */\nwindow.TEST_ARCHIVE_INDEX = {};\n"
+        "</script>"
+}
+
 # Anything matching these in the output means a real secret VALUE leaked into
 # the build. Deliberately matches values, not identifiers: attempts.js legitimately
 # mentions SUPABASE_URL / SUPABASE_ANON_KEY when reading window.ACESTEM_CONFIG.
@@ -101,6 +117,8 @@ def inline(html, base_dir):
         name = m.group(1)
         if name in SKIP_INLINE:
             return m.group(0)            # leave the tag; do not read the file
+        if name in REPLACE_INLINE:
+            return REPLACE_INLINE[name]  # substitute, never read the file
         path = base_dir / name
         if not path.exists():
             raise FileNotFoundError(f"assemble.py: missing {path} (referenced in index.html)")

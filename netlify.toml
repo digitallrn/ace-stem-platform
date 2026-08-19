@@ -30,5 +30,9 @@
 # build-site.js will then fail on the missing config.js, which is intentional.
 
 [build]
-  command = "node gen-config.js && node build-site.js"
+  # archive-testdata.js --verify writes nothing; it fails the deploy when a
+  # version bump was committed without its archive step (the replaced build
+  # sits in the immediately preceding commits, so even a shallowish clone
+  # sees it) or when the archive index is stale. See that script's header.
+  command = "node archive-testdata.js --verify && node gen-config.js && node build-site.js"
   publish = "_site"

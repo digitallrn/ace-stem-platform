@@ -58,11 +58,20 @@ Completed attempts open Review Mode — and in-progress sittings resume — on
 the exact build they were sat on, served from the archive once the current
 file has moved past it. A bump therefore no longer revokes anyone's review,
 and releasing scores before or after a bump makes no difference to review.
-An attempt on a version the archive genuinely lacks (only the pre-archive
-single-file era qualifies) gets an honest "this version isn't available"
-screen, never mismatched content. `build-site.js` fails the deploy if the
-archive index and the files on disk disagree, so a missed step 2 is a red
-build, not a student-facing hole.
+An attempt on a version the archive lacks gets an honest "this version
+isn't available" screen, never mismatched content (a device that already
+holds that build's verified offline cache keeps opening it regardless).
+
+Two nets stand behind step 2, with different coverage. The deploy runs
+`node archive-testdata.js --verify` (netlify.toml), which fails the build
+when a superseded committed build has no archive file or the index is
+stale — this is what catches a FORGOTTEN step 2, provided the deploy
+checkout can see the git history (even a shallow clone usually can: the
+replaced build sits in the immediately preceding commits). Separately,
+`build-site.js` fails on any disagreement between the index and the files
+on disk, which catches hand-edits of `testdata/archive/`. Neither net
+replaces step 2 — and a missed run is always healable after the fact by
+running the script and redeploying, since every build stays in history.
 
 ---
 

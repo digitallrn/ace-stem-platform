@@ -102,10 +102,14 @@ testdata/<testId>.js      the full test; registers itself into
 testdata/archive/<testId>@<testVersion>.js
                           a superseded build, byte-identical to the committed
                           file it once was. Lazy exactly like current tests,
-                          and never inlined into dist/. Review Mode and
-                          resume load these so an attempt opens on the EXACT
-                          build it was sat on; see ARCHIVE.md there for the
-                          per-file source commits.
+                          and never inlined into dist/ — assemble.py inlines
+                          an EMPTY archive index instead, so the single-file
+                          build honestly reports superseded versions as
+                          unavailable rather than advertising builds it has
+                          no origin to fetch. Review Mode and resume load
+                          these so an attempt opens on the EXACT build it was
+                          sat on; see ARCHIVE.md there for the per-file
+                          source commits.
 ```
 
 - **`testId` is internal.** It follows the source-PDF convention
@@ -123,12 +127,16 @@ testdata/archive/<testId>@<testVersion>.js
   (ATTEMPTS-SPEC §9). Version-gating is per test. **After any bump, run
   `node archive-testdata.js` before committing** — it pins the replaced build
   into `testdata/archive/` (idempotent, safe to re-run; the build it replaces
-  is still at HEAD, and stays recoverable from history even if you forget).
-  `build-site.js` fails the deploy if the archive index and files drift.
-  Because completed attempts review — and in-progress sittings resume —
-  against their pinned build, **a bump no longer revokes review**, so
-  release-before-bump ordering is no longer load-bearing for review (the
-  release flow itself is unchanged).
+  is still at HEAD, and stays recoverable from history even if you forget —
+  a later run heals a missed archive retroactively). Two nets behind the
+  procedure: the deploy runs `node archive-testdata.js --verify`
+  (netlify.toml), which fails the build on a superseded committed build with
+  no archive or a stale index — provided the deploy checkout can see the
+  history; and `build-site.js` fails on index-vs-files drift (hand-edits of
+  `testdata/archive/`). Because completed attempts review — and in-progress
+  sittings resume — against their pinned build, **a bump no longer revokes
+  review**, so release-before-bump ordering is no longer load-bearing for
+  review (the release flow itself is unchanged).
 - **Offline:** content is cached in `localStorage` under
   `acestem:testcache:<testId>:<testVersion>` the moment it loads, so a student
   who drops connectivity mid-sitting keeps answering, and a reload restores

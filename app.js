@@ -740,15 +740,25 @@
     const list = ix && ix[testId];
     return Array.isArray(list) ? list : [];
   }
-  /* Can this build serve `version` of the entry's test — as the current file
-     or from the archive? `version` is record-derived and therefore untrusted:
-     it is only ever compared against our own trusted strings, and the pinned
-     loader below fetches by the MATCHED trusted value, never by the raw one. */
+  /* Can this build serve `version` of the entry's test — as the current file,
+     from the archive, or from this device's own verified cache? The cache
+     clause keeps the gate in agreement with the loader's cache-first pinned
+     path: a build this device already holds (version-verified when it was
+     cached) stays openable even when the archive index failed to load this
+     session or a later deploy lost its listing. Existence of the exact
+     versioned key is enough here — the loader re-validates the content on
+     the actual load and falls through honestly if it is corrupt.
+     `version` is record-derived and therefore untrusted: it is only ever
+     compared against our own trusted strings or used as a storage-key lookup,
+     and the pinned loader below fetches by the MATCHED trusted value, never
+     by the raw one. */
   function canServeVersion(entry, version){
     if(!entry) return false;
     const v = version || "unversioned";
     if((entry.testVersion || "unversioned") === v) return true;
-    return archivedVersions(entry.testId).indexOf(v) !== -1;
+    if(archivedVersions(entry.testId).indexOf(v) !== -1) return true;
+    try{ return localStorage.getItem(TESTCACHE_PREFIX + entry.testId + ":" + v) !== null; }
+    catch(e){ return false; }
   }
 
   function readCachedTest(entry){
@@ -762,11 +772,22 @@
   }
   function writeCachedTest(entry, test){
     try{
-      // drop other versions of this same test so the cache can't grow forever
+      /* Drop other versions of this same test so the cache can't grow forever
+         — EXCEPT the current manifest build's entry when writing an archived
+         one. The current build's cache is load-bearing: it is what lets an
+         in-progress sitting resume offline, so opening an old attempt's
+         review must never evict it. At most two builds per test persist
+         (current + the archived one last opened); a CURRENT write still
+         evicts everything else, so an archived review may need one refetch
+         after later current-version activity — bounded, and never touching a
+         live sitting. */
+      const cur = testById(entry.testId);
+      const keep = [cacheKey(entry)];
+      if(cur) keep.push(cacheKey(cur));
       const stale = [];
       for(let i = 0; i < localStorage.length; i++){
         const k = localStorage.key(i);
-        if(k && k.indexOf(TESTCACHE_PREFIX + entry.testId + ":") === 0 && k !== cacheKey(entry)) stale.push(k);
+        if(k && k.indexOf(TESTCACHE_PREFIX + entry.testId + ":") === 0 && keep.indexOf(k) === -1) stale.push(k);
       }
       stale.forEach(k => localStorage.removeItem(k));
       /* Serialise ONLY the content fields. Anything another module hangs off
@@ -3858,9 +3879,14 @@
   }
 
   /* Most recent attempt this student may actually see: completed AND released
-     AND version-matched — the identical gate Score Details and the Past cards
-     apply. An in-progress or unreleased attempt is invisible here, exactly as
-     it is everywhere else in the student app. */
+     AND sat on the CURRENT build — deliberately stricter than Score Details
+     and the Past cards, which since the archive can also open superseded
+     builds (canServeVersion). The calculator grades against the current
+     build's curve (openScoreCalc loads unpinned), so prefilling from an
+     archived-version attempt would mix that record's raws with a curve it
+     was not sat on. Archived attempts open exactly one tap away in Score
+     Details instead. An in-progress or unreleased attempt is invisible here,
+     exactly as it is everywhere else in the student app. */
   function scPrefillSource(){
     const list = (state.pastAttempts || []).filter(r => {
       if(r.released !== true) return false;

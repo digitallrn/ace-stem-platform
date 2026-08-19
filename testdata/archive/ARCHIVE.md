@@ -25,3 +25,8 @@ deliberately not archived: they registered a different global
 (`window.TEST_DATA`) under a different architecture, and no production
 attempt on this site references them. Such an attempt would show the app's
 honest "earlier version isn't available" state.
+
+Renaming a `testId` does NOT rename its archives: records resolve through
+`legacyIds`, but the archive index is keyed by filename id, so archived
+builds of a renamed test stop being offered until the archive files are
+renamed to match (a manual step of any rename, done alongside `legacyIds`).

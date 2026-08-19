@@ -1,0 +1,6 @@
+# Test content is byte-exact by contract: archived builds must stay
+# byte-identical to the committed blobs they came from (archive-testdata.js
+# verifies provenance with a byte compare), so no checkout may ever smudge
+# them to CRLF. -text disables all line-ending conversion in BOTH directions
+# for these paths, on every machine, regardless of core.autocrlf.
+testdata/** -text
