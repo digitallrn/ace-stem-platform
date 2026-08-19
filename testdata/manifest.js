@@ -9,7 +9,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202606asiav1",
   "testName": "2026 June Asia v1",
-  "testVersion": "2026-08-09-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -31,7 +31,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202606asiav2",
   "testName": "2026 June Asia v2",
-  "testVersion": "2026-08-09-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -51,7 +51,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202511asiav1",
   "testName": "2025 November Asia v1",
-  "testVersion": "2026-08-05-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -91,7 +91,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202510usv3",
   "testName": "2025 October US v3",
-  "testVersion": "2026-08-09-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -111,7 +111,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202508asiav1",
   "testName": "2025 August Asia v1",
-  "testVersion": "2026-08-11-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -131,7 +131,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202509asiav4",
   "testName": "2025 September Asia v4",
-  "testVersion": "2026-08-13-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -151,7 +151,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202506asiav2",
   "testName": "2025 June Asia v2",
-  "testVersion": "2026-08-13-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -171,7 +171,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202503usv1",
   "testName": "2025 March US v1",
-  "testVersion": "2026-08-14-c",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -191,7 +191,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202503usv2",
   "testName": "2025 March US v2",
-  "testVersion": "2026-08-15-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -211,7 +211,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202509asiav2",
   "testName": "2025 September Asia v2",
-  "testVersion": "2026-08-17-a",
+  "testVersion": "2026-08-19-a",
   "moduleCount": 4,
   "questionCount": 97,
   "sections": [
