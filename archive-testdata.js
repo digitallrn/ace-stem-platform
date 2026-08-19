@@ -63,12 +63,42 @@
 const fs = require("fs");
 const path = require("path");
 const cp = require("child_process");
+const { applyPatches } = require("./skill-patch.js");
 
 const VERIFY = process.argv.indexOf("--verify") !== -1;
 const TESTDATA = "testdata";
 const ARCHIVE = path.join(TESTDATA, "archive");
 const INDEX_JS = path.join(ARCHIVE, "index.js");
 const ARCHIVE_MD = path.join(ARCHIVE, "ARCHIVE.md");
+const BACKFILL_MANIFEST = path.join(ARCHIVE, "skill-backfills.json");
+const BACKFILL_MANIFEST_REL = BACKFILL_MANIFEST.split(path.sep).join("/");
+
+/* A backfilled archive (CLAUDE.md's skill-tag backfill) was DELIBERATELY
+   mutated after the fact, so its bytes will never match a raw historical
+   blob directly — the tag never shipped bundled with that old testVersion in
+   any real commit. Section B below falls back to this manifest ONLY when
+   the direct byte match fails, and only to re-derive: find the file's real
+   pre-backfill blob in `history`, re-apply the recorded patches with the
+   SAME function that produced the file, and require an EXACT byte match to
+   what's on disk. That keeps byte-identity as the actual invariant — it
+   just verifies a reproducible derivation instead of a raw blob.
+   Any problem with the manifest itself is a hard FAIL for every file that
+   needs it, never a silent pass — absence of proof is not proof of
+   innocence: */
+let backfillFiles = {};
+let backfillManifestError = null;
+if(fs.existsSync(BACKFILL_MANIFEST)){
+  try{
+    const parsed = JSON.parse(fs.readFileSync(BACKFILL_MANIFEST, "utf8"));
+    if(!parsed || typeof parsed !== "object" || !parsed.files || typeof parsed.files !== "object"){
+      backfillManifestError = BACKFILL_MANIFEST_REL + " is malformed (no \"files\" object)";
+    } else {
+      backfillFiles = parsed.files;
+    }
+  }catch(e){
+    backfillManifestError = BACKFILL_MANIFEST_REL + " is not valid JSON: " + e.message;
+  }
+}
 
 let failures = 0;
 function fail(msg){ console.error("FAIL  " + msg); failures++; }
@@ -197,7 +227,7 @@ for(const f of files){
     fail(f + ": " + ver + " is the CURRENT version of " + id + " — an archive must be superseded");
   /* provenance: the bytes must equal some committed blob of this test —
      newest such commit is "the commit it came from" */
-  const src2 = (history[id] || []).find(h => Buffer.compare(h.bytes, bytes) === 0);
+  let src2 = (history[id] || []).find(h => Buffer.compare(h.bytes, bytes) === 0);
   if(!src2){
     if(SHALLOW){
       // the source commit may simply be beyond the clone boundary — count
@@ -205,15 +235,60 @@ for(const f of files){
       (byId[id] = byId[id] || []).push(ver);
       continue;
     }
-    const crlfTwin = (history[id] || []).find(h => Buffer.compare(stripCr(h.bytes), stripCr(bytes)) === 0);
-    fail(f + ": bytes match NO committed build of " + id + " — archives may only come from git history."
-      + (crlfTwin
-        ? " (The difference is ONLY line endings: this checkout smudged the file to CRLF —"
-          + " core.autocrlf overriding the repo's `testdata/archive/** -text` attribute, or a"
-          + " checkout that predates it. Re-materialize, e.g. delete the files and"
-          + " `git checkout -- testdata/archive/`, and re-run.)"
-        : ""));
-    continue;
+    /* Not a direct match — a legitimate skill-tag backfill (CLAUDE.md) can
+       never be one, since the tag never shipped bundled with this old
+       testVersion in any real commit. Try re-deriving it from the manifest
+       before declaring the archive unprovenanced. `attempted` tracks whether
+       a specific fail() already ran for this file, so a broken manifest or a
+       bad entry reports its OWN cause once instead of also printing the
+       generic "no committed build" message underneath it. A file with no
+       manifest entry at all (the common case: not a backfill) still falls
+       through to that generic message, unchanged from before. */
+    let derivedOk = false, attempted = false;
+    if(backfillManifestError){
+      attempted = true;
+      fail(f + ": bytes match no committed build of " + id + ", and " + BACKFILL_MANIFEST_REL
+        + " cannot be trusted to explain why (" + backfillManifestError + ")");
+    } else {
+      const bf = backfillFiles[f];
+      if(bf){
+        attempted = true;
+        if(!Array.isArray(bf.patches) || !bf.patches.length){
+          fail(f + ": has a " + BACKFILL_MANIFEST_REL + " entry with no patches recorded — nothing to re-derive from");
+        } else if(typeof bf.sourceBlobSha !== "string" || !bf.sourceBlobSha){
+          fail(f + ": " + BACKFILL_MANIFEST_REL + " entry is missing sourceBlobSha");
+        } else {
+          const bfSrc = (history[id] || []).find(h => h.blobSha === bf.sourceBlobSha);
+          if(!bfSrc){
+            fail(f + ": " + BACKFILL_MANIFEST_REL + "'s recorded sourceBlobSha is not real git history for " + id);
+          } else {
+            let derived = null;
+            try{ derived = applyPatches(bfSrc.bytes, bf.patches); }
+            catch(e){ fail(f + ": could not re-derive from " + BACKFILL_MANIFEST_REL + " (" + e.message + ")"); }
+            if(derived && Buffer.compare(derived, bytes) === 0){
+              src2 = bfSrc;
+              derivedOk = true;
+            } else if(derived){
+              fail(f + ": backfilled file does not match its recorded derivation in "
+                + BACKFILL_MANIFEST_REL + " — investigate before deploying");
+            }
+          }
+        }
+      }
+    }
+    if(!derivedOk){
+      if(!attempted){
+        const crlfTwin = (history[id] || []).find(h => Buffer.compare(stripCr(h.bytes), stripCr(bytes)) === 0);
+        fail(f + ": bytes match NO committed build of " + id + " — archives may only come from git history."
+          + (crlfTwin
+            ? " (The difference is ONLY line endings: this checkout smudged the file to CRLF —"
+              + " core.autocrlf overriding the repo's `testdata/archive/** -text` attribute, or a"
+              + " checkout that predates it. Re-materialize, e.g. delete the files and"
+              + " `git checkout -- testdata/archive/`, and re-run.)"
+            : ""));
+      }
+      continue;
+    }
   }
   listing.push({ file: f, id, ver, commit: src2.commit, retired });
   (byId[id] = byId[id] || []).push(ver);
