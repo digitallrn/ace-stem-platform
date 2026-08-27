@@ -267,5 +267,27 @@ window.TEST_MANIFEST = [
    }
   ],
   "legacyIds": []
+ },
+ {
+  "testId": "202608intv1",
+  "testName": "2026 August International v1",
+  "testVersion": "2026-08-27-a",
+  "moduleCount": 4,
+  "questionCount": 98,
+  "sections": [
+   {
+    "section": "Reading and Writing",
+    "moduleCount": 2,
+    "questionCount": 54
+   },
+   {
+    "section": "Math",
+    "moduleCount": 2,
+    "questionCount": 44
+   }
+  ],
+  "legacyIds": [
+   "202608asiav1"
+  ]
  }
 ];
