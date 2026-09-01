@@ -315,7 +315,7 @@
 
   /* Submitted confirmation (Phase D, score-visibility (b); language from
      screenshot 1's "Your answers have been submitted!") */
-  #screen-submitted{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px 20px; }
+  #screen-submitted, #screen-setdone{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px 20px; }
   .submitted-card{
     max-width:560px; text-align:center; border:1px solid var(--line); border-radius:16px;
     padding:48px 44px 40px; box-shadow:0 4px 20px rgba(0,0,0,.08);
@@ -1386,3 +1386,17 @@
     .sd-table th, .sd-table td{ padding:3px 6px; }
     .sd-ks-grid{ gap:8px 24px; }
   }
+
+  /* ============ Custom practice sets (2026-08-31) ============ */
+  /* set-completion screen — the whole "results" surface for a set: raw N/M,
+     no scaled anything (contract 5) */
+  .setdone-score{ margin:6px 0 14px; }
+  .setdone-num{ font-size:44px; font-weight:800; color:var(--ink); }
+  .setdone-of{ font-size:18px; color:var(--ink-soft); }
+
+  /* set-review notices (contract 7): drift = the form moved on; err = the
+     recorded question can't be resolved at all. Rendered only in review. */
+  .rv-notice{ margin:0 0 14px; padding:10px 14px; border-radius:8px;
+    font-size:13.5px; line-height:1.5; border:1px solid; }
+  .rv-notice.warn{ background:#FFF7E0; border-color:#E3C55A; color:#6b5200; }
+  .rv-notice.err{ background:#FDEBEC; border-color:#E39A9F; color:#8f1f27; }

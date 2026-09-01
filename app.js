@@ -60,7 +60,7 @@
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-scoredetails","screen-scorecalc","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-setdone","screen-scoredetails","screen-scorecalc","screen-dashboard"];
   // body-level overlays that live outside the SCREENS set — a screen change
   // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
   // them floating as a full-screen click blocker over the next screen
@@ -497,7 +497,11 @@
     const interrupted = crashResumeCandidate();
     if(interrupted){
       renderHome();                   // so Back-from-test has a home to return to
-      if(resumeTestFlow(interrupted.test, interrupted.record)) return true;
+      if(interrupted.setRecord){
+        // interrupted practice-set sitting: same crash-resume contract, its
+        // own restore path (content resolves from the record's snapshot)
+        if(resumeSetFlow(interrupted.setRecord)) return true;
+      } else if(resumeTestFlow(interrupted.test, interrupted.record)) return true;
       // a corrupt or unusable checkpoint falls through to the In Progress card
       // rather than dropping the student into a blank test
     }
@@ -516,6 +520,17 @@
       const cp = rec.checkpoint;
       if(!cp || typeof cp !== "object") continue;
       if(typeof cp.moduleIndex !== "number" || cp.moduleIndex < 0) continue;
+      /* Practice-set records: one synthetic module, no manifest entry to
+         range-check against. The shared blob checks below still apply, so
+         the two paths cannot drift on what "trustworthy checkpoint" means. */
+      if(rec.kind === "set"){
+        if(cp.moduleIndex >= 1) continue;
+        if(cp.questionIndex !== undefined &&
+           (typeof cp.questionIndex !== "number" || cp.questionIndex < 0)) continue;
+        if(cp.timeRemainingSeconds !== undefined &&
+           (typeof cp.timeRemainingSeconds !== "number" || cp.timeRemainingSeconds < 0)) continue;
+        return { setRecord: rec };
+      }
       /* `test` is a MANIFEST entry here — the questions are not loaded yet, so
          the range check uses the manifest's module count. Anything deeper
          (does that module have questions?) is the loader's job, and a content
@@ -796,8 +811,19 @@
   function resumableVersionsFor(testId){
     const out = [];
     const push = rec => {
-      if(rec && rec.status === "in-progress" && (rec.resume || rec.checkpoint)
-         && typeof rec.testVersion === "string"
+      if(!rec || rec.status !== "in-progress" || !(rec.resume || rec.checkpoint)) return;
+      /* a live SET sitting pins the form builds its snapshot references —
+         evicting one would break that set's offline resume just as surely as
+         evicting a test sitting's own build */
+      if(rec.kind === "set" && Array.isArray(rec.setQuestions)){
+        rec.setQuestions.forEach(e => {
+          if(e && e.source === "form" && typeof e.testVersion === "string"
+             && canonTestId(e.testId) === canonTestId(testId)
+             && out.indexOf(e.testVersion) === -1) out.push(e.testVersion);
+        });
+        return;
+      }
+      if(typeof rec.testVersion === "string"
          && canonTestId(rec.testId) === canonTestId(testId)
          && out.indexOf(rec.testVersion) === -1) out.push(rec.testVersion);
     };
@@ -805,13 +831,21 @@
       push((state.resumeRecords || {})[canonTestId(testId)]);
       const idx = state.assignAttempts || {};
       Object.keys(idx).forEach(k => push(idx[k] && idx[k].resumable));
+      /* set records key their attempts under the setId, so they need their
+         own prefix scan alongside this test's aliases */
       const prefixes = testIdAliases(testById(testId) || { testId: testId })
-        .map(id => "devstore:attempt:" + id + ":");
+        .map(id => "devstore:attempt:" + id + ":")
+        .concat(["devstore:attempt:pset-"]);
       for(let i = 0; i < localStorage.length; i++){
         const k = localStorage.key(i);
         if(!k || !prefixes.some(p => k.indexOf(p) === 0)) continue;
         try{ push(JSON.parse(localStorage.getItem(k))); }catch(e){}
       }
+      /* the crash-resume map holds sets under their setId key too */
+      Object.keys(state.resumeRecords || {}).forEach(k => {
+        const r = state.resumeRecords[k];
+        if(r && r.kind === "set") push(r);
+      });
     }catch(e){ /* never let bookkeeping break a cache write */ }
     return out;
   }
@@ -977,6 +1011,505 @@
   // disagree about which attempts are openable
   window.AppTestLoader = { load: loadTest, byId: testById, canServe: canServeVersion };
 
+  /* ================= QUESTION BANKS (custom practice sets, 2026-08-31) ====
+     Banks are NOT tests (SCHEMA-BANKS-v1 §1). They live in their own globals
+     (BANK_MANIFEST / BANK_INDEX / __BANKDATA__), are never joined into
+     TEST_MANIFEST or __TESTDATA__, and nothing that renders tests — the home
+     cards, the pickers, the Past bucket, attempt version-gating, scoring —
+     resolves a bank: testById() cannot return one because state.tests never
+     contains one. tests/bank-isolation.test.js holds that as a check.
+     The loader mirrors loadTest: memory → verified cache → network, with the
+     same timeout and the same honest failure. The cache is keyed
+     bankId:bankVersion; banks are APPEND-ONLY (a qid's content never changes
+     and never leaves the export), so any registered file can serve any
+     recorded qid it actually contains — per-qid presence is checked at every
+     resolve rather than a whole-file version gate. */
+  const BANKCACHE_PREFIX = "acestem:bankcache:";
+  function bankById(bankId){
+    if(!bankId) return null;
+    return (window.BANK_MANIFEST || []).find(b => b && b.bankId === bankId) || null;
+  }
+  /* Can this device produce this bank's content at all — shipped, in memory,
+     or cached? The bank analogue of canServeVersion, minus the version gate
+     (append-only content; per-qid checks happen at resolve time). */
+  function canServeBank(bankId){
+    if(bankById(bankId)) return true;
+    if((window.__BANKDATA__ || {})[bankId]) return true;
+    try{
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf(BANKCACHE_PREFIX + bankId + ":") === 0) return true;
+      }
+    }catch(e){}
+    return false;
+  }
+  function readCachedBank(bankId){
+    try{
+      const man = bankById(bankId);
+      const tryKey = k => {
+        const raw = localStorage.getItem(k);
+        if(!raw) return null;
+        const b = JSON.parse(raw);
+        return (b && b.bankId === bankId && Array.isArray(b.questions)) ? b : null;
+      };
+      // prefer the manifest's own build; fall back to any cached build —
+      // append-only content makes an older cache safe to OFFER (a qid it
+      // lacks fails the per-qid check downstream, honestly)
+      if(man){
+        const exact = tryKey(BANKCACHE_PREFIX + bankId + ":" + (man.bankVersion || "unversioned"));
+        if(exact) return exact;
+      }
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf(BANKCACHE_PREFIX + bankId + ":") === 0){
+          const b = tryKey(k);
+          if(b) return b;
+        }
+      }
+    }catch(e){}
+    return null;
+  }
+  function writeCachedBank(bank){
+    try{
+      const key = BANKCACHE_PREFIX + bank.bankId + ":" + (bank.bankVersion || "unversioned");
+      const stale = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf(BANKCACHE_PREFIX + bank.bankId + ":") === 0 && k !== key) stale.push(k);
+      }
+      stale.forEach(k => localStorage.removeItem(k));
+      // content fields only, mirroring writeCachedTest's discipline
+      localStorage.setItem(key, JSON.stringify({
+        bankId: bank.bankId, bankName: bank.bankName,
+        bankVersion: bank.bankVersion, questions: bank.questions
+      }));
+    }catch(e){ /* quota or private mode: the network path still works */ }
+  }
+  /* `bankId` here is ALWAYS a manifest-resolved id (loadBank looks it up
+     first), so no record-derived string ever reaches the script URL. */
+  function fetchBankFile(bankId){
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      let done = false;
+      const finish = (fn, arg) => {
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        s.remove();
+        fn(arg);
+      };
+      const timer = setTimeout(() => finish(reject, new Error("timed out")), TEST_FETCH_TIMEOUT_MS);
+      s.src = "testdata/" + encodeURIComponent(bankId) + ".js";
+      s.async = true;
+      s.onload = () => {
+        const b = (window.__BANKDATA__ || {})[bankId];
+        b ? finish(resolve, b) : finish(reject, new Error("loaded but registered nothing"));
+      };
+      s.onerror = () => finish(reject, new Error("network"));
+      document.head.appendChild(s);
+    });
+  }
+  async function loadBank(bankId){
+    const man = bankById(bankId);
+    if(!man) throw new Error("unknown bank");
+    const inMemory = (window.__BANKDATA__ || {})[man.bankId];
+    if(inMemory && Array.isArray(inMemory.questions)){
+      writeCachedBank(inMemory);
+      return inMemory;
+    }
+    const cached = readCachedBank(man.bankId);
+    if(cached){
+      window.__BANKDATA__ = window.__BANKDATA__ || {};
+      window.__BANKDATA__[man.bankId] = cached;
+      return cached;
+    }
+    const fetched = await fetchBankFile(man.bankId);
+    if(!Array.isArray(fetched.questions)) throw new Error("bank malformed");
+    writeCachedBank(fetched);
+    return fetched;
+  }
+  // the dashboard's Question Bank tab and set builder use the same loader
+  window.AppBankLoader = { load: loadBank, byId: bankById, canServe: canServeBank };
+
+  /* ================= CUSTOM PRACTICE SETS =================
+     A SET is a tutor-authored, mutable object (pset:<setId>): name, subject
+     (rw|math, exactly one), ordered fully-qualified refs into banks and
+     forms. The SITTING is the real test UI over one synthetic module; the
+     ATTEMPT freezes its resolved question list with per-question provenance
+     at begin (Attempts.begin setMeta); REVIEW is version-tolerant — current
+     content, drift/error banners per question. No scoring: raw N/M only,
+     scaled fields honestly absent (the synthetic test carries no scoring
+     sidecar, and sets never reach Score Details). */
+  function isSetAssign(a){ return !!a && a.kind === "set"; }
+  function isSetRecord(r){ return !!r && r.kind === "set"; }
+
+  function syntheticSetTest(setId, name, subject, questions, timeLimitMinutes){
+    const section = subject === "math" ? "Math" : "Reading and Writing";
+    const safeName = String(name || "Practice Set");
+    return {
+      testId: String(setId),
+      testName: safeName,
+      kind: "set",
+      modules: [{
+        /* deterministic, so record.modules / annotations / moduleState keys
+           line up across sitting, resume and review */
+        moduleId: String(setId) + "-m1",
+        section: section,
+        moduleLabel: "Module 1",
+        setTitle: safeName + " — " + section,
+        timeLimitMinutes: timeLimitMinutes || 0,
+        questions: questions
+      }]
+    };
+  }
+
+  /* Resolve a set's refs against CURRENT content, for starting a sitting.
+     Fail-closed: every ref must resolve or the whole start refuses (a set
+     silently missing questions would record a sitting of a different set
+     than the tutor built). Returns {questions, provenance}; q.id === ref. */
+  async function resolveSetRefs(set){
+    const questions = [], provenance = [];
+    const loadedForms = {}, loadedBanks = {};
+    const refs = Array.isArray(set.refs) ? set.refs : [];
+    if(!refs.length) throw new Error("set has no questions");
+    for(const ref of refs){
+      if(!ref || typeof ref !== "object") throw new Error("set malformed");
+      let rid, q, prov;
+      if(ref.type === "bank"){
+        const man = bankById(String(ref.bankId || ""));
+        if(!man) throw new Error("bank not in this build");
+        const bank = loadedBanks[man.bankId] ||
+          (loadedBanks[man.bankId] = await loadBank(man.bankId));
+        q = (bank.questions || []).find(x => x && x.qid === ref.qid);
+        if(!q) throw new Error("bank question missing");
+        rid = man.bankId + ":" + String(ref.qid);
+        prov = { ref: rid, source: "bank", bankId: man.bankId, qid: String(ref.qid),
+                 bankVersion: bank.bankVersion || man.bankVersion || "unversioned" };
+      } else if(ref.type === "form"){
+        const entry = testById(String(ref.testId || ""));
+        if(!entry) throw new Error("test not in this build");
+        const full = loadedForms[entry.testId] ||
+          (loadedForms[entry.testId] = await loadTest(entry));
+        const mod = (full.modules || []).find(m => m && m.moduleId === ref.moduleId);
+        q = mod && (mod.questions || []).find(x => x && x.id === ref.qid);
+        if(!q) throw new Error("form question missing");
+        rid = entry.testId + ":" + String(ref.qid);
+        prov = { ref: rid, source: "form", testId: entry.testId,
+                 moduleId: String(ref.moduleId), qid: String(ref.qid),
+                 testVersion: full.testVersion || "unversioned" };
+      } else {
+        throw new Error("set malformed");
+      }
+      // duplicate refs would collide on q.id and silently share one answer slot
+      if(provenance.some(p => p.ref === rid)) throw new Error("duplicate question in set");
+      questions.push(Object.assign({}, q, { id: rid }));
+      provenance.push(prov);
+    }
+    return { questions, provenance };
+  }
+
+  /* Rebuild the synthetic test from a RECORD's frozen snapshot.
+     pinned=true (resume): forms load the exact recorded build (archive path,
+     same as test resume) and every question must resolve — a sitting resumes
+     on what it began on or not at all. pinned=false (review): forms load the
+     CURRENT build; a version difference becomes a per-question drift notice,
+     a missing question becomes an error notice over a stub — honest, named,
+     never silence (contract 7). Bank content never drifts (append-only), so
+     a recorded bank qid that fails to resolve is always an ERROR. */
+  function setStubQuestion(ref){
+    return { id: ref, type: "mcq", passage: null,
+      questionText: "This question's content isn't available in this copy, so it can't be replayed here. Your recorded answer and score are unaffected.",
+      choices: ["—", "—", "—", "—"],
+      correctAnswer: null, altAnswers: [], skill: null, tags: [] };
+  }
+  async function buildSetTestFromRecord(record, pinned){
+    const list = Array.isArray(record.setQuestions) ? record.setQuestions : [];
+    if(!list.length) throw new Error("record has no question snapshot");
+    const notices = {};
+    const questions = [];
+    const loadedForms = {}, loadedBanks = {};
+    for(const e of list){
+      const ok = e && typeof e === "object" && typeof e.qid === "string";
+      const rid = ok && typeof e.ref === "string" ? e.ref : ("q" + questions.length);
+      const miss = why => {
+        if(pinned) throw new Error(why);
+        notices[rid] = { kind: "error",
+          text: "Question " + (questions.length + 1) + " (" + rid + ") — " + why +
+                " Your recorded answer is unaffected." };
+        questions.push(setStubQuestion(rid));
+      };
+      if(!ok){ miss("this record entry is malformed, so the question can't be identified."); continue; }
+      if(e.source === "bank"){
+        const man = bankById(String(e.bankId || ""));
+        if(!man){ miss("its question bank isn't part of this copy."); continue; }
+        /* a bank LOAD failure (network) throws out to the retry screen in
+           both modes — that is a connectivity problem, not a missing qid */
+        const bank = loadedBanks[man.bankId] ||
+          (loadedBanks[man.bankId] = await loadBank(man.bankId));
+        const q = (bank.questions || []).find(x => x && x.qid === e.qid);
+        if(!q){ miss("this question is missing from its bank — banks are append-only, so this shouldn't happen; tell your tutor."); continue; }
+        questions.push(Object.assign({}, q, { id: rid }));
+      } else if(e.source === "form"){
+        const entry = testById(String(e.testId || ""));
+        if(!entry){ miss("its source test isn't part of this copy."); continue; }
+        if(pinned && !canServeVersion(entry, e.testVersion)) throw new Error("recorded build unavailable");
+        const cacheKey = entry.testId + "@" + (pinned ? String(e.testVersion) : "current");
+        const full = loadedForms[cacheKey] ||
+          (loadedForms[cacheKey] = await loadTest(entry, pinned ? e.testVersion : undefined));
+        // qid lookup across modules: ids are module-scoped strings, unique per test
+        let q = null;
+        (full.modules || []).some(m => (q = (m.questions || []).find(x => x && x.id === e.qid) || null));
+        if(!q){ miss("its source test no longer carries this question."); continue; }
+        if(!pinned && (entry.testVersion || "unversioned") !== (e.testVersion || "unversioned")){
+          notices[rid] = { kind: "drift",
+            text: "Question " + (questions.length + 1) + " (" + rid + ") comes from " +
+                  (entry.testName || entry.testId) + ", whose content has been updated since this attempt (" +
+                  String(e.testVersion || "unversioned") + " → " + String(entry.testVersion || "unversioned") +
+                  "). You're seeing the current version; your recorded answer is unchanged." };
+        }
+        questions.push(Object.assign({}, q, { id: rid }));
+      } else {
+        miss("its source type isn't recognized.");
+      }
+    }
+    const limit = (record.modules && record.modules[0] && num(record.modules[0].timeLimitMinutes)) || 0;
+    const test = syntheticSetTest(String(record.setId || record.testId || "pset-unknown"),
+      record.setName || record.testName, record.subject === "math" ? "math" : "rw",
+      questions, limit);
+    return { test: test, notices: notices };
+  }
+
+  /* Every source of an in-progress set attempt must be servable for the
+     Resume card to be offered — the set analogue of canServeVersion. */
+  function setAttemptResumable(rec){
+    const list = rec.setQuestions;
+    if(!Array.isArray(list) || !list.length) return false;
+    return list.every(e => {
+      if(!e || typeof e !== "object") return false;
+      if(e.source === "bank") return canServeBank(String(e.bankId || ""));
+      if(e.source === "form"){
+        const entry = testById(String(e.testId || ""));
+        return !!entry && canServeVersion(entry, e.testVersion);
+      }
+      return false;
+    });
+  }
+
+  /* ---- set flow: start ---- */
+  function startSetFlow(a){
+    if(assignmentComplete(a)){ renderHome(); showOnly("screen-home"); return; }
+    if(assignmentState(a) !== "ready"){ renderHome(); return; }
+    showOnly("screen-loading");
+    el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + String(a.setName || "practice set") + "…");
+    (async ()=>{
+      try{
+        const set = await AttemptStore.getSet(state.userName, a.setId);
+        if(!set || typeof set !== "object") throw new Error("set unavailable");
+        const subject = set.subject === "math" ? "math" : (set.subject === "rw" ? "rw" : null);
+        if(!subject) throw new Error("set malformed");
+        const resolved = await resolveSetRefs(set);
+        const limit = num(a.timeLimitMinutes);
+        const test = syntheticSetTest(String(set.setId || a.setId),
+          set.name || a.setName, subject, resolved.questions, (limit && limit > 0) ? limit : 0);
+        el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
+        startSetFlowLoaded(test, a, subject, resolved.provenance, (limit && limit > 0) ? limit : 0);
+      }catch(e){
+        el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
+        showTestLoadError({ testName: String(a.setName || "this practice set") },
+          ()=> startSetFlow(a), undefined, e);
+      }
+    })();
+  }
+  function startSetFlowLoaded(test, assignment, subject, provenance, limitMinutes){
+    state.reviewMode = null;     // a live sitting must never inherit review's read-only gates
+    state.currentTest = test;
+    state.activeAssignment = assignment;
+    /* Untimed by default; a tutor-set limit runs through the existing timing
+       machinery (the synthetic module carries the minutes, timing 1). */
+    state.timing = limitMinutes > 0 ? 1 : "untimed";
+    state.moduleIndex = 0;
+    state.moduleState = {};
+    test.modules.forEach(m=>{
+      state.moduleState[m.moduleId] = { answers:{}, flags:new Set(), eliminated:{}, passageHtml:{}, stemHtml:{}, choiceHtml:{}, notes:{} };
+    });
+    // sets are Practice-category: self-administered, no start-code ceremony
+    Attempts.begin(test, state.userName, "self-administered", state,
+      assignment.assignmentId, state.timing, {
+        kind: "set",
+        setId: test.testId,
+        setName: test.testName,
+        subject: subject,
+        questions: provenance,
+        releaseOnSubmit: assignment.holdRelease !== true
+      });
+    showSetReady(test, limitMinutes, assignment.holdRelease === true);
+  }
+  function showSetReady(test, limitMinutes, held){
+    const mod = test.modules[0];
+    const n = mod.questions.length;
+    el("readyTitle").textContent = "Practice Set";
+    el("readyCard").innerHTML = `
+      <div class="ready-item"><div class="ricon">📚</div><div><h3>${escapeHtml(test.testName)}</h3><p>${n} question${n === 1 ? "" : "s"} · ${escapeHtml(mod.section)} · ${limitMinutes ? limitMinutes + " minutes — the timer auto-submits at 0:00" : "untimed — take the time you need"}.</p></div></div>
+      <div class="ready-item"><div class="ricon">🧰</div><div><h3>Tools</h3><p>${mod.section === "Math" ? "The calculator and reference sheet are available, just like on test day." : "Highlighting and notes are available, just like on test day."}</p></div></div>
+      <div class="ready-item"><div class="ricon">📝</div><div><h3>When you finish</h3><p>${held ? "Your answers go to your tutor, who will release your results." : "You'll see how you did on each question right away."} Need to stop early? Use <b>Save and Exit</b> in the More (⋮) menu — your place is saved.</p></div></div>`;
+    el("readyBackBtn").classList.remove("hidden");
+    el("readyBackBtn").onclick = ()=> showOnly("screen-home");
+    el("readyNextBtn").onclick = ()=> beginModule(0);
+    showOnly("screen-ready");
+  }
+
+  /* ---- set flow: resume (crash checkpoint or Save-and-Exit) ----
+     Same contract as test resume: the sitting reopens on the EXACT builds it
+     began on (forms pinned, banks append-only). Returns true when a restore
+     was started; the loader owns the failure path (message + retry). */
+  function resumeSetFlow(record){
+    if(!record || record.kind !== "set") return false;
+    if(!(record.resume || record.checkpoint)) return false;
+    showOnly("screen-loading");
+    buildSetTestFromRecord(record, true).then(built => {
+      if(!resumeTestFlowLoaded(built.test, record)){
+        state.currentTest = null;
+        renderHome();
+        showOnly("screen-home");
+      }
+    }).catch(e => {
+      showTestLoadError({ testName: String(record.setName || record.testName || "this practice set") },
+        ()=> resumeSetFlow(record), undefined, e);
+    });
+    return true;
+  }
+
+  /* ---- set flow: completion (contract 5 — raw N/M, straight into review) */
+  let setDoneCtx = null;
+  function showSetDone(){
+    const record = Attempts.peekRecord();
+    setDoneCtx = { record: record };
+    const c = record ? num(record.score && record.score.correct) : null;
+    const g = record ? num(record.score && record.score.graded) : null;
+    const nk = record ? num(record.score && record.score.noKey) : null;
+    const released = !!(record && record.released === true);
+    el("setDoneTitle").textContent = "Practice set complete!";
+    el("setDoneScore").innerHTML = (c !== null && g !== null)
+      ? `<span class="setdone-num">${c}</span><span class="setdone-of"> / ${g} correct</span>` : "";
+    el("setDoneNote").textContent =
+      (released
+        ? "Practice sets aren't scored on the 400–1600 scale — review each question to see what you got right."
+        : "Your answers went to your tutor, who will release your results — once released, this set's review appears under Past on your home screen.") +
+      (nk ? " " + nk + " question(s) have no key yet and weren't graded." : "");
+    const working = Attempts.storageWorking();
+    const local = AttemptStore.isLocal();
+    el("setDoneSaveNote").textContent = local
+      ? "Saved on this device. Download your results and send the file to your tutor."
+      : working
+        ? "Your attempt was recorded automatically."
+        : "Automatic recording isn't available in this copy — download your results and send the file to your tutor.";
+    el("setDoneDownloadBtn").classList.toggle("hidden", working && !local);
+    el("setDoneReviewBtn").classList.toggle("hidden", !released);
+    showOnly("screen-setdone");
+  }
+  el("setDoneDownloadBtn").addEventListener("click", ()=> Attempts.downloadJson());
+  el("setDoneReviewBtn").addEventListener("click", ()=>{
+    if(setDoneCtx && setDoneCtx.record) openSetReview(setDoneCtx.record, "setdone");
+  });
+  el("setDoneHomeBtn").addEventListener("click", async ()=>{
+    await refreshStudentState(state.userName);
+    state.practiceTab = "past";
+    state.testsTab = "active";
+    state.currentTest = null;
+    renderHome();
+    showOnly("screen-home");
+  });
+
+  /* ---- set flow: review (the one review surface for sets) ---- */
+  async function openSetReview(record, origin){
+    if(!record || record.kind !== "set") return;
+    showOnly("screen-loading");
+    let built;
+    try{
+      built = await buildSetTestFromRecord(record, false);
+    }catch(e){
+      showTestLoadError({ testName: String(record.setName || record.testName || "this practice set") },
+        ()=> openSetReview(record, origin), origin === "dashboard" ? "dashboard" : undefined, e);
+      return;
+    }
+    /* Same detach contract as openReviewMode: drain any unpersisted write,
+       then drop the recorder's handle so a replay can never write. */
+    await Attempts.detach();
+    const rows = buildScoreRows(built.test, record).rows;
+    const rowByQid = {};
+    rows.forEach(r => { rowByQid[r.q.id] = r; });
+    state.reviewMode = { record: record, rowByQid: rowByQid, notices: built.notices,
+      setMode: true, origin: origin || "home", sdScroll: 0 };
+    state.currentTest = built.test;
+    state.moduleState = buildModuleStateFromRecord(built.test, record);
+    restoreAnnotations(state.moduleState,
+      record.annotations || ((record.resume || record.checkpoint || {}).annotations));
+    state.view = "question";
+    state.elimMode = false;
+    clearInterval(state.timerInterval);
+    state.timerRunning = false;
+    el("timerDisplay").innerHTML = '<span class="timer-review">Review</span>';
+    el("timerBtn").classList.add("hidden");
+    hide("fiveMinPopup");
+    el("rvBackBtn").textContent = "‹ Back";
+    show("rvBackBtn");
+    state.moduleIndex = 0;
+    state.questionIndex = 0;
+    try{
+      renderTest();
+      showOnly("screen-test");
+    }catch(e){
+      exitReviewMode(true);
+    }
+  }
+
+  /* set assignment card — Practice section (no start-code ceremony) */
+  function setAssignmentCard(a){
+    const st = assignmentState(a);
+    if(st === "completed") return null;
+    const name = String(a.setName || "Practice Set");
+    const nQ = num(a.questionCount);
+    const limit = num(a.timeLimitMinutes);
+    const card = document.createElement("div");
+    card.className = "pcard" + ((st === "ready" || st === "resume") ? " clickable" : "");
+    const status =
+      st === "resume"  ? '<span class="pc-ico">🕐</span> In Progress' :
+      st === "notyet"  ? 'Opens ' + fmtCardDate(a.windowOpens) :
+      st === "expired" ? 'Expired' :
+      "Practice set" + (nQ ? ` · ${nQ} question${nQ === 1 ? "" : "s"}` : "") +
+        " · " + (limit ? limit + " min" : "untimed");
+    const action =
+      st === "resume"  ? '<button class="pill ghost">Resume</button>' :
+      st === "ready"   ? '<button class="pill ghost">Start</button>' :
+      st === "expired" ? '<span class="pc-pending">This assignment has expired — ask your tutor</span>' : "";
+    card.innerHTML = `
+      <div class="pcard-head">${escapeHtml(name)}</div>
+      <div class="pcard-body">
+        <div class="pcard-status">${status}</div>
+        ${action ? '<div class="pcard-action">' + action + '</div>' : ""}
+      </div>`;
+    if(st === "resume"){
+      const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
+      card.addEventListener("click", ()=> resumeSetFlow(idx.resumable));
+    } else if(st === "ready"){
+      card.addEventListener("click", ()=> startSetFlow(a));
+    }
+    return card;
+  }
+
+  /* dashboard bridge: open a set attempt's review as the student would see
+     it (admin-only path, mirrors AppScoreView.open) */
+  window.AppSetReview = {
+    open(record){
+      if(!record || record.kind !== "set") return false;
+      state.userName = (record.student && record.student.code) || state.userName;
+      state.displayName = (window.Dashboard && Dashboard.nameFor)
+        ? (Dashboard.nameFor(state.userName) || null) : null;
+      openSetReview(record, "dashboard");
+      return true;
+    }
+  };
+
   /* Shared loading/retry gate. Never leaves a blank screen: on failure the
      student gets a message and a Retry, and can always get back home. */
   const LOADING_DEFAULT_MSG = "This may take up to a minute. Please don't refresh this page or quit the app.";
@@ -1042,6 +1575,9 @@
      loads the pinned build, never the bumped one). */
   function attemptResumable(rec){
     if(!rec || rec.status !== "in-progress" || !(rec.resume || rec.checkpoint)) return false;
+    /* Practice-set records resume against their SNAPSHOT (per-question
+       provenance), not a single testVersion — every source must be servable. */
+    if(rec.kind === "set") return setAttemptResumable(rec);
     const entry = testById(rec.testId);
     if(!entry) return false;
     return canServeVersion(entry, rec.testVersion);
@@ -1076,10 +1612,13 @@
     });
 
     // real (non-legacy) assignments per canonical test — the sole-assignment
-    // fallback only fires when exactly one owns the untagged attempt
+    // fallback only fires when exactly one owns the untagged attempt.
+    // Set assignments have no testId and never own untagged attempts (every
+    // set attempt is stamped with its assignmentId at begin), so they stay
+    // out of this count entirely.
     const assignCountByTest = {};
     (state.assignments || []).forEach(a => {
-      if(isLegacyAssign(a)) return;
+      if(isLegacyAssign(a) || isSetAssign(a)) return;
       const c = canonTestId(a.testId);
       assignCountByTest[c] = (assignCountByTest[c] || 0) + 1;
     });
@@ -1098,7 +1637,7 @@
          assignments, only explicit assignmentIds count; every attempt started
          since the model exists carries one. Same care as legacyIds: absent
          references resolve, they don't vanish. */
-      if(!completed && !resumable && assignCountByTest[canon] === 1 && !isLegacyAssign(a)){
+      if(!completed && !resumable && assignCountByTest[canon] === 1 && !isLegacyAssign(a) && !isSetAssign(a)){
         const pool = (nullByTest[canon] || []).filter(r => categoryMatchesConditions(a.category, r.conditions));
         completed = pool.find(attemptCompleted) || null;
         resumable = pool.filter(attemptResumable).sort(byStartDesc)[0] || null;
@@ -1277,10 +1816,10 @@
      is [] rather than null after any successful resolve; the || [] covers the
      pre-sign-in initial value only. */
   function renderActiveCards(wrap){
-    const practice = (state.assignments || []).filter(a => a.category === "practice");
+    const practice = (state.assignments || []).filter(a => a.category === "practice" || isSetAssign(a));
     // branch on renderable cards, not raw count — assignments for unpublished
     // testIds would otherwise skip the empty-state and leave the section blank
-    const cards = practice.map(assignmentCard).filter(Boolean);
+    const cards = practice.map(a => isSetAssign(a) ? setAssignmentCard(a) : assignmentCard(a)).filter(Boolean);
     if(!cards.length){
       wrap.innerHTML = '<div class="no-tests-card"><h3>No Practice Tests</h3><p>No practice is assigned to this code yet — ask your tutor.</p></div>';
       return;
@@ -1326,6 +1865,31 @@
     }
     list.forEach(record => {
       const released = record.released === true;
+      /* Practice-set attempts: their own card — no Score Details, no scaled
+         anything (contract: scaled fields honestly absent). Review replays
+         against current content, version-tolerantly, so there is no
+         canServeVersion gate here; a per-question miss surfaces inside
+         review as an honest banner instead of withholding the whole card. */
+      if(isSetRecord(record)){
+        const c = num(record.score && record.score.correct);
+        const g = num(record.score && record.score.graded);
+        const card = document.createElement("div");
+        card.className = "pcard";
+        card.innerHTML = `
+          <div class="pcard-head">${escapeHtml(record.setName || record.testName || "Practice Set")}</div>
+          <div class="pcard-body">
+            <div class="pcard-status"><span class="pc-ico">✓</span> Completed
+              <span class="pc-date">${fmtCardDate(record.startedAt)}</span></div>
+            <div class="pcard-badge">Practice set${record.timing === "untimed" ? " · Untimed" : ""}</div>
+            ${(c !== null && g !== null) ? `<div class="pcard-total">${c}<span class="pcard-total-of">/ ${g} correct</span></div>` : ""}
+            <div class="pcard-action">${released
+              ? '<button class="pcard-link">Review Your Answers</button>'
+              : '<span class="pc-pending">Results not released yet</span>'}</div>
+          </div>`;
+        if(released) card.querySelector(".pcard-link").addEventListener("click", ()=> openSetReview(record, "home"));
+        wrap.appendChild(card);
+        return;
+      }
       const test = testById(record.testId);   // resolves legacy ids too
       /* Reviewing against a different test build would mislabel questions
          (ATTEMPTS-SPEC §9) — so Score Details loads the build the attempt was
@@ -1602,7 +2166,14 @@
   function currentQuestion(){ return currentModule().questions[state.questionIndex]; }
   function sectionNumber(mod){ return mod.section === "Reading and Writing" ? 1 : 2; }
   function moduleNumber(mod){ const m = String(mod.moduleLabel).match(/\d+/); return m ? m[0] : "1"; }
-  function sectionTitle(mod){ return `Section ${sectionNumber(mod)}, Module ${moduleNumber(mod)}: ${mod.section}`; }
+  function sectionTitle(mod){
+    /* A practice-set module titles itself (set name + subject) — the
+       Section/Module framing is form structure a one-module set doesn't have.
+       Every consumer is textContent or escapeHtml, so the tutor-typed name is
+       safe on all of them. */
+    if(mod.setTitle) return String(mod.setTitle);
+    return `Section ${sectionNumber(mod)}, Module ${moduleNumber(mod)}: ${mod.section}`;
+  }
 
   /* Phase G §1: accommodated time. Multipliers apply exactly to the module
      limit; break stays 10:00 (handled separately). Untimed has no limit. */
@@ -2089,6 +2660,18 @@
         }).join("") + '</div>';
     }
 
+    /* Set-review notices (contract 7): a form-sourced question whose form has
+       moved past the recorded build gets a DRIFT banner naming the item; a
+       recorded bank qid absent from the loaded bank is an ERROR banner, never
+       silence. The text carries record-derived strings, so it is escaped like
+       every other record value. Form review has no notices (state.reviewMode
+       .notices is only ever set by openSetReview), so this renders nothing
+       there. */
+    const noticeObj = (review && state.reviewMode.notices) ? state.reviewMode.notices[q.id] : null;
+    const noticeHtml = noticeObj
+      ? `<div class="rv-notice ${noticeObj.kind === "error" ? "err" : "warn"}">${escapeHtml(noticeObj.text)}</div>`
+      : "";
+
     /* Review-only extras: an omitted-MCQ banner (an unanswered SPR already
        reads as omitted in its verdict), and the rationale below the choices
        when the question carries one. Rationale is test data, so fmt() — it
@@ -2105,6 +2688,7 @@
         ${review ? reviewTimeHtml(q) : ""}
         ${(isSpr || review) ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
       </div>
+      ${noticeHtml}
       ${figHtml}
       ${stackedHtml}
       ${stemHtml(q.questionText, ms.stemHtml ? ms.stemHtml[q.id] : undefined)}
@@ -2500,7 +3084,12 @@
   function showModuleOver(isFinal){
     showOnly("screen-moduleover");
     setTimeout(()=>{
-      if(isFinal) showSubmitted();     // score-visibility (b): confirmation only
+      if(isFinal){
+        // sets get their own completion screen (raw N/M + straight-to-review);
+        // forms keep the release-gated confirmation exactly as before
+        if(state.currentTest && state.currentTest.kind === "set") showSetDone();
+        else showSubmitted();          // score-visibility (b): confirmation only
+      }
       else beginModule(state.moduleIndex);
     }, 2600);
   }
@@ -3949,9 +4538,12 @@
   function exitReviewMode(failed){
     if(!state.reviewMode) return;
     const scroll = state.reviewMode.sdScroll || 0;
+    const setMode = state.reviewMode.setMode === true;
+    const setOrigin = state.reviewMode.origin;
     closeDirections(); closeQnav(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
     hide("rvBackBtn");
+    el("rvBackBtn").textContent = "‹ Score Details";   // set review relabels it
     // live-test chrome comes back with the next beginModule; un-hide the
     // timer toggle so nothing depends on that
     el("timerBtn").classList.remove("hidden");
@@ -3960,6 +4552,20 @@
     state.currentTest = null;
     state.moduleState = {};
     lastRenderedQKey = null;
+    /* Set review has no Score Details behind it (contract 5): Back lands
+       where the review was opened from — the dashboard for a tutor, home for
+       a student. Home renders immediately from current state, then refreshes
+       so the just-finished attempt's Past card appears without a re-sign-in. */
+    if(setMode){
+      if(setOrigin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }
+      state.practiceTab = "past";
+      renderHome();
+      showOnly("screen-home");
+      refreshStudentState(state.userName).then(ok => {
+        if(ok && !el("screen-home").classList.contains("hidden")) renderHome();
+      });
+      return;
+    }
     renderScoreDetails();
     showOnly("screen-scoredetails");
     window.scrollTo(0, scroll);

@@ -142,11 +142,27 @@ const T = global.window.__TESTDATA__;
 const missing = manifest.filter(e => !T[e.testId]).map(e => e.testId);
 if(missing.length) throw new Error("manifest lists tests that registered nothing: " + missing.join(", "));
 console.log(`    library from manifest: ${manifest.map(e => e.testId).join(", ")}`);
+/* The bank lane ships SPR keys too (custom practice sets, 2026-08-31) —
+   loaded from the BANK manifest the same way, so a newly exported bank is
+   automatically swept. Banks are not tests: separate manifest, separate
+   global; they only join here because their keys grade through the same
+   grading.js. */
+require(path.join(repo, "testdata", "bank-manifest.js"));
+const bankManifest = global.window.BANK_MANIFEST || [];
+bankManifest.forEach(b => require(path.join(repo, "testdata", b.bankId + ".js")));
+const B = global.window.__BANKDATA__ || {};
+const missingBanks = bankManifest.filter(b => !B[b.bankId]).map(b => b.bankId);
+if(missingBanks.length) throw new Error("bank manifest lists banks that registered nothing: " + missingBanks.join(", "));
+if(bankManifest.length) console.log(`    banks from bank-manifest: ${bankManifest.map(b => b.bankId).join(", ")}`);
+
 const keys = [];
 Object.keys(T).forEach(testId => T[testId].modules.forEach(m => m.questions.forEach(q => {
   if(q.type === "spr") keys.push({ testId, qid: q.id, q });
 })));
-console.log(`    ${keys.length} shipped SPR questions\n`);
+Object.keys(B).forEach(bankId => (B[bankId].questions || []).forEach(q => {
+  if(q.type === "spr") keys.push({ testId: bankId, qid: q.qid, q });
+}));
+console.log(`    ${keys.length} shipped SPR questions (forms + banks)\n`);
 
 let totalDiffs = 0;
 const diffDetail = [];
@@ -279,12 +295,45 @@ if(!archivePath){
     (T[testId].legacyIds || []).forEach(l => { qIndex[l + "|" + q.id] = q; });
   })));
   let audited = 0, sprSeen = 0, moved = [], unknown = 0, storedDisagree = [];
+  /* Practice-set records (kind:"set", 2026-08-31) are handled EXPLICITLY:
+     their answers key by fully-qualified refs and resolve through the
+     record's own frozen snapshot (setQuestions provenance) — bank refs into
+     the loaded bank exports (append-only: retired qids are still there),
+     form refs into the library. An answer that cannot be resolved is an
+     unaudited answer and FAILS below, exactly like the not-in-library check
+     for form records — passing over it silently would be a fail-open. */
+  let setSeen = 0, setUnresolved = 0;
+  const setUnresolvedDetail = [];
   records.forEach(r => {
     if(!r || !r.answers || !r.testId) return;
     audited++;
+    const isSet = r.kind === "set";
+    const provByRef = {};
+    if(isSet){
+      setSeen++;
+      (Array.isArray(r.setQuestions) ? r.setQuestions : []).forEach(e => {
+        if(e && typeof e.ref === "string") provByRef[e.ref] = e;
+      });
+    }
     Object.keys(r.answers).forEach(qid => {
-      const q = qIndex[r.testId + "|" + qid];
-      if(!q){ unknown++; return; }
+      let q = null;
+      if(isSet){
+        const e = provByRef[qid];
+        if(e && e.source === "bank"){
+          const bank = B[e.bankId];
+          q = (bank && (bank.questions || []).find(x => x && x.qid === e.qid)) || null;
+        } else if(e && e.source === "form"){
+          q = qIndex[e.testId + "|" + e.qid] || null;
+        }
+        if(!q){
+          setUnresolved++;
+          setUnresolvedDetail.push(((r.student && r.student.key) || "?") + " " + (r.setId || r.testId) + " " + qid);
+          return;
+        }
+      } else {
+        q = qIndex[r.testId + "|" + qid];
+        if(!q){ unknown++; return; }
+      }
       if(q.type !== "spr") return;
       const a = r.answers[qid];
       if(a.given === null || a.given === undefined) return;
@@ -303,8 +352,14 @@ if(!archivePath){
       }
     });
   });
-  console.log(`    ${audited} record(s), ${sprSeen} answered SPR item(s)` +
+  console.log(`    ${audited} record(s)` +
+    (setSeen ? ` (${setSeen} practice-set record(s), resolved via snapshot provenance)` : "") +
+    `, ${sprSeen} answered SPR item(s)` +
     (unknown ? `, ${unknown} answer(s) for questions not in the library (skipped)` : ""));
+  if(setUnresolved){
+    console.log(`    ${setUnresolved} SET answer(s) whose snapshot ref could not be resolved:`);
+    setUnresolvedDetail.forEach(d => console.log("      " + d));
+  }
   if(!moved.length) console.log("    no stored SPR answer changes grade");
   else {
     console.log(`    ${moved.length} STORED ANSWER(S) CHANGE GRADE:`);
@@ -324,6 +379,9 @@ if(!archivePath){
      audited nothing and still passed. It cannot be graded here, so it is an
      unaudited answer, and the gate has to say so. */
   check("every stored answer belonged to a test in the library", unknown, 0);
+  /* the set analogue of the line above: an unresolvable snapshot ref is an
+     unaudited answer, and the gate says so rather than passing over it */
+  check("every set-record answer resolved through its snapshot provenance", setUnresolved, 0);
   check("the export actually contained gradable SPR answers", sprSeen > 0, true);
 }
 

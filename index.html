@@ -388,6 +388,26 @@
   </div>
 </div>
 
+<!-- ============ SET COMPLETE (custom practice sets, 2026-08-31) ============
+     Contract 5: no scoring for sets — a raw N/M and straight into Review
+     Mode. This is the whole set analogue of screen-submitted + Score Details:
+     deliberately minimal, no scaled fields anywhere (they would be invented
+     numbers, not absent ones). -->
+<div id="screen-setdone" class="hidden">
+  <div class="submitted-card">
+    <div class="sub-check">✓</div>
+    <h1 id="setDoneTitle">Practice set complete!</h1>
+    <div class="setdone-score" id="setDoneScore"></div>
+    <p id="setDoneNote"></p>
+    <p class="res-save-note" id="setDoneSaveNote"></p>
+    <div class="submitted-actions">
+      <button class="pill ghost hidden" id="setDoneDownloadBtn">Download Results JSON</button>
+      <button class="pill yellow" id="setDoneReviewBtn">Review Your Answers</button>
+      <button class="pill" id="setDoneHomeBtn">Return to Home</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ STUDENT SCORE DETAILS (Phase G §4, screenshots 25-28;
      redesigned 2026-08-02: module strips + Review Mode replace the results
      screen and the question-review popup that used to live here) ============ -->
@@ -430,6 +450,8 @@
     <button data-tab="items">Item analysis</button>
     <button data-tab="insights">Insights</button>
     <button data-tab="assign">Assignments</button>
+    <button data-tab="bank">Question Bank</button>
+    <button data-tab="sets">Practice Sets</button>
     <button data-tab="bugs">Bug reports</button>
   </div>
   <div class="dash-body" id="dashBody"></div>
@@ -499,6 +521,13 @@
      arrives on demand -->
 <script src="testdata/manifest.js"></script>
 <script src="testdata/archive/index.js"></script>
+<!-- Bank lane (SCHEMA-BANKS-v1 §7): the bank manifest and question index are
+     small and load at startup like the test manifest. Bank CONTENT
+     (testdata/<bankId>.js) is lazy, exactly like a test's questions. Banks
+     are NOT tests: separate globals (BANK_MANIFEST / BANK_INDEX /
+     __BANKDATA__), never joined to TEST_MANIFEST or __TESTDATA__. -->
+<script src="testdata/bank-manifest.js"></script>
+<script src="testdata/bank-index.js"></script>
 <script src="skilldomains.js"></script>
 <script src="render.js"></script>
 <script src="grading.js"></script>

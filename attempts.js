@@ -235,6 +235,37 @@ window.AttemptStore = (function(){
       }catch(e){ return null; }
     },
 
+    /* Practice set for ONE student (chat-track sets work, 2026-08-31). Sets
+       are tutor-authored rows (pset:<setId>, owner_code null) that no student
+       owns, so the anon read has its own RPC: fn_get_set returns the row only
+       when an assignment row for this code references that setId — a code
+       can read exactly the sets assigned to it, and nothing else. Cached
+       locally like a profile so an offline start can still resolve. Local /
+       artifact / devstorage modes read the key directly (same trust model as
+       every other row there). Returns the set object or null. */
+    async getSet(code, setId){
+      const c = String(code || "").trim().toUpperCase();
+      const key = "pset:" + String(setId || "");
+      if(isRemote()){
+        try{
+          const rows = await rpc("fn_get_set", { p_code: c, p_set_id: String(setId || "") });
+          if(Array.isArray(rows) && rows.length && rows[0] && rows[0].value){
+            const b = backend();
+            if(b) try{ await b.set(key, JSON.stringify(rows[0].value), true); }catch(e){}
+            return rows[0].value;
+          }
+          return null;                       // server says: no such set for this code
+        }catch(e){ /* offline — fall through to whatever we cached */ }
+      }
+      const b = backend();
+      if(!b) return null;
+      try{
+        const r = await b.get(key, true);
+        if(!r || typeof r.value !== "string") return null;
+        return JSON.parse(r.value);
+      }catch(e){ return null; }
+    },
+
     /* Tutor-only: pull every row the server has into the local cache so the
        dashboard shows records from ALL devices, not just this one. Without
        this the dashboard in remote mode only ever listed what this browser
@@ -662,7 +693,13 @@ window.Attempts = (function(){
 
   return {
     /* ---- lifecycle (called from app.js) ---- */
-    begin(test, studentCode, conditions, stateRef, assignmentId, timing){
+    /* `setMeta` (2026-08-31, custom practice sets) is optional and ADDITIVE:
+       absent (every form sitting) the record shape is byte-for-byte what it
+       has always been. Present, it stamps the set fields and — the load-
+       bearing part — freezes the resolved question list with per-question
+       provenance (source testId/bankId, its version, qid) at begin. The set
+       object stays mutable in storage; this attempt's copy never moves. */
+    begin(test, studentCode, conditions, stateRef, assignmentId, timing, setMeta){
       try{
         appState = stateRef;
         deliberateExit = false;                  // fresh sitting: interruptible
@@ -695,6 +732,24 @@ window.Attempts = (function(){
             screen: (screen && screen.width) ? screen.width + "x" + screen.height : ""
           }
         };
+        if(setMeta && setMeta.kind === "set"){
+          rec.kind = "set";
+          rec.setId = setMeta.setId;
+          rec.setName = setMeta.setName;         // = testName; kept explicitly too
+          rec.subject = setMeta.subject;         // "rw" | "math", exactly one
+          /* THE SNAPSHOT (contract: the attempt freezes its resolved list).
+             [{ref, source:"form"|"bank", testId|bankId, moduleId?, qid,
+               testVersion|bankVersion}] in sitting order; q.id === ref.
+             A DEEP COPY, so no later mutation of the caller's array — a
+             re-resolved set, a shared reference — can rewrite history. */
+          rec.setQuestions = JSON.parse(JSON.stringify(setMeta.questions || []));
+          /* The release RULE as it stood on the assignment at begin — kept for
+             the local-mode mirror in finalize() and as provenance. The server
+             (fn_upsert_attempt) re-derives from the assignment row itself and
+             ignores whatever the client claims, so remote enforcement never
+             rests on this field. */
+          rec.releaseOnSubmit = setMeta.releaseOnSubmit !== false;
+        }
         dirty = true;
         save();
         startTicker();
@@ -783,6 +838,17 @@ window.Attempts = (function(){
            unannotated ones look identical. */
         const ann = positionBlob().annotations;
         if(ann && Object.keys(ann).length) rec.annotations = ann;
+        /* Set attempts release on submit (contract 6). This client-side write
+           is the LOCAL-mode rule (local / artifact / devstorage storage has no
+           server to derive it) and a display convenience in remote mode —
+           there fn_upsert_attempt independently derives `released` from the
+           set-assignment row at the in-progress→completed transition and
+           overwrites whatever the client sent, exactly as it always has for
+           form attempts (where the derived value stays false). Form records
+           are untouched: this branch is gated on the set kind. */
+        if(rec.kind === "set" && rec.releaseOnSubmit !== false){
+          rec.released = true;
+        }
         save();
       }catch(e){}
     },
@@ -992,6 +1058,16 @@ window.Attempts = (function(){
     },
 
     currentAttemptId(){ return rec ? rec.attemptId : null; },
+
+    /* Deep clone of the live record, or null. Set-completion needs the
+       finished record to offer immediate review even when the storage write
+       failed (detach() will orphan-retry the write; the clone is the review's
+       fallback source). A CLONE, never the live object — handing out `rec`
+       itself would let a caller mutate what the recorder is still flushing. */
+    peekRecord(){
+      try{ return rec ? JSON.parse(JSON.stringify(rec)) : null; }
+      catch(e){ return null; }
+    },
 
     /* The one place that describes "where the student is and what they have
        annotated". Save-and-Exit used to build its own copy of this object,

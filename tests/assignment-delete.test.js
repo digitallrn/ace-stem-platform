@@ -24,8 +24,11 @@ const { extractFn, extractConst } = require("./extract-helper");
 
 const FN_NAMES = ["archivedVersions", "canServeVersion", "testById", "attemptCompleted",
   "attemptResumable", "canonTestId", "isLegacyAssign", "categoryMatchesConditions",
-  "buildAssignmentIndex", "assignmentComplete", "assignmentState"];
-const CONST_NAMES = ["TESTCACHE_PREFIX", "byStartDesc"];
+  "buildAssignmentIndex", "assignmentComplete", "assignmentState",
+  // practice sets (2026-08-31): attemptResumable and buildAssignmentIndex
+  // now branch through these
+  "isSetAssign", "setAttemptResumable", "canServeBank", "bankById"];
+const CONST_NAMES = ["TESTCACHE_PREFIX", "byStartDesc", "BANKCACHE_PREFIX"];
 
 const body = CONST_NAMES.map(n => extractConst(appSrc, n)).join("\n") + "\n\n" +
   FN_NAMES.map(n => extractFn(appSrc, n)).join("\n\n") +

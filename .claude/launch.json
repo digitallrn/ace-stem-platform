@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "repo-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8930", "--directory", "."],
+      "port": 8930
+    },
+    {
       "name": "dist-preview",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8931", "--directory", "dist"],
@@ -13,6 +19,13 @@
       "runtimeArgs": ["-m", "http.server", "8935", "--directory",
         "C:/Users/LEEDA/AppData/Local/Temp/claude/C--Users-LEEDA-OneDrive-Desktop-SAT-Simulator-platform-repo/e3f8953f-7b60-47d2-880e-95eef4ea31c2/scratchpad/pre3/dist"],
       "port": 8935
+    },
+    {
+      "name": "scratch-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8941", "--directory",
+        "C:/Users/LEEDA/AppData/Local/Temp/claude/C--Users-LEEDA-OneDrive-Desktop-SAT-Simulator-platform-repo/e3f8953f-7b60-47d2-880e-95eef4ea31c2/scratchpad"],
+      "port": 8941
     }
   ]
 }

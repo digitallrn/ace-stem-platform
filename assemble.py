@@ -77,6 +77,7 @@ SECRET_PATTERNS = (
 
 
 MANIFEST_REL = "testdata/manifest.js"
+BANK_MANIFEST_REL = "testdata/bank-manifest.js"
 
 
 def inlined_tests(base_dir):
@@ -106,6 +107,36 @@ def inlined_tests(base_dir):
             + "\n".join(blobs) + "\n</script>")
 
 
+def inlined_banks(base_dir):
+    """Every bank the bank-manifest lists, as one <script>.
+
+    Bank content is lazy-fetched at runtime exactly like a test's questions,
+    which the single self-contained file cannot do. Same mechanism as
+    inlined_tests, driven by "bankId" out of bank-manifest.js — the two
+    manifests are deliberately separate files and never merge.
+    """
+    testdata_dir = base_dir / "testdata"
+    manifest = testdata_dir / BANK_MANIFEST_REL.split("/")[-1]
+    if not manifest.exists():
+        raise FileNotFoundError("assemble.py: testdata/bank-manifest.js is missing")
+    ids = re.findall(r'"bankId"\s*:\s*"([^"]+)"', manifest.read_text(encoding="utf-8"))
+    seen, blobs = set(), []
+    for bid in ids:
+        if bid in seen:
+            continue
+        seen.add(bid)
+        f = testdata_dir / (bid + ".js")
+        if not f.exists():
+            raise FileNotFoundError(
+                f"assemble.py: bank-manifest lists {bid} but testdata/{bid}.js is missing")
+        blobs.append(f.read_text(encoding="utf-8"))
+    if not blobs:
+        return ""          # an empty bank manifest inlines nothing — still valid
+    return ("<script>\n/* inlined bank content — see assemble.py. Banks are NOT "
+            "tests: separate globals,\n   never joined to __TESTDATA__. */\n"
+            + "\n".join(blobs) + "\n</script>")
+
+
 def inline(html, base_dir):
     def css_sub(m):
         path = base_dir / m.group(1)
@@ -131,6 +162,10 @@ def inline(html, base_dir):
         # has no origin to download from.
         if name == MANIFEST_REL:
             out += "\n" + inlined_tests(base_dir)
+        # bank content rides behind ITS manifest for the same boot-order
+        # reason — the artifact must resolve a set's bank refs from memory
+        if name == BANK_MANIFEST_REL:
+            out += "\n" + inlined_banks(base_dir)
         return out
 
     html = LOCAL_CSS_RE.sub(css_sub, html)
