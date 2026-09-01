@@ -1117,6 +1117,15 @@ window.Attempts = (function(){
         for(const k of keys){
           const r = await AttemptStore.get(k);
           if(!r || !r.student || String(r.student.key || "") !== key) continue;
+          /* The storage KEY is authoritative for an attempt's identity; every
+             VALUE field (attemptId, kind, testId, setId) is student-writable in
+             shared/remote storage (ATTEMPTS-SPEC §7). A record whose attemptId
+             field disagrees with the key it is stored under is forged — drop it,
+             so downstream code can trust record.attemptId as "the key this is
+             stored under", which is how a set attempt (attempt:pset-…) is told
+             apart from a form attempt. A genuine record always stores under its
+             own attemptId (see Attempts.save), so this never drops real data. */
+          if(r.attemptId !== k) continue;
           out.push(r);
         }
         out.sort((a,b) => (b.startedAt || "").localeCompare(a.startedAt || ""));

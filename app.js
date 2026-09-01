@@ -1180,6 +1180,21 @@
      sidecar, and sets never reach Score Details). */
   function isSetAssign(a){ return !!a && a.kind === "set"; }
   function isSetRecord(r){ return !!r && r.kind === "set"; }
+  /* Whether a record is a set attempt is decided by its STORAGE KEY, not its
+     kind/testId fields — all record VALUE fields are student-writable in
+     shared/remote storage (ATTEMPTS-SPEC §7), and loadForStudent has already
+     dropped any record whose attemptId field ≠ its storage key, so attemptId
+     is the trusted key here. A set attempt is keyed attempt:pset-…; a form
+     attempt never is. This is what stops a student smuggling a copy of their
+     unreleased FORM attempt (form testId, scaled fields, no set shape) under a
+     pset- key — the server may stamp released on it via a two-write dance, but
+     the client must never render a pset-keyed record as a form. */
+  function isSetKeyed(r){ return !!r && typeof r.attemptId === "string" && r.attemptId.indexOf("attempt:pset-") === 0; }
+  /* A pset-keyed record is a GENUINE set attempt only if it also carries the
+     set shape. A pset-keyed record without it is forged/malformed and must
+     render on NO student surface — not as a form (via its testId), not as a
+     reviewable set (review needs setQuestions). */
+  function isValidSetRecord(r){ return isSetKeyed(r) && r.kind === "set" && Array.isArray(r.setQuestions); }
 
   function syntheticSetTest(setId, name, subject, questions, timeLimitMinutes){
     const section = subject === "math" ? "Math" : "Reading and Writing";
@@ -1903,12 +1918,21 @@
     }
     list.forEach(record => {
       const released = record.released === true;
-      /* Practice-set attempts: their own card — no Score Details, no scaled
-         anything (contract: scaled fields honestly absent). Review replays
-         against current content, version-tolerantly, so there is no
-         canServeVersion gate here; a per-question miss surfaces inside
-         review as an honest banner instead of withholding the whole card. */
-      if(isSetRecord(record)){
+      /* Route by the trusted storage KEY, not record.kind/testId (both
+         student-writable). A pset-keyed record is a set attempt or a forgery —
+         NEVER a form. Without this, a student holding a real set assignment
+         could POST a copy of their unreleased FORM attempt (form testId,
+         scaled fields, no set shape) under a pset- key; the server can be made
+         to stamp released:true, and this function — which resolves the form
+         branch by record.testId — would render it as a released form score.
+         A pset-keyed record that isn't a valid set attempt renders nothing. */
+      if(isSetKeyed(record)){
+        if(!isValidSetRecord(record)) return;
+        /* Practice-set attempts: their own card — no Score Details, no scaled
+           anything (contract: scaled fields honestly absent). Review replays
+           against current content, version-tolerantly, so there is no
+           canServeVersion gate here; a per-question miss surfaces inside
+           review as an honest banner instead of withholding the whole card. */
         const c = num(record.score && record.score.correct);
         const g = num(record.score && record.score.graded);
         const card = document.createElement("div");
@@ -4263,6 +4287,12 @@
      without a fetch — but a student reviewing on a different device still gets
      the loading state and the retry rather than an empty report. */
   function openScoreDetails(entryOrTest, record, origin){
+    /* Belt and braces: Score Details is the scaled-score surface and must
+       never open on a set attempt — genuine or forged. A set never has a
+       scaled score, and a pset-keyed record carrying a form testId is a
+       forgery. Its entry points (the Past card, the calculator) already
+       key-gate; this refuses the surface itself. */
+    if(record && isSetKeyed(record)) return;
     /* A pre-loaded test may be handed in, but only the build the attempt was
        SAT on is acceptable here — anything else goes through the pinned
        loader, which serves the record's version from the archive if the
@@ -4690,6 +4720,10 @@
      exactly as it is everywhere else in the student app. */
   function scPrefillSource(){
     const list = (state.pastAttempts || []).filter(r => {
+      // a pset-keyed record is never a form and never has a scaled score —
+      // this also blocks a forged form-shaped payload smuggled under a pset
+      // key (which would otherwise resolve via testById(r.testId) below)
+      if(isSetKeyed(r)) return false;
       if(r.released !== true) return false;
       if(r.status !== "completed" && r.status !== "timed-out") return false;
       const t = testById(r.testId);

@@ -245,7 +245,11 @@ window.Dashboard = (function(){
     let failed = 0;
     for(const k of keys){
       const r = await AttemptStore.get(k);
-      if(r && r.attemptId) loaded.push(r); else failed++;
+      // the storage KEY is authoritative; a record whose attemptId field
+      // disagrees with it is forged (every record VALUE is writable in shared
+      // storage, ATTEMPTS-SPEC §7). Drop it so a smuggled record can't pollute
+      // the tutor's tables/analytics either — matches loadForStudent.
+      if(r && r.attemptId === k) loaded.push(r); else failed++;
     }
     recs = loaded;
     await loadAssignsAndBugs();

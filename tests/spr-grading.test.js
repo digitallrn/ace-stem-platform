@@ -55,6 +55,11 @@ function sanitizeSpr(v){
 
 let pass = 0, fail = 0;
 const failures = [];
+/* The §4 exhaustive sweep is ~11M comparisons (~40s). SPR_AUDIT_ONLY=1 skips
+   it to run ONLY the §5 stored-attempt audit fast — used by
+   tests/set-audit.test.js, which invokes this script per fixture. §5's own
+   deps (the library T/B, oldSprValueMatches, grading.js) load regardless. */
+const AUDIT_ONLY = process.env.SPR_AUDIT_ONLY === "1";
 function check(name, got, want){
   const ok = got === want;
   if(ok) pass++; else { fail++; failures.push(`${name}\n     got ${got}, want ${want}`); }
@@ -125,8 +130,12 @@ function* everyEntry(){
   for(const s of seen) yield s;
 }
 const entries = [];
-for(const e of everyEntry()) entries.push(e);
-console.log(`    ${entries.length.toLocaleString()} enterable strings`);
+if(!AUDIT_ONLY){
+  for(const e of everyEntry()) entries.push(e);
+  console.log(`    ${entries.length.toLocaleString()} enterable strings`);
+} else {
+  console.log("    (SPR_AUDIT_ONLY=1 — skipping the exhaustive sweep; running §5 only)");
+}
 
 /* Every SPR key shipped in the library, taken from the MANIFEST — the file
    that defines the library and the one build-site.js ships from. Hardcoding
@@ -166,6 +175,7 @@ console.log(`    ${keys.length} shipped SPR questions (forms + banks)\n`);
 
 let totalDiffs = 0;
 const diffDetail = [];
+if(!AUDIT_ONLY){
 keys.forEach(k => {
   const changed = [];
   entries.forEach(e => {
@@ -249,6 +259,7 @@ const wronglyMoved = mustHold.filter(m => movedSet.has(m.join("|")));
 check("valid shortenings and exact values are untouched by the change", wronglyMoved.length, 0);
 if(wronglyMoved.length) console.log("    moved: " + wronglyMoved.map(m => m.join(" ")).join(", "));
 check("the two rules genuinely differ (guards against a silent revert)", totalDiffs > 0, true);
+}   // end if(!AUDIT_ONLY)
 
 /* ---------------------------------------------------------------------- */
 /* 5. Audit REAL stored attempts.

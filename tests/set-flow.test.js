@@ -365,6 +365,61 @@ function makeAppState(test){
       "readCachedBank(id, exactVersion) returns the build when that exact version IS cached");
   }
 
+  console.log("--- 6c. client routes Past cards by the trusted KEY, not record.testId ---");
+  {
+    /* Regression for the review follow-up: a form-shaped payload smuggled
+       under a pset key (server made to stamp released:true) must NOT render as
+       a released form score. renderPastCards routes by isSetKeyed/
+       isValidSetRecord; extract them and model the routing decision. */
+    const body = extractFn(appSrc, "isSetKeyed") + "\n" +
+      extractFn(appSrc, "isValidSetRecord") + "\n" +
+      "return { isSetKeyed, isValidSetRecord };";
+    const { isSetKeyed, isValidSetRecord } = new Function(body)();
+    // renderPastCards' routing: pset-keyed -> (valid set ? set card : DROP); else form
+    const routeOf = r => isSetKeyed(r) ? (isValidSetRecord(r) ? "set" : "drop") : "form";
+
+    const forged = { attemptId: "attempt:pset-1:1:eeee", testId: "202606asiav1",
+      released: true, status: "completed", score: { correct: 48, scaled: 1400 } };  // no kind/setQuestions
+    check(routeOf(forged) === "drop",
+      "a pset-keyed, form-shaped, released record is DROPPED — never rendered as a form score");
+
+    const legitForm = { attemptId: "attempt:202606asiav1:1:aaaa", testId: "202606asiav1",
+      released: true, status: "completed" };
+    check(routeOf(legitForm) === "form",
+      "a genuine form record (non-pset key) still routes to the form branch");
+
+    const legitSet = { attemptId: "attempt:pset-1:1:bbbb", kind: "set", setId: "pset-1",
+      released: true, status: "completed", setQuestions: [{ ref: "bank-x:q1" }] };
+    check(routeOf(legitSet) === "set",
+      "a genuine set record (pset key + kind + setQuestions) routes to the set card");
+
+    // a form-KEYED record wearing kind:"set" is not pset-keyed -> form branch,
+    // but the server never releases it, so released stays false -> not viewable
+    const formKeyKindSet = { attemptId: "attempt:202606asiav1:1:cccc", kind: "set",
+      testId: "202606asiav1", released: false, status: "completed", setQuestions: [] };
+    check(routeOf(formKeyKindSet) === "form" && formKeyKindSet.released === false,
+      "a form-keyed record wearing kind:set routes as a form but is unreleasable (server never released it)");
+  }
+
+  console.log("--- 6d. loadForStudent drops records whose attemptId != storage key ---");
+  {
+    const w = load();
+    // a genuine record: stored under its own attemptId
+    w.localStorage.setItem("devstore:attempt:pset-1:real",
+      JSON.stringify({ attemptId: "attempt:pset-1:real", student: { key: CODE },
+        kind: "set", status: "completed", startedAt: "2026-08-31T02:00:00Z" }));
+    // a FORGED record: stored under a pset key but its attemptId FIELD claims a
+    // form key (an attempt to fool key-based routing after the fact)
+    w.localStorage.setItem("devstore:attempt:pset-1:spoof",
+      JSON.stringify({ attemptId: "attempt:202606asiav1:elsewhere", student: { key: CODE },
+        testId: "202606asiav1", released: true, status: "completed", startedAt: "2026-08-31T03:00:00Z" }));
+    const all = await w.Attempts.loadForStudent(CODE);
+    const ids = Array.isArray(all) ? all.map(r => r.attemptId) : all;
+    check(Array.isArray(all) && all.length === 1 && all[0].attemptId === "attempt:pset-1:real",
+      "the attemptId-matches-key record is kept; the spoofed-attemptId record is dropped",
+      "got " + JSON.stringify(ids));
+  }
+
   console.log("--- 7. remote sync eligibility ---");
   {
     const w = load({ config: { SUPABASE_URL: "https://example-ref.supabase.co", SUPABASE_ANON_KEY: "sb_publishable_testkey" } });

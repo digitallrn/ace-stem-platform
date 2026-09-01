@@ -131,22 +131,35 @@ begin
   -- derived server-side from the SET-ASSIGNMENT row, exactly once — at the
   -- in-progress -> completed/timed-out transition.
   --
-  -- The discriminator is the ATTEMPT KEY PREFIX, never the client payload.
-  -- A set attempt is keyed 'attempt:pset-<setId>:...'; a form attempt is
-  -- 'attempt:<YYYYMMregionvN>:...', which cannot start with 'pset-'. The
-  -- earlier version gated on p_value->>'kind'='set', which is a
-  -- CLIENT-SUPPLIED field: a student could POST fn_upsert_attempt directly
-  -- with their real FORM attempt key + their form JSON augmented with
-  -- kind:'set' and a genuine set assignmentId, and the server would release
-  -- their real-test scaled score early — defeating contract 6's whole point
-  -- (self-release-forced-false for tests) and the §7 invariant that a
-  -- client-supplied `released` is ignored. Writing to a 'pset-' key can only
-  -- create/touch a SET record (never the form record at its own testId key),
-  -- so gating on the key closes the leak at the structural level; the
-  -- setId cross-check is defence in depth (the assignment must govern THIS
-  -- exact set, mirroring fn_get_set's setId verification).
+  -- The PRIMARY discriminator is the ATTEMPT KEY PREFIX, never the client
+  -- `kind` field. A set attempt is keyed 'attempt:pset-<setId>:...'; a form
+  -- attempt is 'attempt:<YYYYMMregionvN>:...', which cannot start with
+  -- 'pset-'. The first version gated on p_value->>'kind'='set', a
+  -- CLIENT-SUPPLIED field, so a student could POST their real FORM attempt
+  -- key + form JSON wearing kind:'set' and self-release their real-test
+  -- score, defeating contract 6 and the §7 invariant that a client-supplied
+  -- `released` is ignored. Writing to a 'pset-' key can only create/touch a
+  -- SET record, never the form record at its own testId key.
+  --
+  -- But the key prefix alone is not enough: a student could still write a
+  -- COPY of their form attempt (form testId, scaled fields, NO set shape)
+  -- UNDER a pset- key with a genuine set assignmentId, and this branch would
+  -- release it — the client, resolving Past cards by record.testId, would
+  -- then show it as a released form score. So the release also requires the
+  -- payload to actually BE a set attempt: kind:'set', a setQuestions ARRAY,
+  -- and the key's own setId (split_part 2) matching the payload's setId and
+  -- the assignment's setId. All four — key, payload kind, payload setId,
+  -- assignment setId — must agree. These are conjunctive RESTRICTIONS on the
+  -- key-prefixed branch, so they can only refuse a release, never grant one
+  -- to a form record (which never has a pset- key). The remaining two-write
+  -- vector (release a set-shaped record, then overwrite it form-shaped —
+  -- released is preserved across writes by design) is closed on the CLIENT:
+  -- a pset-keyed record lacking set shape renders on no student surface.
   if coalesce(v_released, 'false'::jsonb) = 'false'::jsonb
      and p_key like 'attempt:pset-%'
+     and p_value ->> 'kind' = 'set'
+     and jsonb_typeof(p_value -> 'setQuestions') = 'array'
+     and split_part(p_key, ':', 2) = (p_value ->> 'setId')
      and p_value ->> 'status' in ('completed', 'timed-out')
      and coalesce(v_status, '') not in ('completed', 'timed-out') then
     select a.value
