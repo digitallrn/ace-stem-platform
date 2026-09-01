@@ -27,6 +27,12 @@ window.Dashboard = (function(){
   let tab = "attempts";
   let sortKey = "startedAt", sortDir = -1;
   let lastExport = null;         // {ids:[attemptId], when} — unlocks delete
+  /* ---- custom practice sets (2026-08-31) ---- */
+  let sets = [];                 // loaded pset:<setId> rows
+  let builder = null;            // {setId|null, name, subject, refs:[]} while editing
+  let bankFilter = { q: "", subject: "", retired: true };   // Question Bank tab
+  let builderTestId = "";        // which form's questions the builder shows
+  let setsMsg = "";              // one-line status inside the Sets tab
   /* Manifest entries — names and versions, no questions. Keyed under every id
      a test has carried so records written before a rename still resolve. */
   const testsById = {};
@@ -41,6 +47,46 @@ window.Dashboard = (function(){
      slow or failed load degrades rather than blanking the dashboard. */
   const fullTests = {};
   const loadingTests = {};
+
+  /* Banks, same lazy pattern, through the shared loader (AppBankLoader) so
+     the two apps use one cache. Banks are NOT tests: nothing here ever joins
+     them into testsById or the test filter — they exist for the Question
+     Bank tab, the set builder, and resolving set-record provenance. */
+  const loadedBanks = {};
+  const loadingBanks = {};
+  function ensureBankLoaded(bankId){
+    if(!bankId || loadedBanks[bankId] || loadingBanks[bankId]) return;
+    if(!window.AppBankLoader || !AppBankLoader.byId(bankId)) return;
+    loadingBanks[bankId] = true;
+    AppBankLoader.load(bankId).then(bank => {
+      loadedBanks[bankId] = bank;
+      loadingBanks[bankId] = false;
+      render();
+      if(openAttemptId && !$("dashDetail").classList.contains("hidden")) openDetail(openAttemptId);
+    }).catch(()=>{ loadingBanks[bankId] = "failed"; });
+  }
+  /* Resolve a SET record's answer key (a fully-qualified ref) to its question
+     through the record's own frozen provenance — the dashboard analogue of
+     the student app's review rebuild. Returns {q} or null (content not
+     loaded yet / unresolvable); callers keep their honest "unavailable"
+     fallbacks either way, so set records are handled EXPLICITLY rather than
+     falling through the form-only qIndex and reading as missing. */
+  function setProvLookup(r, qid){
+    if(!r || r.kind !== "set" || !Array.isArray(r.setQuestions)) return null;
+    const e = r.setQuestions.find(x => x && x.ref === qid);
+    if(!e) return null;
+    if(e.source === "bank"){
+      const b = loadedBanks[e.bankId];
+      if(!b){ ensureBankLoaded(e.bankId); return null; }
+      const q = (b.questions || []).find(x => x && x.qid === e.qid);
+      return q ? { q: q } : null;
+    }
+    if(e.source === "form"){
+      const ix = qIndex(e.testId);
+      return (ix && ix[e.qid]) || null;
+    }
+    return null;
+  }
   function ensureTestLoaded(testId){
     const entry = testsById[testId];
     if(!entry || fullTests[entry.testId] || loadingTests[entry.testId]) return;
@@ -211,8 +257,22 @@ window.Dashboard = (function(){
     renderAll();
   }
 
+  /* pset rows: the tutor's editable set objects. Remote mode already mirrors
+     every server row locally via pullAllForTutor before this runs. */
+  async function loadSets(){
+    sets = [];
+    const keys = await AttemptStore.list("pset:");
+    if(!keys) return;
+    for(const k of keys){
+      const v = await AttemptStore.get(k);
+      if(v && v.setId && typeof v.name === "string") sets.push(v);
+    }
+    sets.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
   async function loadAssignsAndBugs(){
     assigns = []; bugs = []; profiles = {};
+    await loadSets();
     /* display-name profiles live in their own rows, never inside attempts */
     const pKeys = await AttemptStore.list("student:");
     if(pKeys){
@@ -346,6 +406,8 @@ window.Dashboard = (function(){
     else if(tab === "students") body.innerHTML = viewStudents(rows);
     else if(tab === "items") body.innerHTML = viewItems(rows);
     else if(tab === "assign") body.innerHTML = viewAssign();
+    else if(tab === "bank") body.innerHTML = viewBank();
+    else if(tab === "sets") body.innerHTML = viewSets();
     else if(tab === "bugs") body.innerHTML = viewBugs();
     else body.innerHTML = viewInsights(rows);
     attachBodyHandlers();
@@ -406,7 +468,7 @@ window.Dashboard = (function(){
       sorted.map((r, i) => `
         <tr data-att="${escAttr(r.attemptId)}">
           <td>${studentCell(r.student && r.student.code)}</td>
-          <td>${esc(r.testName || r.testId)}</td>
+          <td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</td>
           <td>${fmtDate(r.startedAt)}</td>
           <td><b>${scoreStr(r)}</b></td>
           <td>${statusBadge(r)}</td>
@@ -464,7 +526,7 @@ window.Dashboard = (function(){
           const bs = (r.score && r.score.bySection) || {};
           const rw = bs["Reading and Writing"], ma = bs["Math"];
           return `<tr data-att="${escAttr(r.attemptId)}">
-            <td>${fmtDate(r.startedAt)}</td><td>${esc(r.testName || r.testId)}</td>
+            <td>${fmtDate(r.startedAt)}</td><td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</td>
             <td><b>${scoreStr(r)}</b></td>
             <td>${countPair(rw)}</td>
             <td>${countPair(ma)}</td>
@@ -494,7 +556,16 @@ window.Dashboard = (function(){
     const idx = qIndex(testId);
     const use = rows.filter(r => r.testId === testId);
     const stats = {};   // qid -> {answered, correct, wrongGiven:[], times:[]}
+    /* set records under this "testId" (their setId): resolve question text
+       through each record's snapshot so the rows aren't blank — explicit set
+       handling, mirroring openDetail */
+    const provInfo = {};
     use.forEach(r => {
+      if(r.kind === "set"){
+        Object.keys(r.answers || {}).forEach(qid => {
+          if(!provInfo[qid]) provInfo[qid] = setProvLookup(r, qid);
+        });
+      }
       Object.entries(r.answers || {}).forEach(([qid, a]) => {
         const s = stats[qid] = stats[qid] || { answered:0, correct:0, wrongGiven:[], times:[] };
         if(a.timeSpentSeconds) s.times.push(a.timeSpentSeconds);
@@ -508,7 +579,7 @@ window.Dashboard = (function(){
     const items = Object.entries(stats)
       .filter(([, s]) => s.answered > 0)
       .map(([qid, s]) => {
-        const info = idx && idx[qid];
+        const info = (idx && idx[qid]) || provInfo[qid] || null;
         const pct = s.correct / s.answered;
         const modeMap = {};
         s.wrongGiven.forEach(g => { const k = String(g); modeMap[k] = (modeMap[k]||0)+1; });
@@ -545,7 +616,12 @@ window.Dashboard = (function(){
     const pacing = [];
 
     use.forEach(r => {
-      const idx = qIndex(r.testId);
+      /* set records resolve through their snapshot; forms through qIndex.
+         qFor() is the one lookup both the change-analysis and the blind-spot
+         label use, so set attempts join every insight instead of silently
+         dropping out of the re-grade. */
+      const idx = r.kind === "set" ? null : qIndex(r.testId);
+      const qFor = qid => (idx && idx[qid]) || (r.kind === "set" ? setProvLookup(r, qid) : null);
       const times = Object.values(r.answers).map(a => a.timeSpentSeconds).filter(t => t > 0);
       const med = median(times) || 0;
       Object.entries(r.answers).forEach(([qid, a]) => {
@@ -560,7 +636,7 @@ window.Dashboard = (function(){
           }
         }
         if(a.changeCount > 0 && a.firstGiven !== null && a.firstGiven !== undefined &&
-           a.given !== null && a.given !== undefined && a.firstGiven !== a.given && idx && idx[qid]){
+           a.given !== null && a.given !== undefined && a.firstGiven !== a.given && qFor(qid)){
           /* Both sides must come from the SAME rule. This recomputed
              firstGiven while reading the final verdict off the record, so for
              any attempt recorded before the SPR rule changed (2026-08-02) the
@@ -568,8 +644,8 @@ window.Dashboard = (function(){
              wrong->right when the record says it never was, and the
              right->wrong counter — the one this panel exists to surface —
              read zero in exactly the case it should have caught. */
-          const firstCorrect = answerMatches(idx[qid].q, a.firstGiven);
-          const finalCorrect = answerMatches(idx[qid].q, a.given);
+          const firstCorrect = answerMatches(qFor(qid).q, a.firstGiven);
+          const finalCorrect = answerMatches(qFor(qid).q, a.given);
           if(firstCorrect && !finalCorrect) changes.rw++;
           else if(!firstCorrect && finalCorrect) changes.wr++;
           else if(!firstCorrect && !finalCorrect) changes.ww++;
@@ -583,8 +659,12 @@ window.Dashboard = (function(){
       });
     });
 
+    const blindQ = x => {
+      const info = x.r.kind === "set" ? setProvLookup(x.r, x.qid) : (qIndex(x.r.testId) || {})[x.qid];
+      return info && info.q;
+    };
     const blind = quad.nw.map(x =>
-      `<tr><td>${esc(x.code)}</td><td>${esc(x.qid)}</td><td>${esc(x.r.testName || x.r.testId)}</td><td>${esc(givenLabel(x.a, (qIndex(x.r.testId)||{})[x.qid] && qIndex(x.r.testId)[x.qid].q))}</td><td>${mmss(x.a.timeSpentSeconds)}</td></tr>`).join("");
+      `<tr><td>${esc(x.code)}</td><td>${esc(x.qid)}</td><td>${esc(x.r.testName || x.r.testId)}</td><td>${esc(givenLabel(x.a, blindQ(x)))}</td><td>${mmss(x.a.timeSpentSeconds)}</td></tr>`).join("");
 
     return `
       <div class="dcard lead">
@@ -1022,6 +1102,483 @@ window.Dashboard = (function(){
     await loadFromStorage();
   }
 
+  /* ---------- Question Bank tab (custom practice sets, 2026-08-31) ----------
+     Read-only browse over BANK_INDEX. Authoring is the TSV lane (test-bank
+     repo: banks/<bankId>/inbox.tsv -> tsv_to_bluebook_json.py --bank ->
+     export_bank.py); nothing here writes a bank. Every string is escaped —
+     the index ships with the app, but one escaping rule for every surface
+     beats reasoning about which inputs are trusted. */
+  function bankStatusBadge(e){
+    if(!e.retired) return '<span class="dstatus ok">active</span>';
+    return '<span class="dstatus to">retired</span>' +
+      (e.supersededBy ? ' <span class="dcode">→ ' + esc(e.supersededBy) + '</span>' : "");
+  }
+  function viewBank(){
+    const idx = window.BANK_INDEX;
+    const banks = window.BANK_MANIFEST || [];
+    if(!idx || !Array.isArray(idx.entries) || !banks.length){
+      return '<p class="dash-empty">No question banks are loaded — testdata/bank-manifest.js and bank-index.js ship from the test-bank repo\'s export lane.</p>';
+    }
+    const q = bankFilter.q.trim().toLowerCase();
+    const entries = idx.entries.filter(e => {
+      if(bankFilter.subject && e.subject !== bankFilter.subject) return false;
+      if(!bankFilter.retired && e.retired) return false;
+      if(!q) return true;
+      return [e.ref, e.qid, e.skill, e.stemPreview, (e.tags || []).join(" ")]
+        .some(s => String(s || "").toLowerCase().indexOf(q) !== -1);
+    });
+    const bankLines = banks.map(b =>
+      `<p class="dash-hint"><b>${esc(b.bankName || b.bankId)}</b> <span class="dcode">${esc(b.bankId)}</span> · ` +
+      `${cnt(b.activeCount)} active / ${cnt(b.retiredCount)} retired · version ${esc(b.bankVersion || "?")}</p>`).join("");
+    const rowsHtml = entries.map(e => `
+      <tr>
+        <td class="dcode">${esc(e.ref)}</td>
+        <td>${esc(e.subject === "math" ? "Math" : "R&W")}</td>
+        <td>${esc(e.skill || "—")}</td>
+        <td>${esc(e.keyType || "?")}</td>
+        <td>${(e.tags || []).map(t => '<span class="dcode">' + esc(t) + '</span>').join(" ") || "—"}</td>
+        <td>${bankStatusBadge(e)}</td>
+        <td class="bank-stem">${esc(e.stemPreview || "")}</td>
+      </tr>`).join("");
+    return `
+      <div class="dcard">
+        <h3>Question Bank <span class="dcard-sub">read-only</span></h3>
+        <p class="dash-hint">Questions are authored in the test-bank repo's TSV lane and arrive here through
+          <code>export_bank.py</code> — a shipped question never changes; edits mint a new qid and retire the old one.</p>
+        ${bankLines}
+        <div class="af-actions bank-filters">
+          <input id="bankSearch" placeholder="Search qid / skill / tags / stem…" value="${escAttr(bankFilter.q)}" autocomplete="off">
+          <select id="bankSubject">
+            <option value=""${bankFilter.subject === "" ? " selected" : ""}>All subjects</option>
+            <option value="rw"${bankFilter.subject === "rw" ? " selected" : ""}>Reading and Writing</option>
+            <option value="math"${bankFilter.subject === "math" ? " selected" : ""}>Math</option>
+          </select>
+          <label class="sd-toggle"><input type="checkbox" id="bankRetired" ${bankFilter.retired ? "checked" : ""}> Show retired</label>
+        </div>
+      </div>
+      ${entries.length ? `<table class="dtable"><thead><tr>
+          <th>Ref</th><th>Subject</th><th>Skill</th><th>Type</th><th>Tags</th><th>Status</th><th>Stem</th>
+        </tr></thead><tbody>${rowsHtml}</tbody></table>`
+        : '<p class="dash-empty">No bank questions match.</p>'}`;
+  }
+
+  /* ---------- Practice Sets tab ----------
+     Create/edit/delete SETS (mutable pset:<setId> rows), assign them to
+     codes, and list attempts per set. The builder's question index is the
+     bank index PLUS a form-question index derived at runtime from loaded
+     testdata (testId, module, qid, keyType, stem preview; skill comes
+     straight off the question and is empty where a form is untagged). */
+  function stripTokens(s){
+    return String(s == null ? "" : s).replace(/\{\{\/?[a-z]+\}\}/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  }
+  function subjectOfSection(section){ return section === "Math" ? "math" : "rw"; }
+  function refKey(ref){
+    return ref.type === "bank" ? (ref.bankId + ":" + ref.qid) : (ref.testId + ":" + ref.qid);
+  }
+  function refLabel(ref){
+    if(ref.type === "bank"){
+      const e = (window.BANK_INDEX && BANK_INDEX.entries || []).find(x => x.bankId === ref.bankId && x.qid === ref.qid);
+      return { title: ref.bankId + ":" + ref.qid, sub: e ? (e.skill || "") + (e.retired ? " · RETIRED" : "") : "", stem: e ? e.stemPreview : "" };
+    }
+    const t = testsById[ref.testId];
+    const ix = qIndex(ref.testId);
+    const info = ix && ix[ref.qid];
+    return { title: (t ? t.testName : ref.testId) + " · " + ref.qid,
+      sub: info && info.q.skill ? info.q.skill : "",
+      stem: info ? stripTokens(info.q.questionText) : "" };
+  }
+  function setAttemptsFor(setId){
+    return recs.filter(r => r.kind === "set" && r.setId === setId);
+  }
+  function assignmentsForSet(setId){
+    const out = [];
+    assigns.forEach(entry => (entry.list || []).forEach(a => {
+      if(a && a.kind === "set" && a.setId === setId) out.push({ code: entry.code, a: a });
+    }));
+    return out;
+  }
+
+  function viewSets(){
+    const canWrite = source === "storage";
+    if(!canWrite) return '<p class="dash-empty">You\'re viewing a loaded archive file — sets are managed against live storage. Reload from storage first.</p>';
+    const listHtml = sets.length ? `<table class="dtable"><thead><tr>
+        <th>Set</th><th>Subject</th><th>Questions</th><th>Assigned</th><th>Attempts</th><th></th>
+      </tr></thead><tbody>` +
+      sets.map(s => {
+        const nAssign = assignmentsForSet(s.setId).length;
+        const nAtt = setAttemptsFor(s.setId).length;
+        return `<tr>
+          <td><b>${esc(s.name)}</b> <span class="dcode">${esc(s.setId)}</span></td>
+          <td>${esc(s.subject === "math" ? "Math" : "R&W")}</td>
+          <td>${Array.isArray(s.refs) ? s.refs.length : 0}</td>
+          <td>${nAssign}</td>
+          <td>${nAtt}</td>
+          <td>
+            <button class="dash-rel set-edit" data-set="${escAttr(s.setId)}">Edit</button>
+            <button class="dash-rel set-del" data-set="${escAttr(s.setId)}">Delete</button>
+          </td>
+        </tr>`;
+      }).join("") + "</tbody></table>"
+      : '<p class="dash-empty">No practice sets yet — build one below.</p>';
+
+    /* attempts per set (records audit stays in the Attempts tab; this is the
+       per-set slice the contract asks for) */
+    const attemptsHtml = sets.map(s => {
+      const mine = setAttemptsFor(s.setId).slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+      if(!mine.length) return "";
+      return `<div class="dcard"><h3>${esc(s.name)} <span class="dcard-sub">${mine.length} attempt(s)</span></h3>
+        <table class="dtable slim"><thead><tr><th>Student</th><th>Date</th><th>Score</th><th>Status</th><th>Results</th></tr></thead><tbody>` +
+        mine.map(r => `<tr data-att="${escAttr(r.attemptId)}">
+          <td>${studentCell(r.student && r.student.code)}</td>
+          <td>${fmtDate(r.startedAt)}</td>
+          <td><b>${scoreStr(r)}</b></td>
+          <td>${statusBadge(r)}${timingBadgeHtml(r.timing)}</td>
+          <td>${releaseCell(r)}</td>
+        </tr>`).join("") + "</tbody></table></div>";
+    }).join("");
+
+    return `
+      <div class="dcard">
+        <h3>Practice Sets</h3>
+        <p class="dash-hint">A set is a named, ordered pick of questions from the bank and from published tests —
+          one subject per set, sat untimed (or with a time limit you choose at assignment) in the real test UI, no scaled scoring.</p>
+        ${listHtml}
+        <div class="af-actions">
+          <button class="pill" id="setNewBtn" style="padding:9px 22px;">New set</button>
+          <span class="dash-hint" id="setsMsg">${esc(setsMsg)}</span>
+        </div>
+      </div>
+      ${builder ? viewSetBuilder() : ""}
+      ${viewSetAssign()}
+      ${attemptsHtml}`;
+  }
+
+  function viewSetBuilder(){
+    const refs = builder.refs;
+    const refsHtml = refs.length ? refs.map((ref, i) => {
+      const lbl = refLabel(ref);
+      return `<div class="setref-row">
+        <span class="setref-n">${i + 1}</span>
+        <span class="setref-main"><b>${esc(lbl.title)}</b>${lbl.sub ? ' <span class="dcode">' + esc(lbl.sub) + "</span>" : ""}
+          <span class="bank-stem">${esc(lbl.stem)}</span></span>
+        <span class="setref-btns">
+          <button class="dash-rel ref-up" data-i="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button class="dash-rel ref-down" data-i="${i}" ${i === refs.length - 1 ? "disabled" : ""}>↓</button>
+          <button class="dash-rel ref-rm" data-i="${i}">✕</button>
+        </span>
+      </div>`;
+    }).join("") : '<p class="dash-empty">No questions yet — add from the bank or a test below.</p>';
+
+    /* bank picker: subject-matched, active first, retired flagged */
+    const bankEntries = (window.BANK_INDEX && BANK_INDEX.entries || [])
+      .filter(e => e.subject === builder.subject);
+    const inSet = {};
+    refs.forEach(r => { inSet[refKey(r)] = true; });
+    const bankPickHtml = bankEntries.length ? bankEntries.map(e => `
+      <div class="setpick-row${e.retired ? " is-retired" : ""}">
+        <span class="setpick-main"><b>${esc(e.ref)}</b> ${bankStatusBadge(e)}
+          <span class="dcode">${esc(e.skill || "")}</span>
+          <span class="bank-stem">${esc(e.stemPreview || "")}</span></span>
+        <button class="dash-rel pick-bank" data-bank="${escAttr(e.bankId)}" data-qid="${escAttr(e.qid)}"
+          ${inSet[e.bankId + ":" + e.qid] ? "disabled" : ""}>${inSet[e.bankId + ":" + e.qid] ? "Added" : "Add"}</button>
+      </div>`).join("")
+      : '<p class="dash-empty">The bank has no ' + esc(builder.subject === "math" ? "Math" : "R&W") + ' questions yet.</p>';
+
+    /* form picker: pick a test, load its content, then per-module rows */
+    const wantSection = builder.subject === "math" ? "Math" : "Reading and Writing";
+    const testOpts = (window.TEST_MANIFEST || []).map(t =>
+      `<option value="${escAttr(t.testId)}"${builderTestId === t.testId ? " selected" : ""}>${esc(t.testName)}</option>`).join("");
+    let formPickHtml = "";
+    if(builderTestId){
+      const full = fullTests[builderTestId];
+      if(!full){
+        ensureTestLoaded(builderTestId);
+        formPickHtml = '<p class="dash-hint">Loading questions…</p>';
+      } else {
+        formPickHtml = full.modules.filter(m => m.section === wantSection).map(m => {
+          const allIn = m.questions.every(q => inSet[builderTestId + ":" + q.id]);
+          return `<div class="setpick-mod">
+            <div class="setpick-modhead"><b>${esc(m.section)} · ${esc(m.moduleLabel)}</b>
+              <button class="dash-rel pick-module" data-mod="${escAttr(m.moduleId)}" ${allIn ? "disabled" : ""}>
+                ${allIn ? "All added" : "Add whole module"}</button></div>` +
+            m.questions.map((q, qi) => `
+              <div class="setpick-row">
+                <span class="setpick-main"><b>${qi + 1}</b> <span class="dcode">${esc(q.id)}</span> ${esc(q.type || "?")}
+                  ${q.skill ? '<span class="dcode">' + esc(q.skill) + "</span>" : ""}
+                  <span class="bank-stem">${esc(stripTokens(q.questionText))}</span></span>
+                <button class="dash-rel pick-form" data-mod="${escAttr(m.moduleId)}" data-qid="${escAttr(q.id)}"
+                  ${inSet[builderTestId + ":" + q.id] ? "disabled" : ""}>${inSet[builderTestId + ":" + q.id] ? "Added" : "Add"}</button>
+              </div>`).join("") + "</div>";
+        }).join("") || '<p class="dash-empty">That test has no ' + esc(wantSection) + ' modules.</p>';
+      }
+    }
+
+    return `
+      <div class="dcard set-builder">
+        <h3>${builder.setId ? "Edit set" : "New set"}</h3>
+        <div class="af-grid">
+          <label>Name (students see this)
+            <input id="sbName" value="${escAttr(builder.name)}" placeholder="Linear equations warm-up" autocomplete="off"></label>
+          <label>Subject — one per set
+            <select id="sbSubject" ${refs.length ? "disabled title=\"Remove every question to change the subject\"" : ""}>
+              <option value="math"${builder.subject === "math" ? " selected" : ""}>Math</option>
+              <option value="rw"${builder.subject === "rw" ? " selected" : ""}>Reading and Writing</option>
+            </select></label>
+        </div>
+        <h4>Questions — in the order students see them</h4>
+        <div class="setref-list">${refsHtml}</div>
+        <div class="setpick-cols">
+          <div>
+            <h4>From the question bank</h4>
+            ${bankPickHtml}
+          </div>
+          <div>
+            <h4>From a test</h4>
+            <label>Test <select id="sbTest"><option value="">Pick a test…</option>${testOpts}</select></label>
+            ${formPickHtml}
+          </div>
+        </div>
+        <div class="af-actions">
+          <button class="pill" id="sbSaveBtn" style="padding:9px 26px;">Save set</button>
+          <button class="pill ghost" id="sbCancelBtn" style="padding:9px 20px;">Cancel</button>
+          <span class="dash-hint" id="sbMsg"></span>
+        </div>
+      </div>`;
+  }
+
+  function viewSetAssign(){
+    if(!sets.length) return "";
+    const knownCodes = Array.from(new Set(
+      recs.map(r => r.student && r.student.key).filter(Boolean)
+        .concat(assigns.map(a => a.code))
+    )).sort();
+    const existing = [];
+    assigns.forEach(entry => (entry.list || []).forEach(a => {
+      if(a && a.kind === "set") existing.push({ code: entry.code, a: a });
+    }));
+    const rowsHtml = existing.map(x => {
+      const s = sets.find(v => v.setId === x.a.setId);
+      const st = assignRowStatus(x.code, x.a);
+      const deletable = st === "pending" || st === "expired";
+      return `<tr>
+        <td>${studentCell(x.code)}</td>
+        <td>${esc((s && s.name) || x.a.setName || x.a.setId)}</td>
+        <td>${x.a.timeLimitMinutes ? esc(String(x.a.timeLimitMinutes)) + " min" : "Untimed"}</td>
+        <td>${x.a.holdRelease ? "Held — release manually" : "Releases on submit"}</td>
+        <td>${fmtDay(x.a.expiresAt)}</td>
+        <td><span class="dstatus ${ {completed:"ok", "in-progress":"warn", expired:"to"}[st] || "" }">${st}</span></td>
+        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${escAttr(x.code)}" data-aid="${escAttr(x.a.assignmentId)}">Delete</button>` : ""}</td>
+      </tr>`;
+    }).join("");
+    return `
+      <div class="dcard">
+        <h3>Assign a set</h3>
+        <div class="af-grid">
+          <label>Set
+            <select id="saSet">${sets.map(s => `<option value="${escAttr(s.setId)}">${esc(s.name)}</option>`).join("")}</select></label>
+          <label>Student codes (seen in storage)
+            <select id="saCodes" multiple size="4">${knownCodes.map(c => `<option value="${escAttr(c)}">${esc(codeOptionLabel(c))}</option>`).join("")}</select></label>
+          <label>More codes (comma-separated)
+            <span class="af-codegen">
+              <input id="saFree" placeholder="AS-XXXXXXXX" autocomplete="off">
+              <button type="button" class="pill ghost" id="saGenBtn" title="Generate a new unused code">Generate</button>
+            </span></label>
+          <label>Time limit (minutes, blank = untimed)
+            <input id="saLimit" type="number" min="1" max="180" placeholder="untimed"></label>
+          <label>Expires (optional, end of day)
+            <input type="date" id="saExpires"></label>
+          <label class="sd-toggle" style="align-self:end;"><input type="checkbox" id="saHold">
+            Hold results — release manually instead of on submit</label>
+        </div>
+        <div class="af-actions">
+          <button class="pill" id="saAssignBtn" style="padding:9px 26px;">Assign set</button>
+          <span class="dash-hint" id="saMsg"></span>
+        </div>
+        ${existing.length ? `<table class="dtable slim"><thead><tr>
+            <th>Student</th><th>Set</th><th>Timing</th><th>Results</th><th>Expires</th><th>Status</th><th></th>
+          </tr></thead><tbody>${rowsHtml}</tbody></table>` : ""}
+      </div>`;
+  }
+
+  /* ---- set persistence (tutor-only writes: setLocal + adminUpsert, the
+     same two-step every other tutor write uses) ---- */
+  function newSetId(){
+    return "pset-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6);
+  }
+  async function saveSetFromBuilder(){
+    const name = $("sbName").value.trim().slice(0, 80);
+    if(!name){ $("sbMsg").textContent = "Give the set a name."; return; }
+    if(!builder.refs.length){ $("sbMsg").textContent = "Add at least one question."; return; }
+    builder.name = name;
+    const now = new Date().toISOString();
+    const isNew = !builder.setId;
+    const set = {
+      setId: builder.setId || newSetId(),
+      name: name,
+      subject: builder.subject,
+      refs: builder.refs,
+      createdAt: builder.createdAt || now,
+      updatedAt: now
+    };
+    const key = "pset:" + set.setId;
+    let ok = await AttemptStore.setLocal(key, set);
+    if(ok && AttemptStore.isRemote()){
+      try{ await AttemptStore.adminUpsert(key, null, set); }
+      catch(e){ ok = false; }
+    }
+    setsMsg = ok
+      ? (isNew ? "Created “" + set.name + "” — assign it below." : "Saved “" + set.name + "”. Existing assignments use the updated set from the next sitting on; completed attempts keep their own snapshot.")
+      : "Couldn't save the set — check your tutor sign-in and try again.";
+    if(ok){ builder = null; await loadSets(); }
+    render();
+  }
+  async function deleteSet(setId){
+    const s = sets.find(x => x.setId === setId);
+    if(!s) return;
+    const live = assignmentsForSet(setId);
+    const warn = "Delete the set “" + s.name + "”?\n\n" +
+      (live.length
+        ? "It is assigned to: " + live.map(x => x.code).join(", ") + ".\nAn UNSTARTED assignment of it will no longer be able to start.\n\n"
+        : "") +
+      "Completed and in-progress attempts are NOT affected — each attempt froze its own copy of the questions at start.";
+    if(!confirm(warn)) return;
+    await AttemptStore.remove("pset:" + setId);
+    if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete("pset:" + setId); }catch(e){} }
+    setsMsg = "Deleted “" + s.name + "”.";
+    await loadSets();
+    render();
+  }
+  async function assignSetFromForm(){
+    const setId = $("saSet").value;
+    const s = sets.find(x => x.setId === setId);
+    if(!s){ $("saMsg").textContent = "Pick a set."; return; }
+    const sel = Array.from($("saCodes").selectedOptions).map(o => o.value);
+    const free = $("saFree").value.split(/[\s,;]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
+    const bad = free.filter(c => !StudentCode.valid(c));
+    if(bad.length){ $("saMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
+    const codes = Array.from(new Set(sel.concat(free)));
+    if(!codes.length){ $("saMsg").textContent = "Pick or enter at least one student code."; return; }
+    const limitRaw = parseInt($("saLimit").value, 10);
+    const limit = (isFinite(limitRaw) && limitRaw > 0) ? Math.min(limitRaw, 180) : null;
+    const expires = $("saExpires").value ? new Date($("saExpires").value + "T23:59:00").toISOString() : null;
+    let okAll = true, remoteFailed = false;
+    for(const code of codes){
+      const a = {
+        assignmentId: "a-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6),
+        kind: "set", category: "practice",
+        setId: s.setId, setName: s.name,
+        questionCount: Array.isArray(s.refs) ? s.refs.length : 0,
+        timeLimitMinutes: limit,
+        holdRelease: $("saHold").checked === true,
+        windowOpens: null, expiresAt: expires,
+        assignedAt: new Date().toISOString(),
+        completedAttemptId: null
+      };
+      const key = "assign:" + code + ":" + a.assignmentId;
+      if(!(await AttemptStore.setLocal(key, a))) okAll = false;
+      if(AttemptStore.isRemote()){
+        try{ await AttemptStore.adminUpsert(key, code, a); }
+        catch(e){ remoteFailed = true; }
+      }
+    }
+    $("saMsg").textContent = !okAll
+      ? "Some assignment writes failed — storage problem."
+      : remoteFailed
+        ? "Saved locally, but the server write failed — students won't see this until it syncs."
+        : "Assigned “" + s.name + "” to " + codes.join(", ") + (AttemptStore.isRemote() ? " (synced)." : ".");
+    await loadAssignsAndBugs();
+    render();
+  }
+  function builderAddRef(ref){
+    if(!builder) return;
+    const k = refKey(ref);
+    if(builder.refs.some(r => refKey(r) === k)) return;   // no duplicates
+    builder.refs.push(ref);
+    render();
+  }
+  function attachSetsHandlers(){
+    const nb = $("setNewBtn");
+    if(nb) nb.addEventListener("click", ()=>{
+      builder = { setId: null, name: "", subject: "math", refs: [] };
+      builderTestId = "";
+      render();
+    });
+    document.querySelectorAll("#dashBody .set-edit").forEach(btn =>
+      btn.addEventListener("click", ()=>{
+        const s = sets.find(x => x.setId === btn.dataset.set);
+        if(!s) return;
+        builder = JSON.parse(JSON.stringify({ setId: s.setId, name: s.name,
+          subject: s.subject === "math" ? "math" : "rw",
+          refs: Array.isArray(s.refs) ? s.refs : [], createdAt: s.createdAt }));
+        builderTestId = "";
+        render();
+      }));
+    document.querySelectorAll("#dashBody .set-del").forEach(btn =>
+      btn.addEventListener("click", ()=> deleteSet(btn.dataset.set)));
+    if(builder){
+      const nameIn = $("sbName");
+      if(nameIn) nameIn.addEventListener("input", ()=>{ builder.name = nameIn.value; });
+      const subj = $("sbSubject");
+      if(subj) subj.addEventListener("change", ()=>{ builder.subject = subj.value === "rw" ? "rw" : "math"; render(); });
+      const tsel = $("sbTest");
+      if(tsel) tsel.addEventListener("change", ()=>{ builderTestId = tsel.value; render(); });
+      const save = $("sbSaveBtn");
+      if(save) save.addEventListener("click", saveSetFromBuilder);
+      const cancel = $("sbCancelBtn");
+      if(cancel) cancel.addEventListener("click", ()=>{ builder = null; render(); });
+      document.querySelectorAll("#dashBody .pick-bank").forEach(btn =>
+        btn.addEventListener("click", ()=> builderAddRef({ type: "bank", bankId: btn.dataset.bank, qid: btn.dataset.qid })));
+      document.querySelectorAll("#dashBody .pick-form").forEach(btn =>
+        btn.addEventListener("click", ()=> builderAddRef({ type: "form", testId: builderTestId, moduleId: btn.dataset.mod, qid: btn.dataset.qid })));
+      document.querySelectorAll("#dashBody .pick-module").forEach(btn =>
+        btn.addEventListener("click", ()=>{
+          /* whole-module selection is a CONVENIENCE that expands to explicit
+             refs — the set stores every (testId, moduleId, qid), never
+             "module m1 of X" */
+          const full = fullTests[builderTestId];
+          const m = full && full.modules.find(x => x.moduleId === btn.dataset.mod);
+          if(!m) return;
+          m.questions.forEach(q => {
+            const k = builderTestId + ":" + q.id;
+            if(!builder.refs.some(r => refKey(r) === k))
+              builder.refs.push({ type: "form", testId: builderTestId, moduleId: m.moduleId, qid: q.id });
+          });
+          render();
+        }));
+      document.querySelectorAll("#dashBody .ref-rm").forEach(btn =>
+        btn.addEventListener("click", ()=>{ builder.refs.splice(parseInt(btn.dataset.i, 10), 1); render(); }));
+      document.querySelectorAll("#dashBody .ref-up").forEach(btn =>
+        btn.addEventListener("click", ()=>{
+          const i = parseInt(btn.dataset.i, 10);
+          if(i > 0){ const t = builder.refs[i - 1]; builder.refs[i - 1] = builder.refs[i]; builder.refs[i] = t; render(); }
+        }));
+      document.querySelectorAll("#dashBody .ref-down").forEach(btn =>
+        btn.addEventListener("click", ()=>{
+          const i = parseInt(btn.dataset.i, 10);
+          if(i < builder.refs.length - 1){ const t = builder.refs[i + 1]; builder.refs[i + 1] = builder.refs[i]; builder.refs[i] = t; render(); }
+        }));
+    }
+    const sa = $("saAssignBtn");
+    if(sa) sa.addEventListener("click", assignSetFromForm);
+    const sg = $("saGenBtn");
+    if(sg) sg.addEventListener("click", ()=>{
+      const c = generateUnusedCode();
+      if(!c){ $("saMsg").textContent = "Couldn't find an unused code — try again."; return; }
+      const cur = $("saFree").value.trim();
+      $("saFree").value = cur ? cur.replace(/[\s,;]+$/, "") + ", " + c : c;
+      $("saMsg").textContent = "Generated " + c + " — give this to the student.";
+    });
+  }
+  function attachBankHandlers(){
+    const s = $("bankSearch");
+    if(s) s.addEventListener("input", ()=>{ bankFilter.q = s.value; render();
+      const s2 = $("bankSearch"); if(s2){ s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } });
+    const subj = $("bankSubject");
+    if(subj) subj.addEventListener("change", ()=>{ bankFilter.subject = subj.value; render(); });
+    const ret = $("bankRetired");
+    if(ret) ret.addEventListener("change", ()=>{ bankFilter.retired = ret.checked; render(); });
+  }
+
   /* ---------- Phase F §9: bug reports ---------- */
   function viewBugs(){
     if(!bugs.length) return '<p class="dash-empty">No bug reports.</p>';
@@ -1039,12 +1596,19 @@ window.Dashboard = (function(){
     const r = recs.find(x => x.attemptId === attemptId);
     if(!r) return;
     openAttemptId = attemptId;
-    const idx = qIndex(r.testId);
-    const test = testsById[r.testId];
-    const versionNote = (test && test.testVersion && r.testVersion !== (test.testVersion || "unversioned"))
+    const isSet = r.kind === "set";
+    const idx = isSet ? null : qIndex(r.testId);
+    const test = isSet ? null : testsById[r.testId];
+    /* Set records get their own provenance note in place of the form version
+       warning: per-question versions live in the snapshot, and the review
+       resolves through it (setProvLookup) — EXPLICIT handling, not a
+       fall-through to "question text unavailable". */
+    const versionNote = isSet
+      ? `<p class="dash-hint">Practice set — ${Array.isArray(r.setQuestions) ? r.setQuestions.length : "?"} question(s), each pinned to its source (bank qids never change; form questions carry the testVersion they were served). No scaled score by design.</p>`
+      : (test && test.testVersion && r.testVersion !== (test.testVersion || "unversioned"))
       ? `<p class="dash-warn">⚠ This attempt was served test version “${esc(r.testVersion)}”, but this build carries “${esc(test.testVersion)}” — the review below may not match what the student saw (ATTEMPTS-SPEC §9).</p>` : "";
     const qRows = Object.entries(r.answers || {}).map(([qid, a]) => {
-      const info = idx && idx[qid];
+      const info = (idx && idx[qid]) || (isSet ? setProvLookup(r, qid) : null);
       const q = info && info.q;
       const status = a.correct === null ? "nokey" : (a.given === null ? "skipped" : (a.correct ? "correct" : "wrong"));
       const statusLabel = { nokey:"No key", skipped:"Skipped", correct:"Correct", wrong:"Incorrect" }[status];
@@ -1070,8 +1634,10 @@ window.Dashboard = (function(){
     // regardless of release). Offered when this build can SERVE the attempt's
     // version — current or archived; the student view loads the pinned build,
     // so the tutor sees exactly what the student sat on. (reuses `test`.)
-    const canOpen = source === "storage" && test && window.AppTestLoader &&
-      AppTestLoader.canServe(test, r.testVersion);
+    const canOpen = isSet
+      ? (source === "storage" && !!window.AppSetReview)
+      : (source === "storage" && test && window.AppTestLoader &&
+         AppTestLoader.canServe(test, r.testVersion));
     const canDelete = isDeletableAttempt(r);
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
@@ -1086,7 +1652,9 @@ window.Dashboard = (function(){
       const btn = $("dashStudentView");
       if(btn) btn.addEventListener("click", ()=>{
         $("dashDetail").classList.add("hidden");
-        if(window.AppScoreView) AppScoreView.open(r.testId, r);
+        // sets replay in Review Mode (no Score Details surface for them)
+        if(isSet){ if(window.AppSetReview) AppSetReview.open(r); }
+        else if(window.AppScoreView) AppScoreView.open(r.testId, r);
       });
     }
     if(canDelete){
@@ -1150,6 +1718,8 @@ window.Dashboard = (function(){
 
   /* ---------- events ---------- */
   function attachBodyHandlers(){
+    if(tab === "sets") attachSetsHandlers();
+    if(tab === "bank") attachBankHandlers();
     document.querySelectorAll("#dashBody [data-att]").forEach(tr =>
       tr.addEventListener("click", () => openDetail(tr.dataset.att)));
     document.querySelectorAll("#dashBody .dash-rel[data-rel]").forEach(btn =>

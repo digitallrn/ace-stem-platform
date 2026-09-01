@@ -208,6 +208,10 @@
     localStorage.setItem("as:student:" + PAYLOAD, JSON.stringify({ displayName: "innocent" }));
     localStorage.setItem("as:assign:" + PAYLOAD + ":a1",
       JSON.stringify({ assignmentId: "a1", testId: "x", timing: 1 }));
+    /* Practice-set hostile data is seeded LATER (inside the set-review block),
+       not here — a set attempt record lands in the same Practice Past bucket
+       the form Score Details drive selects its card from, so seeding it up
+       front would hand that drive the set card instead of the form's. */
 
     $("nameInput").value = "AS-XSSTEST2";
     $("signinBtn").click();
@@ -696,6 +700,91 @@
                               : shapes.length + " malformed shapes coerced away without throwing" });
     }
 
+    /* ---- custom practice sets (2026-08-31): the new student-facing render
+       sites. Set names and provenance refs are untrusted strings reaching new
+       innerHTML paths — the home set Past card (hostile setName) and set
+       Review Mode's error/drift NOTICE (hostile provenance ref in the banner
+       text). Seed a hostile pset row + a hostile SET attempt record whose
+       snapshot has one RESOLVABLE bank ref (so review builds) and one hostile
+       ref (so an error notice fires carrying the payload), then re-sign-in as
+       the owner so the student state loads them. */
+    {
+      const firstBank = (window.BANK_MANIFEST || [])[0];
+      const bankVer = firstBank ? (firstBank.bankVersion || "unversioned") : "unversioned";
+      const bankId = firstBank ? firstBank.bankId : "bank-david-core";
+      const firstBankQ = (window.BANK_INDEX && (BANK_INDEX.entries || [])[0]) || null;
+      const goodRef = firstBankQ ? (firstBankQ.bankId + ":" + firstBankQ.qid) : (bankId + ":q0001");
+      const goodQid = firstBankQ ? firstBankQ.qid : "q0001";
+      localStorage.setItem("as:pset:pset-xss1", JSON.stringify({
+        setId: "pset-xss1", name: PAYLOAD, subject: "math",
+        refs: [{ type: "bank", bankId: bankId, qid: goodQid },
+               { type: "bank", bankId: PAYLOAD, qid: PAYLOAD }],
+        createdAt: "2026-08-31T00:00:00.000Z", updatedAt: "2026-08-31T00:00:00.000Z"
+      }));
+      const setRec = {
+        recordVersion: 1, attemptId: "attempt:pset-xss1:1700000002:xss2",
+        student: { code: PAYLOAD, key: "AS-XSSTEST2" },
+        testId: "pset-xss1", testName: PAYLOAD, testVersion: "unversioned",
+        kind: "set", setId: "pset-xss1", setName: PAYLOAD, subject: "math",
+        releaseOnSubmit: true, assignmentId: "a-xss-set", timing: "untimed",
+        conditions: "self-administered", startedAt: "2026-07-30T16:00:00.000Z",
+        lastSavedAt: "2026-07-30T16:20:00.000Z", submittedAt: "2026-07-30T16:20:00.000Z",
+        status: "completed", released: true,
+        modules: [{ moduleId: "pset-xss1-m1", section: "Math", moduleLabel: "Module 1",
+          timeLimitMinutes: 0, startedAt: "2026-07-30T16:00:00.000Z",
+          endedAt: "2026-07-30T16:20:00.000Z", timeSpentSeconds: 1200, endedBy: "submitted" }],
+        setQuestions: [
+          { ref: goodRef, source: "bank", bankId: bankId, qid: goodQid, bankVersion: bankVer },
+          { ref: PAYLOAD, source: "bank", bankId: PAYLOAD, qid: PAYLOAD, bankVersion: PAYLOAD }
+        ],
+        answers: {
+          [goodRef]: { given: 2, firstGiven: 2, correct: true, markedForReview: false,
+            eliminated: [], timeSpentSeconds: 30, visitCount: 1, changeCount: 0, blankReason: null },
+          [PAYLOAD]: { given: PAYLOAD, firstGiven: PAYLOAD, correct: false, markedForReview: false,
+            eliminated: [], timeSpentSeconds: PAYLOAD, visitCount: PAYLOAD, changeCount: PAYLOAD, blankReason: null }
+        },
+        score: { correct: 1, graded: 2, noKey: 0,
+          bySection: { "Math": { correct: 1, graded: 2 } },
+          byModule: { "pset-xss1-m1": { correct: 1, graded: 2 } } },
+        client: {}
+      };
+      localStorage.setItem("as:" + setRec.attemptId, JSON.stringify(setRec));
+
+      // re-sign-in so student state picks up the seeded set record, then Past
+      [...document.querySelectorAll('[id^=screen-]')].forEach(s => s.classList.add("hidden"));
+      $("screen-signin").classList.remove("hidden");
+      $("signinError").classList.add("hidden");
+      $("nameInput").value = "AS-XSSTEST2";
+      $("signinBtn").click();
+      await wait(800);
+      document.querySelector('#practiceSeg .seg-btn[data-seg="past"]').click();
+      await wait(200);
+      results.push(audit("Set Past card (hostile set name)", $("practiceCards")));
+
+      if(window.AppSetReview){
+        window.AppSetReview.open(setRec);
+        await wait(650);
+        /* the error notice sits on the SECOND (unresolvable) question — review
+           opens on the first, so step to it via the real Next button */
+        $("btnNext").click();
+        await wait(400);
+        const notice = document.querySelector("#paneRight .rv-notice");
+        results.push(audit("Set Review Mode error notice (hostile provenance ref)", $("paneRight")));
+        results.push({ surface: "Set review error notice renders the hostile ref as inert text",
+          pass: !!notice && notice.textContent.indexOf("PWN") !== -1 &&
+                !notice.querySelector("img") && !notice.querySelector("b[data-x]") &&
+                !window.__XSS_FIRED,
+          note: notice ? "notice present, payload inert as escaped text"
+                       : "no .rv-notice rendered for the unresolvable ref" });
+        const back = $("rvBackBtn");
+        if(back) back.click();
+        await wait(400);
+      } else {
+        results.push({ surface: "Set Review Mode error notice (hostile provenance ref)",
+          pass: false, note: "AppSetReview bridge missing" });
+      }
+    }
+
     /* Review must not write through the recorder. Asserting only
        "currentAttemptId() === null" after the drives above was VACUOUS: run()
        never starts a sitting, so `rec` is null for the whole run and the
@@ -766,6 +855,37 @@
       pass: hostileLinks.length === 0,
       note: hostileLinks.length ? hostileLinks.length + " link(s) on invalid codes"
                                 : "copy-link only appears on valid AS- codes" });
+
+    /* Practice Sets tab (2026-08-31): the hostile pset row's name reaches the
+       set list, the builder (opened via Edit), and the assign form's <select>
+       — all new innerHTML sites carrying tutor-typed text. The Question Bank
+       tab renders BANK_INDEX (skill/tags/stem), driven with the search box
+       holding a payload so the filtered re-render is covered too. Each is
+       escaped, so audit() (payload as inert text, no element/handler) is the
+       right assertion. The hostile set attempt also surfaces in the Attempts
+       table and the per-set attempts list here. */
+    document.querySelector('#dashTabs [data-tab="sets"]').click();
+    await wait(300);
+    results.push(audit("Dashboard Practice Sets tab (hostile set name, list + assign)", $("dashBody")));
+    const setEdit = [...document.querySelectorAll("#dashBody .set-edit")]
+      .find(b => b.dataset.set === "pset-xss1");
+    if(setEdit){
+      setEdit.click();                       // open the builder on the hostile set
+      await wait(300);
+      results.push(audit("Dashboard set builder (hostile name + refs)", $("dashBody")));
+    } else {
+      results.push({ surface: "Dashboard set builder (hostile name + refs)",
+        pass: false, note: "no Edit button for the seeded hostile set" });
+    }
+    document.querySelector('#dashTabs [data-tab="bank"]').click();
+    await wait(300);
+    const bankSearch = $("bankSearch");
+    if(bankSearch){
+      bankSearch.value = PAYLOAD;
+      bankSearch.dispatchEvent(new Event("input", { bubbles: true }));
+      await wait(200);
+    }
+    results.push(audit("Dashboard Question Bank tab (index render + hostile filter)", $("dashBody")));
 
     /* v1.2 addendum tokens: {{bullets}}/{{item}}, {{quote}}, {{credit}}.
        Test data is untrusted on the same terms as a record (contract rule 1),

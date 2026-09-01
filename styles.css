@@ -1400,3 +1400,24 @@
     font-size:13.5px; line-height:1.5; border:1px solid; }
   .rv-notice.warn{ background:#FFF7E0; border-color:#E3C55A; color:#6b5200; }
   .rv-notice.err{ background:#FDEBEC; border-color:#E39A9F; color:#8f1f27; }
+
+  /* ---- dashboard: Question Bank + Practice Sets tabs (2026-08-31) ---- */
+  .bank-filters input#bankSearch{ flex:1; min-width:220px; padding:8px 12px;
+    border:1px solid #C9CFDE; border-radius:8px; font-size:13.5px; }
+  .bank-filters select{ padding:8px 10px; border:1px solid #C9CFDE; border-radius:8px; }
+  .bank-stem{ display:block; color:var(--ink-soft); font-size:12.5px; margin-top:2px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:520px; }
+  .setref-row, .setpick-row{ display:flex; align-items:center; gap:10px;
+    padding:7px 10px; border-bottom:1px solid #EDEFF5; }
+  .setpick-row.is-retired{ opacity:.62; }
+  .setref-n{ font-weight:800; color:var(--ink-soft); min-width:20px; text-align:right; }
+  .setref-main, .setpick-main{ flex:1; min-width:0; font-size:13.5px; }
+  .setref-btns{ display:flex; gap:4px; }
+  .setpick-cols{ display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:14px; }
+  .setpick-mod{ margin-bottom:12px; }
+  .setpick-modhead{ display:flex; align-items:center; justify-content:space-between;
+    padding:6px 0; border-bottom:2px solid #E3E6EF; }
+  .set-builder h4{ margin:16px 0 6px; font-size:14px; }
+  .setref-list{ border:1px solid #E3E6EF; border-radius:8px; max-height:300px; overflow:auto; }
+  .setpick-cols > div{ border:1px solid #E3E6EF; border-radius:8px; padding:10px 12px;
+    max-height:420px; overflow:auto; }
