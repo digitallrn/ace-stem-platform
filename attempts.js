@@ -1124,8 +1124,16 @@ window.Attempts = (function(){
              so downstream code can trust record.attemptId as "the key this is
              stored under", which is how a set attempt (attempt:pset-…) is told
              apart from a form attempt. A genuine record always stores under its
-             own attemptId (see Attempts.save), so this never drops real data. */
-          if(r.attemptId !== k) continue;
+             own attemptId (see Attempts.save), so this never drops real data.
+             NEVER SILENT: a legitimate record vanishing from Past with no trace
+             is the flattened-to-[] failure class — log the key on every drop so
+             an exclusion is always visible. */
+          if(r.attemptId !== k){
+            try{ console.warn("[Attempts.loadForStudent] EXCLUDED a record whose attemptId (" +
+              (r && r.attemptId) + ") does not match its storage key (" + k +
+              ") — treated as forged/corrupt, not shown."); }catch(e){}
+            continue;
+          }
           out.push(r);
         }
         out.sort((a,b) => (b.startedAt || "").localeCompare(a.startedAt || ""));

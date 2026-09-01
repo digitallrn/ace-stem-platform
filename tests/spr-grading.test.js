@@ -60,6 +60,13 @@ const failures = [];
    tests/set-audit.test.js, which invokes this script per fixture. §5's own
    deps (the library T/B, oldSprValueMatches, grading.js) load regardless. */
 const AUDIT_ONLY = process.env.SPR_AUDIT_ONLY === "1";
+if(AUDIT_ONLY){
+  console.log("========================================================================");
+  console.log("  EXHAUSTIVE SWEEP SKIPPED — not a pre-deploy audit");
+  console.log("  (SPR_AUDIT_ONLY=1: running only §5, the stored-attempt audit.");
+  console.log("   Run without this flag for the full old-vs-new grading sweep.)");
+  console.log("========================================================================");
+}
 function check(name, got, want){
   const ok = got === want;
   if(ok) pass++; else { fail++; failures.push(`${name}\n     got ${got}, want ${want}`); }
@@ -396,6 +403,7 @@ if(!archivePath){
   check("the export actually contained gradable SPR answers", sprSeen > 0, true);
 }
 
-console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);
+console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed` +
+  (AUDIT_ONLY ? "  [§5 AUDIT ONLY — exhaustive sweep was SKIPPED, not a pre-deploy grading audit]" : ""));
 if(failures.length){ console.log("\nFailures:"); failures.forEach(f => console.log("  - " + f)); }
 process.exit(fail ? 1 : 0);

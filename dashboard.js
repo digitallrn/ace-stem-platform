@@ -242,21 +242,31 @@ window.Dashboard = (function(){
       return;
     }
     const loaded = [];
-    let failed = 0;
+    let failed = 0, mismatched = 0;
     for(const k of keys){
       const r = await AttemptStore.get(k);
       // the storage KEY is authoritative; a record whose attemptId field
       // disagrees with it is forged (every record VALUE is writable in shared
       // storage, ATTEMPTS-SPEC §7). Drop it so a smuggled record can't pollute
       // the tutor's tables/analytics either — matches loadForStudent.
-      if(r && r.attemptId === k) loaded.push(r); else failed++;
+      if(r && r.attemptId === k){ loaded.push(r); continue; }
+      failed++;
+      // NEVER SILENT: distinguish an attemptId/key mismatch (readable but
+      // forged/corrupt) from a genuinely unreadable row, and log the key so
+      // the exclusion is always traceable.
+      if(r && r.attemptId !== k){
+        mismatched++;
+        try{ console.warn("[Dashboard] EXCLUDED a record whose attemptId (" + r.attemptId +
+          ") does not match its storage key (" + k + ") — forged/corrupt."); }catch(e){}
+      }
     }
     recs = loaded;
     await loadAssignsAndBugs();
     $("dashStatus").textContent = recs.length +
       (local ? " attempt(s) saved on this device (local mode — not synced)."
              : " attempt(s) in shared storage.") +
-      (failed ? " (" + failed + " unreadable — see console.)" : "") +
+      (failed ? " (" + failed + " excluded" +
+        (mismatched ? ", " + mismatched + " for an attemptId/key mismatch" : "") + " — see console.)" : "") +
       (lastExport ? "" : " Download an archive before deleting anything.");
     renderAll();
   }
