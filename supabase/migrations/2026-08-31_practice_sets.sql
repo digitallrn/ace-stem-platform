@@ -129,11 +129,24 @@ begin
 
   -- Practice-set release rule (2026-08-31, contract 6): released-on-submit,
   -- derived server-side from the SET-ASSIGNMENT row, exactly once — at the
-  -- in-progress -> completed/timed-out transition. Form attempts never take
-  -- this branch (their records carry no kind), so their released stays the
-  -- stored value / false, exactly as before this migration.
+  -- in-progress -> completed/timed-out transition.
+  --
+  -- The discriminator is the ATTEMPT KEY PREFIX, never the client payload.
+  -- A set attempt is keyed 'attempt:pset-<setId>:...'; a form attempt is
+  -- 'attempt:<YYYYMMregionvN>:...', which cannot start with 'pset-'. The
+  -- earlier version gated on p_value->>'kind'='set', which is a
+  -- CLIENT-SUPPLIED field: a student could POST fn_upsert_attempt directly
+  -- with their real FORM attempt key + their form JSON augmented with
+  -- kind:'set' and a genuine set assignmentId, and the server would release
+  -- their real-test scaled score early — defeating contract 6's whole point
+  -- (self-release-forced-false for tests) and the §7 invariant that a
+  -- client-supplied `released` is ignored. Writing to a 'pset-' key can only
+  -- create/touch a SET record (never the form record at its own testId key),
+  -- so gating on the key closes the leak at the structural level; the
+  -- setId cross-check is defence in depth (the assignment must govern THIS
+  -- exact set, mirroring fn_get_set's setId verification).
   if coalesce(v_released, 'false'::jsonb) = 'false'::jsonb
-     and p_value ->> 'kind' = 'set'
+     and p_key like 'attempt:pset-%'
      and p_value ->> 'status' in ('completed', 'timed-out')
      and coalesce(v_status, '') not in ('completed', 'timed-out') then
     select a.value
@@ -141,7 +154,8 @@ begin
       from public.records a
      where a.owner_code = p_code
        and a.key = 'assign:' || p_code || ':' || (p_value ->> 'assignmentId')
-       and a.value ->> 'kind' = 'set';
+       and a.value ->> 'kind' = 'set'
+       and a.value ->> 'setId' = (p_value ->> 'setId');
     if v_assign is not null
        and coalesce(v_assign -> 'holdRelease', 'false'::jsonb) <> 'true'::jsonb then
       v_released := 'true'::jsonb;

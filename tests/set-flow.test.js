@@ -304,6 +304,67 @@ function makeAppState(test){
       "a bankVersion difference alone produces NO banner (append-only content cannot drift)");
   }
 
+  console.log("--- 6b. loadBank is version-aware (stale cache must not mask the current build) ---");
+  {
+    /* Regression for the adversarial review's stale-bank-cache finding: a
+       device holding an older cached bank build must NOT have it served in
+       place of the current build the manifest names — the set start path is
+       fail-closed, so a stale cache there refuses a correctly-assigned set.
+       Harness extracts loadBank + its cache helpers and INJECTS fetchBankFile
+       (the real one builds a <script> tag). */
+    const body =
+      extractConst(appSrc, "BANKCACHE_PREFIX") + "\n" +
+      extractFn(appSrc, "bankById") + "\n" +
+      extractFn(appSrc, "canServeBank") + "\n" +
+      extractFn(appSrc, "readCachedBank") + "\n" +
+      extractFn(appSrc, "writeCachedBank") + "\n" +
+      "async " + extractFn(appSrc, "loadBank") + "\n" +
+      "return { loadBank, readCachedBank };";
+    const mk = (opts) => {
+      const ls = { _d: {}, setItem(k, v){ this._d[k] = v; },
+        getItem(k){ return k in this._d ? this._d[k] : null; },
+        removeItem(k){ delete this._d[k]; },
+        key(i){ return Object.keys(this._d)[i]; },
+        get length(){ return Object.keys(this._d).length; } };
+      const win = {
+        BANK_MANIFEST: [{ bankId: "bank-david-core", type: "bank", bankVersion: "sha-v2" }],
+        __BANKDATA__: {}
+      };
+      let fetched = 0;
+      const v2 = { bankId: "bank-david-core", bankName: "Core", bankVersion: "sha-v2",
+        questions: [{ qid: "q0001", type: "mcq", correctAnswer: 2 },
+                    { qid: "q0099", type: "mcq", correctAnswer: 0 }] };  // v2 adds q0099
+      const fetchBankFile = async () => { fetched++; if(opts.offline) throw new Error("network"); return v2; };
+      // seed ONLY the older v1 cache (no q0099)
+      ls.setItem("acestem:bankcache:bank-david-core:sha-v1", JSON.stringify({
+        bankId: "bank-david-core", bankName: "Core", bankVersion: "sha-v1",
+        questions: [{ qid: "q0001", type: "mcq", correctAnswer: 2 }] }));
+      const api = new Function("window", "localStorage", "fetchBankFile", body)(win, ls, fetchBankFile);
+      return { api, ls, win, getFetched: () => fetched };
+    };
+
+    const online = mk({ offline: false });
+    const got = await online.api.loadBank("bank-david-core");
+    check(got.bankVersion === "sha-v2" && got.questions.some(q => q.qid === "q0099"),
+      "online: loadBank fetches the CURRENT build, not the stale v1 cache",
+      "got " + got.bankVersion + " (fetched " + online.getFetched() + "x)");
+    check(online.getFetched() === 1,
+      "online: the current build is actually fetched when only an older cache exists");
+
+    const offline = mk({ offline: true });
+    const got2 = await offline.api.loadBank("bank-david-core");
+    check(got2.bankVersion === "sha-v1",
+      "offline: falls back to the stale cache rather than throwing (append-only, per-qid fails downstream)");
+
+    // exact-version read must never substitute a different build (fresh
+    // harness: only sha-v1 is cached, nothing has fetched yet)
+    const fresh = mk({ offline: true });
+    check(fresh.api.readCachedBank("bank-david-core", "sha-v2") === null,
+      "readCachedBank(id, exactVersion) returns null when only a DIFFERENT version is cached");
+    check(fresh.api.readCachedBank("bank-david-core", "sha-v1") !== null,
+      "readCachedBank(id, exactVersion) returns the build when that exact version IS cached");
+  }
+
   console.log("--- 7. remote sync eligibility ---");
   {
     const w = load({ config: { SUPABASE_URL: "https://example-ref.supabase.co", SUPABASE_ANON_KEY: "sb_publishable_testkey" } });

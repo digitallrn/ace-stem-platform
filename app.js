@@ -1043,21 +1043,30 @@
     }catch(e){}
     return false;
   }
-  function readCachedBank(bankId){
+  /* readCachedBank(bankId) returns any cached build (offline fallback).
+     readCachedBank(bankId, version) returns ONLY that exact build, or null —
+     the version-scoped read the start/resume/review path uses so a stale
+     cache can never stand in for the build actually wanted. */
+  function readCachedBank(bankId, version){
     try{
-      const man = bankById(bankId);
       const tryKey = k => {
         const raw = localStorage.getItem(k);
         if(!raw) return null;
         const b = JSON.parse(raw);
         return (b && b.bankId === bankId && Array.isArray(b.questions)) ? b : null;
       };
-      // prefer the manifest's own build; fall back to any cached build —
-      // append-only content makes an older cache safe to OFFER (a qid it
-      // lacks fails the per-qid check downstream, honestly)
+      if(version != null){
+        // exact build only — no fallback to a different version
+        const exact = tryKey(BANKCACHE_PREFIX + bankId + ":" + version);
+        return (exact && (exact.bankVersion || "unversioned") === version) ? exact : null;
+      }
+      // no version asked: prefer the manifest's current build, else ANY cached
+      // build (offline). Append-only content makes an older cache safe to
+      // OFFER here — a qid it lacks fails the per-qid check downstream.
+      const man = bankById(bankId);
       if(man){
-        const exact = tryKey(BANKCACHE_PREFIX + bankId + ":" + (man.bankVersion || "unversioned"));
-        if(exact) return exact;
+        const cur = tryKey(BANKCACHE_PREFIX + bankId + ":" + (man.bankVersion || "unversioned"));
+        if(cur) return cur;
       }
       for(let i = 0; i < localStorage.length; i++){
         const k = localStorage.key(i);
@@ -1109,24 +1118,53 @@
       document.head.appendChild(s);
     });
   }
+  /* Version-aware, exactly like loadTest: prefer the manifest's CURRENT build
+     (memory or exact cache), else fetch it, and fall back to a stale cached
+     build only when the network fails. Banks are append-only, so the current
+     build is always a superset of every older one — preferring it is always
+     correct, and it is what lets a set drawing on a just-added qid start even
+     when this device still holds an older cache. The earlier version returned
+     ANY cached build without a version check and never fetched, so a device
+     holding v1 refused a set that used a v2-only question even though v2 was
+     downloadable — the start path is fail-closed (one missing qid aborts the
+     whole sitting), so a stale cache there is a refusal, not a degradation.
+     The any-build fallback survives for OFFLINE only, where a missing qid
+     still fails honestly per-question downstream. */
   async function loadBank(bankId){
     const man = bankById(bankId);
     if(!man) throw new Error("unknown bank");
+    const want = man.bankVersion || "unversioned";
     const inMemory = (window.__BANKDATA__ || {})[man.bankId];
-    if(inMemory && Array.isArray(inMemory.questions)){
+    if(inMemory && Array.isArray(inMemory.questions) &&
+       (inMemory.bankVersion || "unversioned") === want){
       writeCachedBank(inMemory);
       return inMemory;
     }
-    const cached = readCachedBank(man.bankId);
-    if(cached){
+    const cachedExact = readCachedBank(man.bankId, want);
+    if(cachedExact){
       window.__BANKDATA__ = window.__BANKDATA__ || {};
-      window.__BANKDATA__[man.bankId] = cached;
-      return cached;
+      window.__BANKDATA__[man.bankId] = cachedExact;
+      return cachedExact;
     }
-    const fetched = await fetchBankFile(man.bankId);
-    if(!Array.isArray(fetched.questions)) throw new Error("bank malformed");
-    writeCachedBank(fetched);
-    return fetched;
+    try{
+      const fetched = await fetchBankFile(man.bankId);
+      if(!Array.isArray(fetched.questions)) throw new Error("bank malformed");
+      writeCachedBank(fetched);
+      window.__BANKDATA__ = window.__BANKDATA__ || {};
+      window.__BANKDATA__[man.bankId] = fetched;
+      return fetched;
+    }catch(e){
+      // offline (or the current file genuinely won't load): a stale cached
+      // build may still carry the qids an older attempt referenced; a qid it
+      // lacks fails per-question downstream, never silently
+      const stale = readCachedBank(man.bankId);
+      if(stale){
+        window.__BANKDATA__ = window.__BANKDATA__ || {};
+        window.__BANKDATA__[man.bankId] = stale;
+        return stale;
+      }
+      throw e;
+    }
   }
   // the dashboard's Question Bank tab and set builder use the same loader
   window.AppBankLoader = { load: loadBank, byId: bankById, canServe: canServeBank };
