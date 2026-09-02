@@ -1199,6 +1199,10 @@
   function syntheticSetTest(setId, name, subject, questions, timeLimitMinutes){
     const section = subject === "math" ? "Math" : "Reading and Writing";
     const safeName = String(name || "Practice Set");
+    /* The header is "<name> — <subject>", unless the tutor already put the
+       subject in the name ("Set B (Reading and Writing)") — then the name
+       alone, so the header never reads "… (Math) — Math". */
+    const namesSubject = safeName.toLowerCase().indexOf(section.toLowerCase()) !== -1;
     return {
       testId: String(setId),
       testName: safeName,
@@ -1209,7 +1213,7 @@
         moduleId: String(setId) + "-m1",
         section: section,
         moduleLabel: "Module 1",
-        setTitle: safeName + " — " + section,
+        setTitle: namesSubject ? safeName : safeName + " — " + section,
         timeLimitMinutes: timeLimitMinutes || 0,
         questions: questions
       }]

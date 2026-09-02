@@ -304,6 +304,29 @@ function makeAppState(test){
       "a bankVersion difference alone produces NO banner (append-only content cannot drift)");
   }
 
+  console.log("--- 6a. sitting/review header: subject appended once, never doubled ---");
+  {
+    /* Production smoke 2026-09-02: a set named "Set B (Reading and Writing)"
+       rendered its header as "Set B (Reading and Writing) — Reading and
+       Writing". The subject is appended only when the name doesn't already
+       carry it. */
+    const synth = new Function(extractFn(appSrc, "syntheticSetTest") + "\nreturn syntheticSetTest;")();
+    const t1 = synth("pset-1", "Set B (Reading and Writing)", "rw", [], 0);
+    check(t1.modules[0].setTitle === "Set B (Reading and Writing)",
+      "a name that already names the subject is the whole header");
+    const t2 = synth("pset-1", "Set A (math)", "math", [], 0);
+    check(t2.modules[0].setTitle === "Set A (math)",
+      "the name-already-names-subject match is case-insensitive");
+    const t3 = synth("pset-1", "Set B", "rw", [], 0);
+    check(t3.modules[0].setTitle === "Set B — Reading and Writing",
+      "a bare name still gets the subject appended");
+    const t4 = synth("pset-1", "Geometry drill", "math", [], 0);
+    check(t4.modules[0].setTitle === "Geometry drill — Math",
+      "a bare math name still gets the subject appended");
+    check(t1.testName === "Set B (Reading and Writing)" && t1.modules[0].section === "Reading and Writing",
+      "testName and module section are unchanged by the header rule");
+  }
+
   console.log("--- 6b. loadBank is version-aware (stale cache must not mask the current build) ---");
   {
     /* Regression for the adversarial review's stale-bank-cache finding: a
