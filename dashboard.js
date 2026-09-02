@@ -1452,22 +1452,38 @@ window.Dashboard = (function(){
     }
     /* A live assignment carries a name/count snapshot for the student's card
        (assignSetFromForm). Refresh it on edit so the card doesn't advertise
-       the old count. Assignment rows are tutor-written only — the student's
-       completeAssignment touches its local copy, never the server — so this
-       can't race a student write. Completed attempts are untouched: they
-       froze their own question list at begin. */
+       the old count. Each row is RE-READ FRESH right before it is patched
+       and only the two fields are changed on that fresh copy — never the
+       in-memory `assigns` snapshot written back wholesale. The snapshot is
+       this browser's mirror, which never drops a row deleted from another
+       browser (writing it back would resurrect a deleted assignment as a
+       startable card), and in local/artifact mode the student's
+       completeAssignment may have stamped completedAttemptId on the stored
+       row since the dashboard opened (writing the snapshot back would erase
+       it, and the assignment would reopen if the attempt were later
+       deleted). A row that is gone is dropped from the mirror, not patched.
+       Completed attempts are untouched either way: they froze their own
+       question list at begin. */
     let patched = 0, patchFailed = 0;
     if(ok && !isNew){
       for(const x of assignmentsForSet(set.setId)){
-        const a = x.a;
-        if(a.setName === set.name && a.questionCount === set.refs.length) continue;
-        a.setName = set.name;
-        a.questionCount = set.refs.length;
-        const ak = "assign:" + x.code + ":" + a.assignmentId;
-        let pok = await AttemptStore.setLocal(ak, a);
+        const ak = "assign:" + x.code + ":" + x.a.assignmentId;
+        let live;
+        try{ live = await freshAssignmentRow(ak); }
+        catch(e){ patchFailed++; continue; }
+        if(!live){
+          try{ await AttemptStore.remove(ak); }catch(e){}   // heal the stale mirror
+          continue;
+        }
+        if(live.setName === set.name && live.questionCount === set.refs.length) continue;
+        const next = Object.assign({}, live, { setName: set.name, questionCount: set.refs.length });
+        let pok = await AttemptStore.setLocal(ak, next);
         if(pok && AttemptStore.isRemote()){
-          try{ await AttemptStore.adminUpsert(ak, x.code, a); }
-          catch(e){ pok = false; }
+          try{ await AttemptStore.adminUpsert(ak, x.code, next); }
+          catch(e){
+            pok = false;
+            try{ await AttemptStore.setLocal(ak, live); }catch(e2){}   // mirror follows the server
+          }
         }
         if(pok) patched++; else patchFailed++;
       }
@@ -1478,8 +1494,23 @@ window.Dashboard = (function(){
                  (patched ? " Updated " + patched + " assignment card" + (patched === 1 ? "" : "s") + "." : "") +
                  (patchFailed ? " " + patchFailed + " assignment card" + (patchFailed === 1 ? "" : "s") + " couldn't be updated — the question count shown to that student may be stale." : ""))
       : "Not saved — the server rejected the write (tutor sign-in expired?). Sign in again and try again.";
-    if(ok){ builder = null; await loadSets(); }
+    if(ok){ builder = null; if(isNew) await loadSets(); else await loadAssignsAndBugs(); }
     render();
+  }
+  /* The freshest copy of one assignment row, or null if it no longer exists:
+     the SERVER's in remote mode (this browser's mirror can hold rows deleted
+     from another browser), storage's otherwise (the student may have stamped
+     completedAttemptId since `assigns` was loaded). Throws on a failed
+     server read so the caller counts it as not patched rather than acting
+     on nothing. */
+  async function freshAssignmentRow(key){
+    if(AttemptStore.isRemote()){
+      const rows = await AttemptStore.adminSelectKey(key);
+      const r = Array.isArray(rows) ? rows[0] : null;
+      return (r && r.value && typeof r.value === "object" && r.value.assignmentId) ? r.value : null;
+    }
+    const v = await AttemptStore.get(key);
+    return (v && typeof v === "object" && v.assignmentId) ? v : null;
   }
   async function deleteSet(setId){
     const s = sets.find(x => x.setId === setId);
@@ -1510,7 +1541,8 @@ window.Dashboard = (function(){
     const limitRaw = parseInt($("saLimit").value, 10);
     const limit = (isFinite(limitRaw) && limitRaw > 0) ? Math.min(limitRaw, 180) : null;
     const expires = $("saExpires").value ? new Date($("saExpires").value + "T23:59:00").toISOString() : null;
-    let okAll = true, remoteFailed = false;
+    let okAll = true;
+    const assigned = [], notAssigned = [];
     for(const code of codes){
       const a = {
         assignmentId: "a-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6),
@@ -1524,22 +1556,32 @@ window.Dashboard = (function(){
         completedAttemptId: null
       };
       const key = "assign:" + code + ":" + a.assignmentId;
-      if(!(await AttemptStore.setLocal(key, a))) okAll = false;
+      if(!(await AttemptStore.setLocal(key, a))){ okAll = false; notAssigned.push(code); continue; }
       if(AttemptStore.isRemote()){
         try{ await AttemptStore.adminUpsert(key, code, a); }
         catch(e){
-          remoteFailed = true;
           /* same rollback as saveSetFromBuilder: the student reads
              assignments from the server, so a local-only row is an
              assignment the dashboard shows and the student never gets */
           try{ await AttemptStore.remove(key); }catch(e2){}
+          notAssigned.push(code);
+          continue;
         }
       }
+      assigned.push(code);
     }
+    /* Per-code reporting: with several codes the server can accept some and
+       reject the rest, and a blanket "try again" would duplicate the ones
+       that landed. */
+    const retryHint = " — the server rejected the write (tutor sign-in expired?). Sign in again and assign " +
+      (notAssigned.length === 1 ? "that code" : "those codes") + " only.";
     $("saMsg").textContent = !okAll
-      ? "Some assignment writes failed — storage problem."
-      : remoteFailed
-        ? "Not assigned — the server rejected the write (tutor sign-in expired?). Sign in again and try again."
+      ? "Some assignment writes failed — storage problem." +
+        (assigned.length ? " Assigned to " + assigned.join(", ") + "; not assigned to " + notAssigned.join(", ") + "." : "")
+      : notAssigned.length
+        ? (assigned.length
+            ? "Assigned “" + s.name + "” to " + assigned.join(", ") + ". Not assigned to " + notAssigned.join(", ") + retryHint
+            : "Not assigned" + retryHint)
         : "Assigned “" + s.name + "” to " + codes.join(", ") + (AttemptStore.isRemote() ? " (synced)." : ".");
     await loadAssignsAndBugs();
     render();

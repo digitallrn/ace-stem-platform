@@ -455,6 +455,59 @@ function makeAppState(test){
       "a set attempt enqueues through the same fn_upsert_attempt sync queue as a form attempt");
   }
 
+  console.log("--- 8. dashboard set-edit patch reads each assignment row FRESH (never the mirror snapshot) ---");
+  {
+    /* Adversarial review of the 2026-09-02 follow-ups: writing the dashboard's
+       in-memory `assigns` snapshot back to the server would (a) resurrect an
+       assignment deleted from another browser — the mirror never drops rows —
+       and (b) erase a completedAttemptId the student stamped on the stored row
+       since the dashboard opened. The patch therefore goes through
+       freshAssignmentRow(): the SERVER's copy in remote mode, storage's
+       otherwise, null when gone. */
+    const dashSrc = fs.readFileSync("dashboard.js", "utf8");
+    const mkFresh = (remote, serverRows, mirror) => new Function("AttemptStore",
+      "async " + extractFn(dashSrc, "freshAssignmentRow") + "\nreturn freshAssignmentRow;")({
+        isRemote: () => remote,
+        adminSelectKey: async (k) => serverRows(k),
+        get: async (k) => mirror[k] || null
+      });
+    const K = "assign:AS-TESTCODE:a-1";
+    const mirrorRow = { assignmentId: "a-1", kind: "set", setId: "pset-1", setName: "old", questionCount: 3, completedAttemptId: null };
+
+    const gone = await mkFresh(true, () => [], { [K]: mirrorRow })(K);
+    check(gone === null,
+      "remote: a row the server no longer has resolves null even though the mirror still holds it (no resurrection)");
+
+    const serverRow = Object.assign({}, mirrorRow, { completedAttemptId: "attempt:pset-1:1:aa" });
+    const live = await mkFresh(true, () => [{ key: K, owner_code: "AS-TESTCODE", value: serverRow }], { [K]: mirrorRow })(K);
+    check(live && live.completedAttemptId === "attempt:pset-1:1:aa" && live !== mirrorRow,
+      "remote: the SERVER's row wins over the mirror's snapshot");
+
+    let threw = false;
+    try{ await mkFresh(true, () => { throw new Error("401"); }, { [K]: mirrorRow })(K); }catch(e){ threw = true; }
+    check(threw, "remote: a failed server read THROWS (counted as not-patched) rather than falling back to the mirror");
+
+    const localRow = Object.assign({}, mirrorRow, { completedAttemptId: "attempt:pset-1:2:bb" });
+    const loc = await mkFresh(false, () => { throw new Error("must not be called"); }, { [K]: localRow })(K);
+    check(loc && loc.completedAttemptId === "attempt:pset-1:2:bb",
+      "local/artifact: the STORED row is re-read (a student-stamped completedAttemptId survives the patch)");
+    check((await mkFresh(false, () => [], {})(K)) === null,
+      "local/artifact: a missing row resolves null");
+
+    /* the patch loop itself must use it, and must never write the snapshot */
+    const saveBody = extractFn(dashSrc, "saveSetFromBuilder");
+    check(saveBody.indexOf("freshAssignmentRow(ak)") !== -1,
+      "saveSetFromBuilder patches through freshAssignmentRow");
+    check(saveBody.indexOf("adminUpsert(ak, x.code, a)") === -1 && saveBody.indexOf("setLocal(ak, a)") === -1
+      && /Object\.assign\(\{\}, live, \{ setName: set\.name, questionCount: set\.refs\.length \}\)/.test(saveBody),
+      "the patch changes exactly setName/questionCount on the FRESH row, never the in-memory `assigns` entry");
+    check(/if\(!live\)\{[\s\S]*?AttemptStore\.remove\(ak\)/.test(saveBody),
+      "a row that is gone is dropped from the mirror, not re-created");
+    const assignBody = extractFn(dashSrc, "assignSetFromForm");
+    check(assignBody.indexOf("notAssigned") !== -1 && assignBody.indexOf("Not assigned to ") !== -1,
+      "assignSetFromForm reports assigned vs not-assigned codes separately (no blanket retry that duplicates)");
+  }
+
   console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);
   if(failures.length){ console.log("Failures:"); failures.forEach(f => console.log("  - " + f)); }
   process.exit(fail ? 1 : 0);

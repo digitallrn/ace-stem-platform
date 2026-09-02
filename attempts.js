@@ -286,6 +286,14 @@ window.AttemptStore = (function(){
     async adminSelectAll(){
       return await httpJson("/rest/v1/records?select=key,owner_code,value", { timeoutMs: 20000 });
     },
+    /* One row by exact key, straight from the server — for a tutor write that
+       must be based on what the server holds NOW rather than on this
+       browser's mirror (the mirror never drops rows deleted elsewhere).
+       Resolves [] when the key is absent; throws on HTTP failure. */
+    async adminSelectKey(key){
+      return await httpJson("/rest/v1/records?select=key,owner_code,value&key=eq." + encodeURIComponent(key),
+        { timeoutMs: 20000 });
+    },
     async adminUpsert(key, ownerCode, value){
       return await httpJson("/rest/v1/records", {
         method: "POST",
