@@ -387,14 +387,25 @@ window.Dashboard = (function(){
       "These are the attempts in the archive you downloaded at " + lastExport.when.toLocaleTimeString() + ". " +
       "Only proceed if you've verified that file. The archive file itself is not touched.";
     if(!window.confirm(msg)) return;
-    let ok = 0, fail = 0;
+    /* Server first, per row (tutorDelete): in remote mode this used to remove
+       only the mirror, so the server kept every archived record and the very
+       next load pulled them all straight back. */
+    let ok = 0;
+    const stillThere = [], problems = [];
     for(const id of ids){
-      (await AttemptStore.remove(id)) ? ok++ : fail++;
+      const res = await tutorDelete(id);
+      if(res.ok){ ok++; if(res.warning) problems.push(res.warning); }
+      else { stillThere.push(id); problems.push(res.message); }
     }
-    lastExport = null;
-    $("dashDeleteBtn").disabled = true;
-    $("dashStatus").textContent = "Deleted " + ok + " record(s)" + (fail ? " — " + fail + " FAILED (still in storage, refresh and retry)" : "") + ".";
-    loadFromStorage();
+    /* stay armed for exactly the rows that are still there, so a retry after
+       signing in again deletes those and nothing else */
+    lastExport = stillThere.length ? { ids: stillThere, when: lastExport.when } : null;
+    $("dashDeleteBtn").disabled = !lastExport;
+    const summary = "Deleted " + ok + " of " + ids.length + " archived record(s)." +
+      (stillThere.length ? " " + stillThere.length + " NOT deleted — still in storage. " +
+        problems.slice(0, 3).join(" ") + (problems.length > 3 ? " (+" + (problems.length - 3) + " more, same reason.)" : "") : "");
+    await loadFromStorage();
+    $("dashStatus").textContent = summary + " " + $("dashStatus").textContent;
   }
 
   /* ---------- views ---------- */
@@ -443,25 +454,21 @@ window.Dashboard = (function(){
       return;
     }
     r.released = !r.released;
-    /* setLocal, not set(): set() would enqueue this through the STUDENT RPC,
+    /* tutorPut, never set(): set() would enqueue this through the STUDENT RPC,
        and fn_upsert_attempt deliberately ignores `released` so students can't
        self-release. The tutor's authenticated table write is the only path
        that can actually flip it. */
-    let ok = await AttemptStore.setLocal(r.attemptId, r);
-    if(ok && AttemptStore.isRemote()){
-      try{
-        await AttemptStore.adminUpsert(r.attemptId, (r.student && r.student.key) || null, r);
-      }catch(e){ ok = false; }
-    }
-    if(!ok){
-      r.released = !r.released;                 // roll back — nothing persisted
-      $("dashStatus").textContent = AttemptStore.isRemote()
-        ? "Release didn't save to the server — check your tutor sign-in and try again."
-        : "Release toggle didn't save — storage unavailable.";
+    const res = await tutorPut(r.attemptId, (r.student && r.student.key) || null, r);
+    if(!res.ok){
+      r.released = !r.released;                 // nothing persisted; the mirror is untouched
+      $("dashStatus").textContent = res.message;
     } else if(AttemptStore.isRemote()){
-      $("dashStatus").textContent = r.released
+      $("dashStatus").textContent = (r.released
         ? "Released — the student sees Score Details at their next sign-in or refresh."
-        : "Un-released — Score Details hidden from the student again.";
+        : "Un-released — Score Details hidden from the student again.") +
+        (res.warning ? " " + res.warning : "");
+    } else if(res.warning){
+      $("dashStatus").textContent = res.warning;
     }
     render();
   }
@@ -947,31 +954,84 @@ window.Dashboard = (function(){
              bad: free.filter(c => !StudentCode.valid(c)) };
   }
 
+  /* ================= TUTOR MUTATIONS (remote-confirmed) =================
+     Every tutor write and delete in this file goes through tutorPut() and
+     tutorDelete() — one implementation of one rule: in remote mode the SERVER
+     is written first, and this browser's mirror follows only on success. A
+     rejected write (expired tutor session → 401, any non-2xx, a timeout)
+     therefore leaves the mirror exactly as it was, so the dashboard never
+     shows a row the server doesn't have (a phantom assignment the student
+     never gets) and never drops a row the server still has (a delete the
+     student never sees). Nothing syncs tutor writes later — the student RPCs
+     can't carry them and the sync queue holds only student rows — so a
+     rejection is final and is reported as "Not saved" / "Not deleted",
+     naming the row. In local/artifact mode the mirror IS the store.
+     tests/tutor-writes.test.js drives every caller through a rejecting
+     server and checks the mirror against its true pre-write state. */
+  function describeRow(key){
+    const k = String(key || "");
+    const p = k.split(":");
+    if(p[0] === "assign" && p.length >= 3){
+      return p[2] === "__none" ? "the empty-assignments marker for " + p[1]
+                               : "assignment " + p.slice(2).join(":") + " for " + p[1];
+    }
+    if(p[0] === "assign")  return "the legacy assignment list for " + (p[1] || "?");
+    if(p[0] === "student") return "the display name for " + (p[1] || "?");
+    if(p[0] === "pset")    return "set " + (p[1] || "?");
+    if(p[0] === "attempt") return "attempt " + k;
+    if(p[0] === "bug")     return "bug report " + k;
+    return "row " + k;
+  }
+  function rejectedText(what, key, e){
+    const why = (e && e.status === 401) ? "the tutor sign-in has expired"
+              : (e && e.status)         ? "the server rejected it (HTTP " + e.status + ")"
+              : (e && e.name === "AbortError") ? "the server didn't answer in time"
+              : "the server rejected it";
+    return "Not " + what + " — " + describeRow(key) + ": " + why +
+      ". This browser's copy is unchanged. Sign in again and retry.";
+  }
+  async function tutorPut(key, ownerCode, value){
+    if(AttemptStore.isRemote()){
+      try{ await AttemptStore.adminUpsert(key, ownerCode, value); }
+      catch(e){ return { ok: false, message: rejectedText("saved", key, e) }; }
+      if(await AttemptStore.setLocal(key, value)) return { ok: true };
+      return { ok: true, warning: "Saved on the server, but this browser's copy of " +
+        describeRow(key) + " couldn't be updated — press Refresh." };
+    }
+    if(await AttemptStore.setLocal(key, value)) return { ok: true };
+    return { ok: false, message: "Not saved — " + describeRow(key) + ": storage isn't writable in this browser." };
+  }
+  async function tutorDelete(key){
+    if(AttemptStore.isRemote()){
+      try{ await AttemptStore.adminDelete(key); }
+      catch(e){ return { ok: false, message: rejectedText("deleted", key, e) }; }
+      if(await AttemptStore.remove(key)) return { ok: true };
+      return { ok: true, warning: "Deleted on the server, but this browser's copy of " +
+        describeRow(key) + " couldn't be removed — press Refresh." };
+    }
+    if(await AttemptStore.remove(key)) return { ok: true };
+    return { ok: false, message: "Not deleted — " + describeRow(key) + ": storage isn't writable in this browser." };
+  }
+
   /* Write the display-name profile row. Its own key, its own row — never
      merged into an attempt (ATTEMPTS-SPEC §7a). Writing goes through the
      tutor's authenticated table access; there is deliberately no anon RPC for
-     this, so a student can't rename themselves or anyone else. */
+     this, so a student can't rename themselves or anyone else. Returns which
+     codes were saved, which weren't, and the messages to show; the in-memory
+     profiles map changes only for codes the store actually took. */
   async function saveProfiles(codes, name){
     const clean = String(name || "").trim().slice(0, 60);
-    let ok = true;
+    const out = { saved: [], failed: [], messages: [] };
     for(const code of codes){
       const key = "student:" + code;
-      if(clean){
-        if(!(await AttemptStore.setLocal(key, { displayName: clean }))) ok = false;
-        if(AttemptStore.isRemote()){
-          try{ await AttemptStore.adminUpsert(key, code, { displayName: clean }); }
-          catch(e){ ok = false; }
-        }
-        profiles[code] = clean;
-      } else {
-        await AttemptStore.remove(key);                 // blank clears the name
-        if(AttemptStore.isRemote()){
-          try{ await AttemptStore.adminDelete(key); }catch(e){ ok = false; }
-        }
-        delete profiles[code];
-      }
+      const res = clean ? await tutorPut(key, code, { displayName: clean })
+                        : await tutorDelete(key);        // blank clears the name
+      if(!res.ok){ out.failed.push(code); out.messages.push(res.message); continue; }
+      if(clean) profiles[code] = clean; else delete profiles[code];
+      out.saved.push(code);
+      if(res.warning) out.messages.push(res.warning);
     }
-    return ok;
+    return out;
   }
 
   async function saveNameOnly(){
@@ -979,11 +1039,13 @@ window.Dashboard = (function(){
     if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
     const name = $("afName").value.trim();
-    const ok = await saveProfiles(codes, name);
-    $("dashStatus").textContent = ok
-      ? (name ? "Name saved for " + codes.join(", ") + " — assignments untouched."
-              : "Name cleared for " + codes.join(", ") + " — they'll see their code again.")
-      : "Couldn't save the name — check your tutor sign-in and try again.";
+    const r = await saveProfiles(codes, name);
+    $("dashStatus").textContent =
+      (r.saved.length
+        ? (name ? "Name saved for " + r.saved.join(", ") + " — assignments untouched."
+                : "Name cleared for " + r.saved.join(", ") + " — they'll see their code again.")
+        : "") +
+      (r.messages.length ? (r.saved.length ? " " : "") + r.messages.join(" ") : "");
     await loadAssignsAndBugs();
     render();
   }
@@ -994,7 +1056,7 @@ window.Dashboard = (function(){
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
     // a name typed here is saved as a profile row, separate from the assignment
     const nameIn = $("afName").value.trim();
-    if(nameIn) await saveProfiles(codes, nameIn);
+    const prof = nameIn ? await saveProfiles(codes, nameIn) : null;
     const testId = $("afTest").value;
     const category = $("afCat").value;
     const timingRaw = $("afTiming").value;                       // Phase G §1
@@ -1004,8 +1066,11 @@ window.Dashboard = (function(){
     const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
     const expires = $("afExpires").value ? new Date($("afExpires").value + "T23:59:00").toISOString() : null;
     /* Phase H §3: one row per assignment. No read-modify-write, so the
-       Phase F clobber is gone — concurrent writers touch different keys. */
-    let okAll = true, remoteFailed = false;
+       Phase F clobber is gone — concurrent writers touch different keys.
+       Per-code outcome: the server can take some codes and reject the rest
+       (a session expiring mid-loop), and a blanket "try again" would
+       duplicate the ones that landed. */
+    const assigned = [], notes = [];
     for(const code of codes){
       const a = {
         assignmentId: "a-" + Math.floor(Date.now()/1000) + "-" + Math.random().toString(16).slice(2, 6),
@@ -1015,22 +1080,26 @@ window.Dashboard = (function(){
         completedAttemptId: null
       };
       const key = "assign:" + code + ":" + a.assignmentId;
-      if(!(await AttemptStore.setLocal(key, a))) okAll = false;
-      await AttemptStore.remove("assign:" + code + ":__none");   // tidy any vestigial sentinel
-      if(AttemptStore.isRemote()){
-        try{
-          await AttemptStore.adminUpsert(key, code, a);
-          await AttemptStore.adminDelete("assign:" + code + ":__none");
-        }catch(e){ remoteFailed = true; }
+      const res = await tutorPut(key, code, a);
+      if(!res.ok){ notes.push(res.message); continue; }
+      assigned.push(code);
+      if(res.warning) notes.push(res.warning);
+      /* tidy the vestigial __none marker (absent == empty since 2026-08-01)
+         if this browser still holds one; not a failed assignment if it
+         can't go, so it is noted rather than counted */
+      const sentinel = "assign:" + code + ":__none";
+      if(await AttemptStore.get(sentinel)){
+        const t = await tutorDelete(sentinel);
+        if(!t.ok) notes.push(t.message);
       }
     }
-    lastStartCode = startCode;
-    $("dashStatus").textContent = !okAll
-      ? "Some assignment writes failed — storage problem."
-      : remoteFailed
-        ? "Saved locally, but the server write failed — students won't see this until it syncs. Check your tutor sign-in and try again."
-        : "Assigned " + testId + " to " + codes.join(", ") +
-          (AttemptStore.isRemote() ? " (synced)." : ".");
+    if(prof) notes.push(...prof.messages);
+    lastStartCode = assigned.length ? startCode : null;   // never read a code aloud for a sitting that doesn't exist
+    $("dashStatus").textContent =
+      (assigned.length
+        ? "Assigned " + testId + " to " + assigned.join(", ") + (AttemptStore.isRemote() ? " (on the server)." : ".")
+        : "") +
+      (notes.length ? (assigned.length ? " " : "") + notes.join(" ") : "");
     await loadAssignsAndBugs();
     render();
   }
@@ -1047,8 +1116,11 @@ window.Dashboard = (function(){
        !confirm("This is " + code + "'s last assignment.\n\nDeleting it leaves them with NOTHING on their home screen until you assign something new.\n\nDelete anyway?")){
       return;
     }
-    await AttemptStore.remove(key);
-    if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete(key); }catch(e){} }
+    const res = await tutorDelete(key);
+    $("dashStatus").textContent = res.ok
+      ? "Deleted " + describeRow(key) + "." + (res.warning ? " " + res.warning : "")
+      : res.message;
+    if(!res.ok) return;                          // nothing changed anywhere
     await loadAssignsAndBugs();
     render();
   }
@@ -1060,14 +1132,17 @@ window.Dashboard = (function(){
     if(!code) return;
     if(!confirm("Clear all assignments for " + code + "?\n\nThey will see NOTHING on their home screen — both Your Tests and Practice and Prepare will be empty — until you assign something new.\n\nTheir recorded attempts are not affected.")) return;
     const keys = (await AttemptStore.list("assign:" + code)) || [];   // rows + legacy array
-    let ok = true;
+    let cleared = 0;
+    const problems = [];
     for(const k of keys){
-      if(!(await AttemptStore.remove(k))) ok = false;
-      if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete(k); }catch(e){ ok = false; } }
+      const res = await tutorDelete(k);
+      if(res.ok){ cleared++; if(res.warning) problems.push(res.warning); }
+      else problems.push(res.message);
     }
-    $("dashStatus").textContent = ok
+    $("dashStatus").textContent = !problems.length
       ? "Cleared every assignment for " + code + " — their home screen is now empty."
-      : "Clear partly failed — check the connection and try again.";
+      : (cleared ? "Cleared " + cleared + " of " + keys.length + " assignment row(s) for " + code + ". " : "") +
+        problems.join(" ");
     await loadAssignsAndBugs();
     render();
   }
@@ -1095,16 +1170,17 @@ window.Dashboard = (function(){
       return;
     }
     let sent = 0, skipped = 0, failed = 0;
-    for(const prefix of ["attempt:", "assign:", "bug:", "pset:"]){
+    for(const prefix of ["attempt:", "assign:", "bug:", "pset:", "student:"]){
       const keys = (await AttemptStore.list(prefix)) || [];
       for(const k of keys){
         if(remoteKeys[k]){ skipped++; continue; }
         const v = await AttemptStore.get(k);
         if(!v) { failed++; continue; }
-        // owner: attempts carry student.code; assignment keys embed the code
+        // owner: attempts carry student.code; assignment and profile keys embed the code
         let owner = null;
         if(k.indexOf("attempt:") === 0) owner = (v.student && v.student.key) || null;
         else if(k.indexOf("assign:") === 0) owner = k.split(":")[1] || null;
+        else if(k.indexOf("student:") === 0) owner = k.split(":")[1] || null;
         else if(k.indexOf("bug:") === 0) owner = v.studentCode || null;
         try{ await AttemptStore.adminUpsert(k, owner, v); sent++; }
         catch(e){ failed++; }
@@ -1414,8 +1490,8 @@ window.Dashboard = (function(){
       </div>`;
   }
 
-  /* ---- set persistence (tutor-only writes: setLocal + adminUpsert, the
-     same two-step every other tutor write uses) ---- */
+  /* ---- set persistence (tutor-only writes through tutorPut/tutorDelete:
+     server first, mirror on success, like every other tutor write) ---- */
   function newSetId(){
     return "pset-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6);
   }
@@ -1435,21 +1511,11 @@ window.Dashboard = (function(){
       updatedAt: now
     };
     const key = "pset:" + set.setId;
-    const prev = isNew ? null : (sets.find(x => x.setId === set.setId) || null);
-    let ok = await AttemptStore.setLocal(key, set);
-    if(ok && AttemptStore.isRemote()){
-      try{ await AttemptStore.adminUpsert(key, null, set); }
-      catch(e){
-        ok = false;
-        /* Roll the local mirror back. Left in place, a set the server never
-           accepted (expired tutor session is the usual cause) keeps showing
-           in this browser's list and can even be ASSIGNED from here — the
-           student then gets "set unavailable", since fn_get_set reads the
-           server. The tutor pull never removes local-only rows, so the
-           phantom would otherwise persist until deleted by hand. */
-        try{ if(prev) await AttemptStore.setLocal(key, prev); else await AttemptStore.remove(key); }catch(e2){}
-      }
-    }
+    /* Server first (tutorPut): a set the server never accepted must not show
+       in this browser's list — it could be ASSIGNED from here, and the
+       student would get "set unavailable", since fn_get_set reads the server. */
+    const res = await tutorPut(key, null, set);
+    const ok = res.ok;
     /* A live assignment carries a name/count snapshot for the student's card
        (assignSetFromForm). Refresh it on edit so the card doesn't advertise
        the old count. Each row is RE-READ FRESH right before it is patched
@@ -1465,35 +1531,31 @@ window.Dashboard = (function(){
        Completed attempts are untouched either way: they froze their own
        question list at begin. */
     let patched = 0, patchFailed = 0;
+    const patchNotes = [];
     if(ok && !isNew){
       for(const x of assignmentsForSet(set.setId)){
         const ak = "assign:" + x.code + ":" + x.a.assignmentId;
         let live;
         try{ live = await freshAssignmentRow(ak); }
-        catch(e){ patchFailed++; continue; }
+        catch(e){ patchFailed++; patchNotes.push("Couldn't read " + describeRow(ak) + " from the server."); continue; }
         if(!live){
-          try{ await AttemptStore.remove(ak); }catch(e){}   // heal the stale mirror
+          try{ await AttemptStore.remove(ak); }catch(e){}   // heal the stale mirror (server never had it)
           continue;
         }
         if(live.setName === set.name && live.questionCount === set.refs.length) continue;
         const next = Object.assign({}, live, { setName: set.name, questionCount: set.refs.length });
-        let pok = await AttemptStore.setLocal(ak, next);
-        if(pok && AttemptStore.isRemote()){
-          try{ await AttemptStore.adminUpsert(ak, x.code, next); }
-          catch(e){
-            pok = false;
-            try{ await AttemptStore.setLocal(ak, live); }catch(e2){}   // mirror follows the server
-          }
-        }
-        if(pok) patched++; else patchFailed++;
+        const p = await tutorPut(ak, x.code, next);   // server first; the mirror keeps `live` on rejection
+        if(p.ok){ patched++; if(p.warning) patchNotes.push(p.warning); }
+        else { patchFailed++; patchNotes.push(p.message); }
       }
     }
     setsMsg = ok
       ? (isNew ? "Created “" + set.name + "” — assign it below."
                : "Saved “" + set.name + "”. Existing assignments use the updated set from the next sitting on; completed attempts keep their own snapshot." +
                  (patched ? " Updated " + patched + " assignment card" + (patched === 1 ? "" : "s") + "." : "") +
-                 (patchFailed ? " " + patchFailed + " assignment card" + (patchFailed === 1 ? "" : "s") + " couldn't be updated — the question count shown to that student may be stale." : ""))
-      : "Not saved — the server rejected the write (tutor sign-in expired?). Sign in again and try again.";
+                 (patchFailed ? " " + patchFailed + " assignment card" + (patchFailed === 1 ? "" : "s") + " couldn't be updated — the question count shown to that student may be stale. " + patchNotes.join(" ") : "")) +
+        (res.warning ? " " + res.warning : "")
+      : res.message;
     if(ok){ builder = null; if(isNew) await loadSets(); else await loadAssignsAndBugs(); }
     render();
   }
@@ -1522,9 +1584,8 @@ window.Dashboard = (function(){
         : "") +
       "Completed and in-progress attempts are NOT affected — each attempt froze its own copy of the questions at start.";
     if(!confirm(warn)) return;
-    await AttemptStore.remove("pset:" + setId);
-    if(AttemptStore.isRemote()){ try{ await AttemptStore.adminDelete("pset:" + setId); }catch(e){} }
-    setsMsg = "Deleted “" + s.name + "”.";
+    const res = await tutorDelete("pset:" + setId);
+    setsMsg = res.ok ? "Deleted “" + s.name + "”." + (res.warning ? " " + res.warning : "") : res.message;
     await loadSets();
     render();
   }
@@ -1541,8 +1602,10 @@ window.Dashboard = (function(){
     const limitRaw = parseInt($("saLimit").value, 10);
     const limit = (isFinite(limitRaw) && limitRaw > 0) ? Math.min(limitRaw, 180) : null;
     const expires = $("saExpires").value ? new Date($("saExpires").value + "T23:59:00").toISOString() : null;
-    let okAll = true;
-    const assigned = [], notAssigned = [];
+    /* Per-code outcome (server first via tutorPut): the server can accept
+       some codes and reject the rest, and a blanket "try again" would
+       duplicate the ones that landed. */
+    const assigned = [], notes = [];
     for(const code of codes){
       const a = {
         assignmentId: "a-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6),
@@ -1556,33 +1619,16 @@ window.Dashboard = (function(){
         completedAttemptId: null
       };
       const key = "assign:" + code + ":" + a.assignmentId;
-      if(!(await AttemptStore.setLocal(key, a))){ okAll = false; notAssigned.push(code); continue; }
-      if(AttemptStore.isRemote()){
-        try{ await AttemptStore.adminUpsert(key, code, a); }
-        catch(e){
-          /* same rollback as saveSetFromBuilder: the student reads
-             assignments from the server, so a local-only row is an
-             assignment the dashboard shows and the student never gets */
-          try{ await AttemptStore.remove(key); }catch(e2){}
-          notAssigned.push(code);
-          continue;
-        }
-      }
+      const res = await tutorPut(key, code, a);
+      if(!res.ok){ notes.push(res.message); continue; }
       assigned.push(code);
+      if(res.warning) notes.push(res.warning);
     }
-    /* Per-code reporting: with several codes the server can accept some and
-       reject the rest, and a blanket "try again" would duplicate the ones
-       that landed. */
-    const retryHint = " — the server rejected the write (tutor sign-in expired?). Sign in again and assign " +
-      (notAssigned.length === 1 ? "that code" : "those codes") + " only.";
-    $("saMsg").textContent = !okAll
-      ? "Some assignment writes failed — storage problem." +
-        (assigned.length ? " Assigned to " + assigned.join(", ") + "; not assigned to " + notAssigned.join(", ") + "." : "")
-      : notAssigned.length
-        ? (assigned.length
-            ? "Assigned “" + s.name + "” to " + assigned.join(", ") + ". Not assigned to " + notAssigned.join(", ") + retryHint
-            : "Not assigned" + retryHint)
-        : "Assigned “" + s.name + "” to " + codes.join(", ") + (AttemptStore.isRemote() ? " (synced)." : ".");
+    $("saMsg").textContent =
+      (assigned.length
+        ? "Assigned “" + s.name + "” to " + assigned.join(", ") + (AttemptStore.isRemote() ? " (on the server)." : ".")
+        : "") +
+      (notes.length ? (assigned.length ? " " : "") + notes.join(" ") : "");
     await loadAssignsAndBugs();
     render();
   }
@@ -1780,25 +1826,13 @@ window.Dashboard = (function(){
       "\n\nThis permanently removes the attempt record. Its assignment (if any) stays marked " +
       "Completed — deleting the record does not reopen it for a retake.";
     if(!window.confirm(msg)) return;
-    let ok = await AttemptStore.remove(r.attemptId);
-    if(ok && AttemptStore.isRemote()){
-      try{ await AttemptStore.adminDelete(r.attemptId); }
-      catch(e){
-        /* remove() above only ever touches the LOCAL cache (backend() routes
-           remote mode through localBackend, same as every other mode except
-           "artifact" — see attempts.js), and unlike a write, a failed delete
-           has no sync-queue retry behind it. Left alone, the record would be
-           gone locally but still on the server, and the next pullAllForTutor()
-           (any future loadFromStorage()) would silently resurrect it — the
-           tutor would have no way to tell the delete "took" or not. Restore
-           the local copy so local and remote agree again, matching
-           toggleRelease's rollback on the same failure shape. */
-        try{ await AttemptStore.setLocal(r.attemptId, r); }catch(e2){}
-        ok = false;
-      }
-    }
-    if(!ok){
-      $("dashStatus").textContent = "Delete didn't save — storage unavailable. Try again.";
+    /* Server first (tutorDelete): a failed delete has no sync-queue retry
+       behind it, so the mirror must not drop the row until the server has —
+       otherwise the record would be gone here but still on the server, and
+       the next pullAllForTutor() would silently resurrect it. */
+    const res = await tutorDelete(r.attemptId);
+    if(!res.ok){
+      $("dashStatus").textContent = res.message;
       return;
     }
     openAttemptId = null;
@@ -1810,10 +1844,22 @@ window.Dashboard = (function(){
     // own "Loading…" text before the tutor ever sees it
     recs = recs.filter(x => x.attemptId !== r.attemptId);
     renderAll();
-    $("dashStatus").textContent = "Deleted the attempt for " + who + ".";
+    $("dashStatus").textContent = "Deleted the attempt for " + who + "." + (res.warning ? " " + res.warning : "");
   }
 
   /* ---------- events ---------- */
+  /* Dismiss = delete the bug row. Used to remove only the mirror, so the
+     report came back on the next load. */
+  async function dismissBug(key){
+    const res = await tutorDelete(key);
+    $("dashStatus").textContent = res.ok
+      ? "Dismissed the bug report." + (res.warning ? " " + res.warning : "")
+      : res.message;
+    if(!res.ok) return;
+    await loadAssignsAndBugs();
+    render();
+  }
+
   function attachBodyHandlers(){
     if(tab === "sets") attachSetsHandlers();
     if(tab === "bank") attachBankHandlers();
@@ -1840,11 +1886,7 @@ window.Dashboard = (function(){
     document.querySelectorAll("#dashBody .assign-del").forEach(btn =>
       btn.addEventListener("click", () => deleteAssignment(btn.dataset.code, btn.dataset.aid)));
     document.querySelectorAll("#dashBody .bug-dismiss").forEach(btn =>
-      btn.addEventListener("click", async () => {
-        await AttemptStore.remove(btn.dataset.bug);
-        await loadAssignsAndBugs();
-        render();
-      }));
+      btn.addEventListener("click", () => dismissBug(btn.dataset.bug)));
     document.querySelectorAll("#dashBody th[data-sort]").forEach(th =>
       th.addEventListener("click", () => {
         const k = th.dataset.sort;

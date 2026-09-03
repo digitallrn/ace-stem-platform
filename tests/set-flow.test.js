@@ -504,8 +504,9 @@ function makeAppState(test){
     check(/if\(!live\)\{[\s\S]*?AttemptStore\.remove\(ak\)/.test(saveBody),
       "a row that is gone is dropped from the mirror, not re-created");
     const assignBody = extractFn(dashSrc, "assignSetFromForm");
-    check(assignBody.indexOf("notAssigned") !== -1 && assignBody.indexOf("Not assigned to ") !== -1,
-      "assignSetFromForm reports assigned vs not-assigned codes separately (no blanket retry that duplicates)");
+    check(assignBody.indexOf("tutorPut(key, code, a)") !== -1 && /notes\.push\(res\.message\)/.test(assignBody)
+      && assignBody.indexOf("Sign in again and assign") === -1,
+      "assignSetFromForm goes through tutorPut per code and reports each rejected row by name (no blanket retry that duplicates) — behaviour in tests/tutor-writes.test.js");
   }
 
   console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);
