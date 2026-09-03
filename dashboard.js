@@ -33,6 +33,10 @@ window.Dashboard = (function(){
   let bankFilter = { q: "", subject: "", retired: true };   // Question Bank tab
   let builderTestId = "";        // which form's questions the builder shows
   let setsMsg = "";              // one-line status inside the Sets tab
+  let saMsg = "";                // outcome line under the set-assign form — a
+                                 // module var, because render() rebuilds
+                                 // #dashBody and a textContent write to the
+                                 // old #saMsg node would be wiped with it
   /* Manifest entries — names and versions, no questions. Keyed under every id
      a test has carried so records written before a rename still resolve. */
   const testsById = {};
@@ -368,9 +372,22 @@ window.Dashboard = (function(){
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
     if(source === "storage"){
-      lastExport = { ids: recs.map(r => r.attemptId), when: new Date() };
-      $("dashDeleteBtn").disabled = false;
-      $("dashStatus").textContent = "Archive downloaded (" + recs.length + " attempts). Verify the file opened correctly, then “Delete archived attempts” removes exactly those from storage.";
+      /* Arm the delete for FINISHED attempts only. The archive file holds
+         every record, including in-progress sittings, but a live sitting's
+         checkpoint is not something an archive can stand in for — deleting
+         it would leave a partial snapshot as the only copy (and a sitting
+         that finishes between this download and the click would be lost
+         outright, since finalize's upload has already drained). Those rows
+         stay; the status says how many. */
+      const deletable = recs.filter(isDeletableAttempt).map(r => r.attemptId);
+      const live = recs.length - deletable.length;
+      lastExport = deletable.length ? { ids: deletable, when: new Date() } : null;
+      $("dashDeleteBtn").disabled = !lastExport;
+      $("dashStatus").textContent = "Archive downloaded (" + recs.length + " attempts). " +
+        (deletable.length
+          ? "Verify the file opened correctly, then “Delete archived attempts” removes exactly the " + deletable.length + " finished attempt(s) from storage."
+          : "Nothing to delete — ") +
+        (live ? (deletable.length ? " " : "") + live + " in-progress sitting(s) are in the file but stay in storage." : "");
     }
   }
 
@@ -390,20 +407,28 @@ window.Dashboard = (function(){
     /* Server first, per row (tutorDelete): in remote mode this used to remove
        only the mirror, so the server kept every archived record and the very
        next load pulled them all straight back. */
-    let ok = 0;
-    const stillThere = [], problems = [];
+    let ok = 0, skipped = 0;
+    const stillThere = [], rejections = [], warnings = [];
     for(const id of ids){
+      /* belt and braces under the exportAll guard: never delete a row that
+         is not a finished attempt as of THIS load — a sitting that was
+         in-progress when the archive was downloaded, or that has changed
+         since, stays; the archive is not a backup of a live sitting */
+      const cur = recs.find(x => x.attemptId === id);
+      if(!isDeletableAttempt(cur)){ skipped++; continue; }
       const res = await tutorDelete(id);
-      if(res.ok){ ok++; if(res.warning) problems.push(res.warning); }
-      else { stillThere.push(id); problems.push(res.message); }
+      if(res.ok){ ok++; if(res.warning) warnings.push(res.warning); }
+      else { stillThere.push(id); rejections.push(res.message); }
     }
     /* stay armed for exactly the rows that are still there, so a retry after
        signing in again deletes those and nothing else */
     lastExport = stillThere.length ? { ids: stillThere, when: lastExport.when } : null;
     $("dashDeleteBtn").disabled = !lastExport;
     const summary = "Deleted " + ok + " of " + ids.length + " archived record(s)." +
+      (skipped ? " " + skipped + " skipped — not a finished attempt any more (left in storage)." : "") +
       (stillThere.length ? " " + stillThere.length + " NOT deleted — still in storage. " +
-        problems.slice(0, 3).join(" ") + (problems.length > 3 ? " (+" + (problems.length - 3) + " more, same reason.)" : "") : "");
+        rejections.slice(0, 3).join(" ") + (rejections.length > 3 ? " (+" + (rejections.length - 3) + " more.)" : "") : "") +
+      (warnings.length ? " " + warnings.join(" ") : "");
     await loadFromStorage();
     $("dashStatus").textContent = summary + " " + $("dashStatus").textContent;
   }
@@ -1482,7 +1507,7 @@ window.Dashboard = (function(){
         </div>
         <div class="af-actions">
           <button class="pill" id="saAssignBtn" style="padding:9px 26px;">Assign set</button>
-          <span class="dash-hint" id="saMsg"></span>
+          <span class="dash-hint" id="saMsg">${esc(saMsg)}</span>
         </div>
         ${existing.length ? `<table class="dtable slim"><thead><tr>
             <th>Student</th><th>Set</th><th>Timing</th><th>Results</th><th>Expires</th><th>Status</th><th></th>
@@ -1553,7 +1578,8 @@ window.Dashboard = (function(){
       ? (isNew ? "Created “" + set.name + "” — assign it below."
                : "Saved “" + set.name + "”. Existing assignments use the updated set from the next sitting on; completed attempts keep their own snapshot." +
                  (patched ? " Updated " + patched + " assignment card" + (patched === 1 ? "" : "s") + "." : "") +
-                 (patchFailed ? " " + patchFailed + " assignment card" + (patchFailed === 1 ? "" : "s") + " couldn't be updated — the question count shown to that student may be stale. " + patchNotes.join(" ") : "")) +
+                 (patchFailed ? " " + patchFailed + " assignment card" + (patchFailed === 1 ? "" : "s") + " couldn't be updated — the question count shown to that student may be stale." : "") +
+                 (patchNotes.length ? " " + patchNotes.join(" ") : "")) +
         (res.warning ? " " + res.warning : "")
       : res.message;
     if(ok){ builder = null; if(isNew) await loadSets(); else await loadAssignsAndBugs(); }
@@ -1624,7 +1650,9 @@ window.Dashboard = (function(){
       assigned.push(code);
       if(res.warning) notes.push(res.warning);
     }
-    $("saMsg").textContent =
+    /* into the module var, not the node: render() below rebuilds #dashBody
+       and would wipe a textContent write together with the old node */
+    saMsg =
       (assigned.length
         ? "Assigned “" + s.name + "” to " + assigned.join(", ") + (AttemptStore.isRemote() ? " (on the server)." : ".")
         : "") +

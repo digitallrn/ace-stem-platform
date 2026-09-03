@@ -38,36 +38,69 @@ function check(ok, label, detail){
          console.log("FAIL | " + label + (detail ? " — " + detail : "")); }
 }
 const everyMessage = [];      // every status text any path produced, for the no-"sync" sweep
+const STORES = [];            // every store built inside the current run(), for the order invariant
 /* each case runs guarded, so on a source that lacks the fix (or a path) the
-   case FAILS with the reason instead of aborting the whole suite */
+   case FAILS with the reason instead of aborting the whole suite. After the
+   case, every remote-mode store it built is held to the SERVER-FIRST
+   invariant per key (see serverFirstViolations) — the mirror-snapshot checks
+   alone would also pass a mirror-first-then-rollback implementation. */
 async function run(fn){
+  const start = STORES.length;
   try{ await fn(); }
   catch(e){ check(false, "case could not run — " + (e && e.message || e)); }
+  for(const s of STORES.slice(start)){
+    if(!s.remote || !s.ops.some(o => o[0] !== "select")) continue;
+    const v = s.serverFirstViolations();
+    check(v.length === 0, "server-first order held for every key this case touched", v.join("; "));
+  }
 }
 
 /* ---------- fake storage: a mirror, a server, and a call log ---------- */
 function makeStore(opts){
   opts = opts || {};
-  const mirror = new Map(), server = new Map(), calls = [];
+  const mirror = new Map(), server = new Map(), calls = [], ops = [];
   const clone = v => JSON.parse(JSON.stringify(v));
   const rejecting = (op, key) => typeof opts.reject === "function" ? !!opts.reject(op, key) : !!opts.reject;
-  const expired = () => { const e = new Error("JWT expired"); e.status = 401; return e; };
+  const expired = () => { const e = new Error(opts.errorMessage || "JWT expired"); e.status = opts.errorStatus === undefined ? 401 : opts.errorStatus; return e; };
   const AS = {
     isRemote: () => opts.remote !== false,
     hasAuthToken: () => true,
-    async setLocal(k, v){ calls.push(["setLocal", k]); if(opts.localFail) return false; mirror.set(k, clone(v)); return true; },
-    async remove(k){ calls.push(["remove", k]); if(opts.localFail) return false; mirror.delete(k); return true; },
+    async setLocal(k, v){ calls.push(["setLocal", k]); ops.push(["mirror:set", k]); if(opts.localFail) return false; mirror.set(k, clone(v)); return true; },
+    async remove(k){ calls.push(["remove", k]); ops.push(["mirror:remove", k]); if(opts.localFail) return false; mirror.delete(k); return true; },
     async get(k){ return mirror.has(k) ? clone(mirror.get(k)) : null; },
     async list(prefix){ return [...mirror.keys()].filter(k => k.indexOf(prefix) === 0).sort(); },
-    async adminUpsert(k, owner, v){ calls.push(["adminUpsert", k]); if(rejecting("put", k)) throw expired(); server.set(k, { owner: owner, value: clone(v) }); return null; },
-    async adminDelete(k){ calls.push(["adminDelete", k]); if(rejecting("delete", k)) throw expired(); server.delete(k); return null; },
+    async adminUpsert(k, owner, v){ calls.push(["adminUpsert", k]);
+      if(rejecting("put", k)){ ops.push(["admin", k, "rejected"]); throw expired(); }
+      ops.push(["admin", k, "ok"]); server.set(k, { owner: owner, value: clone(v) }); return null; },
+    async adminDelete(k){ calls.push(["adminDelete", k]);
+      if(rejecting("delete", k)){ ops.push(["admin", k, "rejected"]); throw expired(); }
+      ops.push(["admin", k, "ok"]); server.delete(k); return null; },
     async adminSelectKey(k){ calls.push(["adminSelectKey", k]); if(rejecting("select", k)) throw expired();
+      ops.push(["select", k]);
       return server.has(k) ? [{ key: k, owner_code: server.get(k).owner, value: clone(server.get(k).value) }] : []; },
     async adminSelectAll(){ return [...server.entries()].map(([k, r]) => ({ key: k, owner_code: r.owner, value: clone(r.value) })); }
   };
   const seedBoth = (k, v, owner) => { mirror.set(k, clone(v)); server.set(k, { owner: owner || null, value: clone(v) }); };
   const snapshot = () => JSON.stringify([...mirror.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1));
-  return { AS, mirror, server, calls, seedBoth, snapshot };
+  /* SERVER-FIRST, per key, in remote mode: a mirror SET must follow an
+     accepted server call on that same key with no rejection since; a mirror
+     REMOVE must follow an accepted server call OR a server read that came
+     back (the one heal-the-mirror path: a row the server never had). Any
+     mirror write on a key whose last server call was rejected, or with no
+     server call at all, is the pre-fix shape and is a violation. */
+  const serverFirstViolations = () => {
+    const last = new Map(), out = [];
+    for(const [op, k, outcome] of ops){
+      if(op === "admin") last.set(k, outcome);
+      else if(op === "select") last.set(k, "select");
+      else if(op === "mirror:set"){ if(last.get(k) !== "ok") out.push("mirror SET of " + k + " " + (last.has(k) ? "after a " + last.get(k) + " server call" : "with no server call")); }
+      else if(op === "mirror:remove"){ if(last.get(k) !== "ok" && last.get(k) !== "select") out.push("mirror REMOVE of " + k + " " + (last.has(k) ? "after a " + last.get(k) + " server call" : "with no server call")); }
+    }
+    return out;
+  };
+  const store = { AS, mirror, server, calls, ops, seedBoth, snapshot, serverFirstViolations, remote: opts.remote !== false };
+  STORES.push(store);
+  return store;
 }
 
 /* ---------- fake DOM + the dashboard closure, rebuilt per case ---------- */
@@ -93,21 +126,26 @@ function build(store){
   const els = {};
   const $ = id => els[id] || (els[id] = { value: "", textContent: "", checked: false, disabled: false,
     selectedOptions: [], classList: { add(){}, remove(){}, toggle(){} } });
-  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", `
+  /* render()/renderAll() rebuild #dashBody in the real dashboard, which wipes
+     any textContent written to a node INSIDE it (saMsg, sbMsg, afMsg) — model
+     that, so a message delivered only to a soon-to-be-replaced node does not
+     pass here while the page shows nothing. dashStatus lives outside. */
+  const wipeBody = () => { ["saMsg", "sbMsg", "afMsg"].forEach(id => { if(els[id]) els[id].textContent = ""; }); };
+  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", `
     let recs = [], assigns = [], bugs = [], lastStartCode = null, profiles = {}, source = "storage", lastExport = null;
-    let sets = [], builder = null, setsMsg = "", openAttemptId = null;
+    let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null;
     const loads = { assigns: 0, sets: 0, storage: 0, render: 0 };
     async function loadAssignsAndBugs(){ loads.assigns++; }
     async function loadSets(){ loads.sets++; }
     async function loadFromStorage(){ loads.storage++; }
-    function render(){ loads.render++; }
-    function renderAll(){ loads.render++; }
+    function render(){ loads.render++; wipeBody(); }
+    function renderAll(){ loads.render++; wipeBody(); }
     ${BODY}
     const fns = {};
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
     return {
       fns,
-      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, openAttemptId, loads }),
+      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads }),
       seed: o => {
         if("recs" in o) recs = o.recs; if("assigns" in o) assigns = o.assigns; if("profiles" in o) profiles = o.profiles;
         if("lastExport" in o) lastExport = o.lastExport; if("sets" in o) sets = o.sets; if("builder" in o) builder = o.builder;
@@ -115,7 +153,7 @@ function build(store){
       }
     };
   `);
-  const d = factory(store.AS, $, StudentCode, () => true, { confirm: () => true }, s => String(s));
+  const d = factory(store.AS, $, StudentCode, () => true, { confirm: () => true }, s => String(s), wipeBody);
   d.els = els; d.$ = $;
   return d;
 }
@@ -217,6 +255,28 @@ const noSync = t => !/sync/i.test(t);
       "rejected with a name typed: no student: row in the mirror and the in-memory profiles map is unchanged");
     check(/Not saved — the display name for AS-ABCDEFGH/.test(t) && /Not saved — assignment a-/.test(t),
       "rejected with a name typed: BOTH rejections are reported (the name used to be silent)", t);
+  });
+
+  await run(async () => {
+    /* the vestigial assign:<CODE>:__none marker: tidied through the helper
+       after the assignment lands; its own failure is reported, not counted */
+    const s = makeStore({}); const d = build(s);
+    s.seedBoth("assign:" + C1 + ":__none", { none: true }, C1);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.$("afTest").value = "202606asiav1"; d.$("afCat").value = "practice"; d.$("afTiming").value = "untimed";
+    await d.fns.createAssignment();
+    check(s.calls.some(c => c[0] === "adminDelete" && c[1] === "assign:" + C1 + ":__none") && !s.server.has("assign:" + C1 + ":__none") && !s.mirror.has("assign:" + C1 + ":__none"),
+      "sentinel: an accepted assignment deletes the __none marker on the server, then the mirror");
+  });
+  await run(async () => {
+    const s = makeStore({ reject: (op) => op === "delete" }); const d = build(s);
+    s.seedBoth("assign:" + C1 + ":__none", { none: true }, C1);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.$("afTest").value = "202606asiav1"; d.$("afCat").value = "practice"; d.$("afTiming").value = "untimed";
+    await d.fns.createAssignment();
+    const t = status(d);
+    check([...s.server.keys()].some(k => k.indexOf("assign:" + C1 + ":a-") === 0) && s.mirror.has("assign:" + C1 + ":__none") && s.server.has("assign:" + C1 + ":__none"),
+      "sentinel: a rejected marker delete still leaves the assignment landed and the marker in place on both sides");
+    check(/^Assigned 202606asiav1 to AS-ABCDEFGH/.test(t) && /Not deleted — the empty-assignments marker for AS-ABCDEFGH/.test(t),
+      "sentinel: the message reports the assignment AND the marker that couldn't go", t);
   });
 
   /* =================== 2. saveNameOnly / saveProfiles =================== */
@@ -375,6 +435,49 @@ const noSync = t => !/sync/i.test(t);
       "partial archive delete: re-armed for exactly the row that is still there");
   });
 
+  await run(async () => {
+    /* an in-progress sitting must never be deleted by the archive button —
+       exportAll doesn't arm it, and deleteArchived skips it even if armed */
+    const s = makeStore({}); const d = build(s);
+    const done = archRec(1), live = Object.assign(archRec(2), { status: "in-progress" });
+    s.seedBoth(done.attemptId, done, C1); s.seedBoth(live.attemptId, live, C1);
+    d.seed({ recs: [done, live], lastExport: { ids: [done.attemptId, live.attemptId], when: new Date(0) } });
+    await d.fns.deleteArchived();
+    const t = status(d);
+    check(!s.calls.some(c => c[0] === "adminDelete" && c[1] === live.attemptId) && s.server.has(live.attemptId) && s.mirror.has(live.attemptId),
+      "an in-progress sitting armed by a stale export is SKIPPED — never sent to adminDelete, still on both sides");
+    check(!s.server.has(done.attemptId) && /^Deleted 1 of 2 archived record\(s\)\. 1 skipped — not a finished attempt any more/.test(t),
+      "the finished one is deleted and the skip is reported", t);
+    const exportBody = extractFn(src, "exportAll");
+    check(/recs\.filter\(isDeletableAttempt\)/.test(exportBody) && /in-progress sitting\(s\) are in the file but stay in storage/.test(exportBody),
+      "exportAll arms the delete with FINISHED attempts only and says how many live sittings stay");
+  });
+  await run(async () => {
+    /* server accepted, mirror couldn't be written: the warning must reach the
+       status line even though nothing was rejected */
+    const s = makeStore({ localFail: true }); const d = build(s);
+    const r1 = archRec(1);
+    s.seedBoth(r1.attemptId, r1, C1);
+    d.seed({ recs: [r1], lastExport: { ids: [r1.attemptId], when: new Date(0) } });
+    await d.fns.deleteArchived();
+    const t = status(d);
+    check(!s.server.has(r1.attemptId) && s.mirror.has(r1.attemptId) && /Deleted on the server, but this browser's copy of attempt attempt:202606asiav1:1700000001:a1 couldn't be removed — press Refresh\./.test(t),
+      "archive delete: a mirror-write warning is shown even with zero rejections", t);
+  });
+  await run(async () => {
+    /* mixed reasons: a 401 and a timeout must both be named, no 'same reason' */
+    let n = 0;
+    const s = makeStore({ reject: () => true }); const d = build(s);
+    const rs = [1, 2, 3, 4, 5].map(archRec);
+    rs.forEach(r => s.seedBoth(r.attemptId, r, C1));
+    s.AS.adminDelete = async (k) => { n++; const e = n === 1 ? Object.assign(new Error("aborted"), { name: "AbortError" }) : Object.assign(new Error("JWT expired"), { status: 401 }); s.ops.push(["admin", k, "rejected"]); throw e; };
+    d.seed({ recs: rs, lastExport: { ids: rs.map(r => r.attemptId), when: new Date(0) } });
+    await d.fns.deleteArchived();
+    const t = status(d);
+    check(/didn't answer in time/.test(t) && /sign-in has expired/.test(t) && !/same reason/.test(t) && /\(\+2 more\.\)/.test(t),
+      "archive delete with mixed reasons: both reasons appear, the overflow count never claims 'same reason'", t);
+  });
+
   /* =================== 7. dismissBug =================== */
   console.log("--- 7. dismissBug: a real server delete ---");
   await run(async () => {
@@ -462,6 +565,28 @@ const noSync = t => !/sync/i.test(t);
     check(/Updated 1 assignment card\./.test(d.state().setsMsg), "control: the patch is reported");
   });
 
+  await run(async () => {
+    /* EDIT with the set row itself rejected: nothing else may happen — no
+       card patch (it would point live cards at a set the server never got),
+       no server read, builder stays open */
+    const old = { setId: "pset-1", name: "Old name", subject: "math", refs: [REF], createdAt: "2026-09-01T00:00:00Z" };
+    const assignRow = { assignmentId: "a-1", kind: "set", category: "practice", setId: "pset-1", setName: "Old name", questionCount: 1, holdRelease: false, completedAttemptId: null };
+    const s = makeStore({ reject: (op, k) => op === "put" && k.indexOf("pset:") === 0 }); const d = build(s);
+    s.seedBoth("pset:pset-1", old); s.seedBoth("assign:" + C1 + ":a-1", assignRow, C1);
+    d.seed({ sets: [JSON.parse(JSON.stringify(old))], assigns: [{ code: C1, list: [JSON.parse(JSON.stringify(assignRow))] }],
+      builder: { setId: "pset-1", name: "New name", subject: "math", refs: [REF, REF], createdAt: old.createdAt } });
+    d.$("sbName").value = "New name";
+    const before = s.snapshot();
+    await d.fns.saveSetFromBuilder();
+    const m = d.state().setsMsg; everyMessage.push(m);
+    check(s.snapshot() === before && s.server.get("assign:" + C1 + ":a-1").value.setName === "Old name" && s.server.get("pset:pset-1").value.name === "Old name",
+      "rejected set EDIT: mirror unchanged, the assignment row untouched on the server, the set still the old one");
+    check(!s.calls.some(c => c[0] === "adminSelectKey") && !s.calls.some(c => c[0] === "adminUpsert" && c[1].indexOf("assign:") === 0),
+      "rejected set EDIT: the card patch never runs (no server read, no assignment write)");
+    check(d.state().builder !== null && /^Not saved — set pset-1: the tutor sign-in has expired/.test(m) && noSync(m),
+      "rejected set EDIT: builder stays open, message names the set", m);
+  });
+
   /* =================== 10. assignSetFromForm =================== */
   console.log("--- 10. assignSetFromForm ---");
   await run(async () => {
@@ -470,7 +595,7 @@ const noSync = t => !/sync/i.test(t);
     d.$("saSet").value = "pset-1"; d.els.saCodes = { selectedOptions: [{ value: C1 }, { value: C2 }] };
     d.$("saFree").value = ""; d.$("saLimit").value = ""; d.$("saExpires").value = ""; d.$("saHold").checked = true;
     await d.fns.assignSetFromForm();
-    const t = d.$("saMsg").textContent; everyMessage.push(t);
+    const t = d.state().saMsg; everyMessage.push(t);   // the module var render() re-emits — the old node is wiped
     const keys = [...s.server.keys()];
     check(keys.length === 1 && keys[0].indexOf("assign:" + C1 + ":a-") === 0 && s.server.get(keys[0]).value.holdRelease === true
       && ![...s.mirror.keys()].some(k => k.indexOf(C2) !== -1),
@@ -484,7 +609,7 @@ const noSync = t => !/sync/i.test(t);
     d.$("saSet").value = "pset-1"; d.els.saCodes = { selectedOptions: [{ value: C1 }] };
     const before = s.snapshot();
     await d.fns.assignSetFromForm();
-    const t = d.$("saMsg").textContent; everyMessage.push(t);
+    const t = d.state().saMsg; everyMessage.push(t);   // the module var render() re-emits — the old node is wiped
     check(s.snapshot() === before && s.server.size === 0 && /^Not saved — assignment a-\S+ for AS-ABCDEFGH/.test(t),
       "rejected set assignment: nothing anywhere, message names the row", t);
   });
@@ -494,22 +619,33 @@ const noSync = t => !/sync/i.test(t);
   check(everyMessage.length >= 20 && everyMessage.every(noSync), "none of the " + everyMessage.length + " captured tutor messages says 'sync' in any form",
     everyMessage.filter(m => !noSync(m)).join(" | "));
   await run(async () => {
-    /* every raw mutator call in dashboard.js must sit inside the helper, the
-       upload button (a mirror→server push that mutates nothing locally), or
-       the one heal-the-mirror remove of a row the server never had */
-    const ALLOW = { tutorPut: true, tutorDelete: true, migrateLocalToServer: true };
-    const re = /AttemptStore\.(adminUpsert|adminDelete|setLocal|remove)\(/g;
+    /* Source tripwire (the behavioural guard is the per-key order invariant
+       run() applies to every case): outside the helper bodies, the upload
+       button, and the one heal-the-mirror remove, NO use of AttemptStore may
+       be anything but a read. Done by REMOVING those allowed bodies from the
+       source and then flagging every AttemptStore token in the remainder
+       that is not immediately a call to a read-only member — so an alias
+       (const AS2 = AttemptStore), bracket access (AttemptStore["setLocal"]),
+       the student-path set()/delete(), or a new mutator name all trip it. */
+    const READS = ["isRemote", "isLocal", "hasAuthToken", "available", "get", "list", "getResult",
+      "adminSelectKey", "adminSelectAll", "pullAllForTutor", "signOutTutor", "signInTutor", "setAuthToken", "rpc"];
+    let rest = src;
+    for(const fn of ["tutorPut", "tutorDelete", "migrateLocalToServer"]){
+      try{ rest = rest.replace(extractFn(src, fn), ""); }catch(e){ /* absent: nothing to strip */ }
+    }
+    const healLine = (rest.match(/^.*AttemptStore\.remove\(ak\);[^\n]*heal the stale mirror[^\n]*$/m) || [])[0];
+    if(healLine) rest = rest.replace(healLine, "");
+    const readRe = new RegExp("^\\.(?:" + READS.join("|") + ")\\(");
+    const tokRe = /AttemptStore\b/g;
     const offenders = [];
     let m;
-    while((m = re.exec(src))){
-      const head = src.slice(0, m.index);
-      const fnMatch = head.match(/(?:async\s+)?function\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*\{(?![\s\S]*\bfunction\s+[A-Za-z_]\w*\s*\([^)]*\)\s*\{)/);
-      const fn = fnMatch ? fnMatch[1] : "?";
-      const line = head.split("\n").length;
-      const isHeal = fn === "saveSetFromBuilder" && m[1] === "remove" && /heal the stale mirror/.test(src.slice(m.index, m.index + 120));
-      if(!ALLOW[fn] && !isHeal) offenders.push(fn + ":" + line + " " + m[1]);
+    while((m = tokRe.exec(rest))){
+      const after = rest.slice(m.index + m[0].length, m.index + m[0].length + 40);
+      if(readRe.test(after)) continue;
+      const line = rest.slice(0, m.index).split("\n").length;
+      offenders.push("line~" + line + ": AttemptStore" + after.slice(0, 24).replace(/\s+/g, " "));
     }
-    check(offenders.length === 0, "no dashboard.js path calls adminUpsert/adminDelete/setLocal/remove outside tutorPut/tutorDelete (upload button and the mirror-heal excepted)", offenders.join(", "));
+    check(offenders.length === 0, "outside tutorPut/tutorDelete/upload/mirror-heal, every AttemptStore use in dashboard.js is a read-only member call (no alias, bracket, set/delete, or mutator)", offenders.join(" | "));
     check(/for\(const prefix of \[[^\]]*"student:"[^\]]*\]\)/.test(extractFn(src, "migrateLocalToServer") || ""),
       "the upload button carries student: (display-name) rows");
   });
