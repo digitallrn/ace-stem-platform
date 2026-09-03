@@ -393,7 +393,18 @@ window.Dashboard = (function(){
 
   async function deleteArchived(){
     if(!lastExport || source !== "storage") return;
-    const ids = lastExport.ids;
+    /* An armed id that is no longer loaded — deleted from the detail pane
+       here, or from another browser and then Refreshed — is simply gone,
+       and is reported as gone: never as "left in storage", and never counted
+       in the confirmation. */
+    const gone = lastExport.ids.filter(id => !recs.some(x => x.attemptId === id));
+    const ids = lastExport.ids.filter(id => recs.some(x => x.attemptId === id));
+    if(!ids.length){
+      lastExport = null;
+      $("dashDeleteBtn").disabled = true;
+      $("dashStatus").textContent = "Nothing left to delete — the " + gone.length + " archived record(s) were already removed.";
+      return;
+    }
     const codes = [...new Set(recs.filter(r => ids.includes(r.attemptId))
       .map(r => r.student && r.student.code || "?"))];
     const dates = ids.map(id => parseInt(id.split(":")[2], 10)*1000).filter(n => !isNaN(n));
@@ -425,6 +436,7 @@ window.Dashboard = (function(){
     lastExport = stillThere.length ? { ids: stillThere, when: lastExport.when } : null;
     $("dashDeleteBtn").disabled = !lastExport;
     const summary = "Deleted " + ok + " of " + ids.length + " archived record(s)." +
+      (gone.length ? " " + gone.length + " already removed before this." : "") +
       (skipped ? " " + skipped + " skipped — not a finished attempt any more (left in storage)." : "") +
       (stillThere.length ? " " + stillThere.length + " NOT deleted — still in storage. " +
         rejections.slice(0, 3).join(" ") + (rejections.length > 3 ? " (+" + (rejections.length - 3) + " more.)" : "") : "") +
@@ -1865,6 +1877,12 @@ window.Dashboard = (function(){
     }
     openAttemptId = null;
     $("dashDetail").classList.add("hidden");
+    /* the archive button, if armed, no longer covers this row */
+    if(lastExport){
+      const rest = lastExport.ids.filter(id => id !== r.attemptId);
+      lastExport = rest.length ? { ids: rest, when: lastExport.when } : null;
+      $("dashDeleteBtn").disabled = !lastExport;
+    }
     // update in place rather than a full loadFromStorage(): the row is
     // already confirmed gone from storage above, nothing else changed, and a
     // full reload (pullAllForTutor + a get() per attempt key in remote mode)
