@@ -52,6 +52,8 @@ async function run(fn){
     if(!s.remote || !s.ops.some(o => o[0] !== "select")) continue;
     const v = s.serverFirstViolations();
     check(v.length === 0, "server-first order held for every key this case touched", v.join("; "));
+    const dv = s.divergences();
+    check(dv.length === 0, "mirror and server agree on every key they both hold", dv.join(", "));
   }
 }
 
@@ -75,7 +77,8 @@ function makeStore(opts){
     async adminDelete(k){ calls.push(["adminDelete", k]);
       if(rejecting("delete", k)){ ops.push(["admin", k, "rejected"]); throw expired(); }
       ops.push(["admin", k, "ok"]); server.delete(k); return null; },
-    async adminSelectKey(k){ calls.push(["adminSelectKey", k]); if(rejecting("select", k)) throw expired();
+    async adminSelectKey(k){ calls.push(["adminSelectKey", k]);
+      if(rejecting("select", k)){ ops.push(["select", k, "rejected"]); throw expired(); }
       ops.push(["select", k, server.has(k) ? "found" : "missing"]);
       return server.has(k) ? [{ key: k, owner_code: server.get(k).owner, value: clone(server.get(k).value) }] : []; },
     async adminSelectAll(){ return [...server.entries()].map(([k, r]) => ({ key: k, owner_code: r.owner, value: clone(r.value) })); }
@@ -99,7 +102,18 @@ function makeStore(opts){
     }
     return out;
   };
-  const store = { AS, mirror, server, calls, ops, seedBoth, snapshot, serverFirstViolations, remote: opts.remote !== false };
+  /* after a case, every key on BOTH sides must hold the same value — the
+     mirror is a copy of what the server accepted, never a variant of it
+     (unless this store was told the mirror can't be written at all) */
+  const divergences = () => {
+    if(opts.localFail) return [];
+    const out = [];
+    for(const [k, r] of server.entries()){
+      if(mirror.has(k) && JSON.stringify(mirror.get(k)) !== JSON.stringify(r.value)) out.push(k);
+    }
+    return out;
+  };
+  const store = { AS, mirror, server, calls, ops, seedBoth, snapshot, serverFirstViolations, divergences, remote: opts.remote !== false };
   STORES.push(store);
   return store;
 }
@@ -472,16 +486,17 @@ const noSync = t => !/sync/i.test(t);
       "exportAll with only live sittings arms nothing and leaves the button disabled", status(d2));
   });
   await run(async () => {
-    /* an armed id that is no longer loaded (deleted here or elsewhere) is
-       reported as already removed — not counted, not "left in storage" */
+    /* an armed id that is not currently listed is never sent to the server,
+       never reported as skipped-unfinished, and never claimed gone */
     const s = makeStore({}); const d = build(s);
     const a = archRec(1), b = archRec(2);
-    s.seedBoth(a.attemptId, a, C1);                               // b is gone from storage and from recs
+    s.seedBoth(a.attemptId, a, C1); s.seedBoth(b.attemptId, b, C1);   // b is in storage but not in recs (excluded on load)
     d.seed({ recs: [a], lastExport: { ids: [a.attemptId, b.attemptId], when: new Date(0) } });
     await d.fns.deleteArchived();
     const t = status(d);
-    check(!s.calls.some(c => c[0] === "adminDelete" && c[1] === b.attemptId) && !s.server.has(a.attemptId) && /^Deleted 1 of 1 archived record\(s\)\. 1 already removed before this\./.test(t),
-      "a gone id is neither deleted nor reported as skipped-unfinished", t);
+    check(!s.calls.some(c => c[0] === "adminDelete" && c[1] === b.attemptId) && s.server.has(b.attemptId) && !s.server.has(a.attemptId)
+      && !/skipped/.test(t) && !/already removed/.test(t) && /1 not listed right now — left in storage/.test(t),
+      "a not-listed id is neither deleted, nor reported as skipped-unfinished, nor claimed gone", t);
     /* deleteAttempt un-arms the row it removed */
     const s2 = makeStore({}); const d2 = build(s2);
     const c = archRec(3), e = archRec(4);
@@ -492,6 +507,50 @@ const noSync = t => !/sync/i.test(t);
     check(!!le && le.ids.join() === e.attemptId && d2.$("dashDeleteBtn").disabled === false, "deleting one attempt from the detail pane un-arms just that id", JSON.stringify(le && le.ids));
     await d2.fns.deleteAttempt(e);
     check(d2.state().lastExport === null && d2.$("dashDeleteBtn").disabled === true, "deleting the last armed attempt disarms the archive button");
+  });
+  await run(async () => {
+    /* the realistic sequences AFTER a re-arm must still work — the re-armed
+       lastExport has to carry `when`, which the confirm text reads */
+    const s = makeStore({}); const d = build(s);
+    const c = archRec(5), e = archRec(6);
+    s.seedBoth(c.attemptId, c, C1); s.seedBoth(e.attemptId, e, C1);
+    d.seed({ recs: [c, e], lastExport: { ids: [c.attemptId, e.attemptId], when: new Date(0) } });
+    await d.fns.deleteAttempt(c);
+    await d.fns.deleteArchived();                              // re-armed by deleteAttempt, then used
+    check(!s.server.has(e.attemptId) && d.state().lastExport === null && /^Deleted 1 of 1 archived record\(s\)\./.test(status(d)),
+      "deleteAttempt then deleteArchived: the re-armed export still works and deletes the remaining row", status(d));
+    let reject = true;
+    const s2 = makeStore({ reject: () => reject }); const d2 = build(s2);
+    const f = archRec(7);
+    s2.seedBoth(f.attemptId, f, C1);
+    d2.seed({ recs: [f], lastExport: { ids: [f.attemptId], when: new Date(0) } });
+    await d2.fns.deleteArchived();                             // rejected → re-armed
+    reject = false;
+    await d2.fns.deleteArchived();                             // signed in again → retry
+    check(!s2.server.has(f.attemptId) && d2.state().lastExport === null && /^Deleted 1 of 1 archived record\(s\)\./.test(status(d2)),
+      "rejected then retried: the re-armed export deletes on the second attempt", status(d2));
+  });
+  await run(async () => {
+    /* armed ids that are not currently listed (a failed load, an excluded
+       row) are left in storage, stay armed, and are never claimed gone */
+    const s = makeStore({}); const d = build(s);
+    const a = archRec(8);
+    s.seedBoth(a.attemptId, a, C1);
+    d.seed({ recs: [], lastExport: { ids: [a.attemptId], when: new Date(0) } });
+    const before = s.snapshot();
+    await d.fns.deleteArchived();
+    const t = status(d);
+    check(s.snapshot() === before && s.server.has(a.attemptId) && !!d.state().lastExport && d.state().lastExport.ids.join() === a.attemptId && d.$("dashDeleteBtn").disabled === false,
+      "nothing listed: nothing deleted, still armed, button still enabled");
+    check(/^Nothing to delete right now — none of the 1 archived record\(s\) are listed\. Press Refresh/.test(t) && !/already removed/.test(t), "nothing listed: the message says so and never claims the rows are gone", t);
+    const s2 = makeStore({}); const d2 = build(s2);
+    const b = archRec(9), c = archRec(10);
+    s2.seedBoth(b.attemptId, b, C1); s2.seedBoth(c.attemptId, c, C1);
+    d2.seed({ recs: [b], lastExport: { ids: [b.attemptId, c.attemptId], when: new Date(0) } });
+    await d2.fns.deleteArchived();
+    const t2 = status(d2);
+    check(!s2.server.has(b.attemptId) && s2.server.has(c.attemptId) && d2.state().lastExport.ids.join() === c.attemptId && /^Deleted 1 of 1 archived record\(s\)\. 1 not listed right now — left in storage \(press Refresh\)\./.test(t2),
+      "one listed, one not: the listed one goes, the other stays armed and is reported as not listed", t2);
   });
   await run(async () => {
     /* server accepted, mirror couldn't be written: the warning must reach the
@@ -683,10 +742,14 @@ const noSync = t => !/sync/i.test(t);
   /* =================== 9e. the upload button: mirror → server, never the other way =================== */
   await run(async () => {
     const s = makeStore({}); const d = build(s);
-    const att = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", student: { key: C1, code: C1 } };
+    /* realistic shapes, so the owner derivation is actually tested: a record
+       keeps the code AS TYPED in student.code and the normalised key in
+       student.key (the owner); a bug row is keyed bug:<ts>-<rand> and carries
+       its code only in studentCode */
+    const att = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", student: { key: C1, code: "as-abcdefgh" } };
     s.mirror.set(att.attemptId, att);
     s.mirror.set("assign:" + C1 + ":a-1", { assignmentId: "a-1" });
-    s.mirror.set("bug:" + C1 + ":1", { studentCode: C1 });
+    s.mirror.set("bug:1700000000-abcd", { studentCode: C1, text: "x" });
     s.mirror.set("pset:pset-1", { setId: "pset-1", name: "S" });
     s.mirror.set("student:" + C1, { displayName: "Erin K" });
     s.seedBoth("attempt:202606asiav1:2:bb", { attemptId: "attempt:202606asiav1:2:bb", student: { key: C1 } }, C1);   // already on the server → skipped
@@ -694,8 +757,9 @@ const noSync = t => !/sync/i.test(t);
     await d.fns.migrateLocalToServer();
     const t = status(d);
     const owner = k => s.server.has(k) ? s.server.get(k).owner : "ABSENT";
-    check(owner(att.attemptId) === C1 && owner("assign:" + C1 + ":a-1") === C1 && owner("bug:" + C1 + ":1") === C1 && owner("pset:pset-1") === null && owner("student:" + C1) === C1,
-      "upload: every prefix reaches the server with the right owner, display names included");
+    check(owner(att.attemptId) === C1 && owner("assign:" + C1 + ":a-1") === C1 && owner("bug:1700000000-abcd") === C1 && owner("pset:pset-1") === null && owner("student:" + C1) === C1,
+      "upload: every prefix reaches the server with the right owner (the normalised key, never a timestamp or the code as typed), display names included",
+      JSON.stringify({ att: owner(att.attemptId), bug: owner("bug:1700000000-abcd") }));
     check(s.snapshot() === before && /^Upload finished — 5 sent, 1 already on the server\./.test(t), "upload: the mirror is untouched and the count is honest", t);
   });
   await run(async () => {
@@ -764,9 +828,12 @@ const noSync = t => !/sync/i.test(t);
     for(const fn of ["tutorPut", "tutorDelete", "migrateLocalToServer"]){
       try{ rest = rest.replace(extractFn(src, fn), ""); }catch(e){ /* absent: nothing to strip */ }
     }
-    const healLine = (rest.match(/^.*AttemptStore\.remove\(ak\);[^\n]*heal the stale mirror[^\n]*$/m) || [])[0];
+    /* the two sanctioned lines are stripped only in their EXACT expected
+       form — anything smuggled onto the same line breaks the match, stays in
+       the remainder, and is flagged */
+    const healLine = (rest.match(/^\s*try\{ await AttemptStore\.remove\(ak\); \}catch\(e\)\{\}\s*\/\/ heal the stale mirror \(server never had it\)\r?$/m) || [])[0];
     if(healLine) rest = rest.replace(healLine, "");
-    const pullLine = (rest.match(/^.*const n = await AttemptStore\.pullAllForTutor\(\);.*$/m) || [])[0];
+    const pullLine = (rest.match(/^\s*const n = await AttemptStore\.pullAllForTutor\(\);\r?$/m) || [])[0];
     if(pullLine) rest = rest.replace(pullLine, "");
     const readRe = new RegExp("^\\.(?:" + READS.join("|") + ")\\(");
     const tokRe = /AttemptStore\b/g;

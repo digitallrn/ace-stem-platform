@@ -393,16 +393,16 @@ window.Dashboard = (function(){
 
   async function deleteArchived(){
     if(!lastExport || source !== "storage") return;
-    /* An armed id that is no longer loaded — deleted from the detail pane
-       here, or from another browser and then Refreshed — is simply gone,
-       and is reported as gone: never as "left in storage", and never counted
-       in the confirmation. */
-    const gone = lastExport.ids.filter(id => !recs.some(x => x.attemptId === id));
+    /* An armed id that is not currently LISTED is left alone and stays
+       armed. Deleting it here un-arms it (deleteAttempt), and a delete from
+       another browser never prunes this mirror, so the ways to get here are a
+       failed load (recs empty) or an excluded forged row — in both the row
+       is still in storage, so it is neither deleted nor claimed gone. */
+    const notListed = lastExport.ids.filter(id => !recs.some(x => x.attemptId === id));
     const ids = lastExport.ids.filter(id => recs.some(x => x.attemptId === id));
     if(!ids.length){
-      lastExport = null;
-      $("dashDeleteBtn").disabled = true;
-      $("dashStatus").textContent = "Nothing left to delete — the " + gone.length + " archived record(s) were already removed.";
+      $("dashStatus").textContent = "Nothing to delete right now — none of the " + notListed.length +
+        " archived record(s) are listed. Press Refresh and try again; they are still armed.";
       return;
     }
     const codes = [...new Set(recs.filter(r => ids.includes(r.attemptId))
@@ -419,24 +419,26 @@ window.Dashboard = (function(){
        only the mirror, so the server kept every archived record and the very
        next load pulled them all straight back. */
     let ok = 0, skipped = 0;
-    const stillThere = [], rejections = [], warnings = [];
+    const stillThere = [], skippedIds = [], rejections = [], warnings = [];
     for(const id of ids){
       /* belt and braces under the exportAll guard: never delete a row that
          is not a finished attempt as of THIS load — a sitting that was
          in-progress when the archive was downloaded, or that has changed
          since, stays; the archive is not a backup of a live sitting */
       const cur = recs.find(x => x.attemptId === id);
-      if(!isDeletableAttempt(cur)){ skipped++; continue; }
+      if(!isDeletableAttempt(cur)){ skipped++; skippedIds.push(id); continue; }
       const res = await tutorDelete(id);
       if(res.ok){ ok++; if(res.warning) warnings.push(res.warning); }
       else { stillThere.push(id); rejections.push(res.message); }
     }
-    /* stay armed for exactly the rows that are still there, so a retry after
-       signing in again deletes those and nothing else */
-    lastExport = stillThere.length ? { ids: stillThere, when: lastExport.when } : null;
+    /* stay armed for exactly the rows that are still there — rejected,
+       not listed, or no longer finished — so a retry after signing in again
+       (or a Refresh) deletes those and nothing else */
+    const remaining = stillThere.concat(notListed, skippedIds);
+    lastExport = remaining.length ? { ids: remaining, when: lastExport.when } : null;
     $("dashDeleteBtn").disabled = !lastExport;
     const summary = "Deleted " + ok + " of " + ids.length + " archived record(s)." +
-      (gone.length ? " " + gone.length + " already removed before this." : "") +
+      (notListed.length ? " " + notListed.length + " not listed right now — left in storage (press Refresh)." : "") +
       (skipped ? " " + skipped + " skipped — not a finished attempt any more (left in storage)." : "") +
       (stillThere.length ? " " + stillThere.length + " NOT deleted — still in storage. " +
         rejections.slice(0, 3).join(" ") + (rejections.length > 3 ? " (+" + (rejections.length - 3) + " more.)" : "") : "") +
