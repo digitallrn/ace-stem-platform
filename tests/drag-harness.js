@@ -207,7 +207,11 @@
     if(table){
       const rows = [...table.querySelectorAll("tr")];
       const shape = () => [...table.querySelectorAll("tr")].map(r => r.children.length).join(",");
-      const before = shape(), beforeHl = probe().passageHl;
+      /* every cell's rect, exact, in row order — the table as fmt() rendered
+         it, captured BEFORE any table drag; see the within-cell sub-case */
+      const rects = () => [...table.querySelectorAll("tr")].flatMap(r => [...r.children])
+        .map(c => { const b = c.getBoundingClientRect(); return [b.left, b.top, b.width, b.height].map(v => v.toFixed(2)).join("/"); });
+      const before = shape(), beforeHl = probe().passageHl, pristine = rects();
       const a = rows[1] && freeTextNode(rows[1].children[1], 2);
       const b = rows[2] && freeTextNode(rows[2].children[2], 2);
       if(a && b){
@@ -218,15 +222,48 @@
            shape() === before && probe().passageHl === beforeHl,
            shape() === before ? `table still ${before}` : `table SHREDDED: ${before} -> ${shape()}`);
       } else ok("a drag across two table cells is refused, table intact", false, "could not build a cross-cell range");
-      // and a drag INSIDE one cell must still highlight
-      const c = freeTextNode(rows[1].children[1], 2);
-      if(c){
+      /* And a drag INSIDE one cell must still highlight — without disturbing
+         the table. The 2026-08-01 report on 202606asiav1 re1-q11 read
+         "highlighting a part of a table shifted a row to the right": the
+         Heuristic row had gained a cell and every column after it had moved
+         ~28px. Counting highlights cannot see that, so this sub-case also
+         asserts the row shape and EVERY cell rect against `pristine` — the
+         table as fmt() rendered it, captured above before any table drag.
+         Why that baseline and not one taken just before this drag: measured
+         on 66284af (the build before the guard), a drag inside one cell never
+         moved anything by itself, on either build — the shift only ever
+         arrived through the cross-cell tear. A local baseline would therefore
+         pass on the broken build too, and these assertions would never see
+         the report. Against the rendered table they see whatever any table
+         drag in this case did to it, which is what the student sees.
+         The cell comes from the LIVE table, td first: rows[1].children[1] is
+         exactly the cell a tear empties, and the old lookup skipped silently
+         when it found no text there — so the sub-case reported nothing on the
+         one build it existed to catch. No usable cell is a failed
+         precondition now, not a skip. */
+      const cells = [...table.querySelectorAll("td")].concat([...table.querySelectorAll("th")]);
+      const c = cells.map(cell => freeTextNode(cell, 2)).find(Boolean);
+      if(!c){
+        ok("a drag inside one table cell still highlights", false,
+           "precondition: no table cell has a free text node — the table was torn before this ran");
+      } else {
         const h0 = probe().passageHl;
         const r2 = document.createRange();
         r2.setStart(c, 0); r2.setEnd(c, Math.min(4, c.nodeValue.length));
         await dragRange(r2);
         ok("a drag inside one table cell still highlights",
            probe().passageHl > h0, `${h0} -> ${probe().passageHl}`);
+        ok("a highlight inside one cell leaves the row shape unchanged",
+           shape() === before, shape() === before ? `still ${before}` : `${before} -> ${shape()}`);
+        const now = rects();
+        const n = Math.min(now.length, pristine.length);
+        const moved = []; for(let i = 0; i < n; i++) if(now[i] !== pristine[i]) moved.push(i);
+        const same = now.length === pristine.length && !moved.length;
+        ok("a highlight inside one cell moves no cell", same,
+           same ? `${now.length}/${now.length} cells in place`
+                : `${moved.length} of ${n} cells moved` +
+                  (moved.length ? ` — first #${moved[0]} (left/top/w/h): ${pristine[moved[0]]} -> ${now[moved[0]]}` : "") +
+                  (now.length !== pristine.length ? `; ${pristine.length} cells -> ${now.length}` : ""));
       }
     } else {
       results.push({ case: "a drag across two table cells is refused, table intact",
