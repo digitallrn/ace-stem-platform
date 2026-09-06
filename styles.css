@@ -424,7 +424,7 @@
      with the monitor (reference 31 vs our 32): measured against 31 at a 1920
      viewport, the real app's content is ~816px in a ~960px pane in BOTH panes.
      Kept at (0,1,0) specificity on purpose so the components that carry their
-     own narrower cap — .fig-frame at 520px — still win. */
+     own narrower cap — .fig-frame at 470px — still win. */
   .pane > *{ max-width:var(--pane-content); margin-left:auto; margin-right:auto; }
   .pane > .keypad{ margin:0; }        /* dragged, position:fixed — never centred */
   .pane-left{ width:50%; }
@@ -890,11 +890,12 @@
   }
   .fmt-credit{ margin-top:16px; text-align:right; font-size:14.5px; }
 
-  /* A notch smaller than before (520 -> 470 frame, 340 -> 300 image cap): the
-     diagrams in this bank are roughly square and were taking more of the
-     column than they need. Fit-on-first-view is unchanged — the image still
-     caps on both axes so the whole thing is visible at 100% — and zoom is
-     unaffected, since zooming sets an explicit width and releases the cap. */
+  /* A notch smaller than before (520 -> 470 frame; the image cap of that day
+     has since moved again — see the height-cap note below): the diagrams in
+     this bank are roughly square and were taking more of the column than they
+     need. Fit-on-first-view is unchanged — the image still caps on both axes
+     so the whole thing is visible at 100% — and zoom releases those caps (see
+     .fig-imgwrap img). */
   .fig-frame{ border:1px solid #9a9a9a; border-radius:6px; max-width:470px; margin:0 auto 26px; background:#fff; }
   .fig-toolbar{
     display:flex; align-items:center; justify-content:flex-end; gap:12px; padding:7px 12px;
@@ -905,9 +906,12 @@
   .fig-imgwrap{ overflow:auto; max-height:640px; padding:14px; text-align:center; }
   /* Fit on first view: at 100% the whole diagram is visible inside the frame,
      no scrolling. width:auto with both caps keeps the aspect ratio rather than
-     letterboxing. Zooming past 100% sets an explicit width and clears the
-     height cap (attachFigureHandlers), so the frame scrolls only once the
-     student has asked for a closer look. */
+     letterboxing. ZOOM CONTRACT (attachFigureHandlers): any level other than
+     100% sets an explicit width and clears BOTH of these caps inline — max-width
+     beats width, so clearing only max-height leaves zoom clamped to the wrapper
+     (the 2026-09-06 bug). Add a cap here and the handler must release it too.
+     The overflow lands in .fig-imgwrap above, the scroll container — the pane
+     and the page never grow. */
   /* Height cap raised 300 -> 560 (2026-08-15). Measured against reference 33,
      whose figure container runs 613px tall by 574px wide — 21.9 lines of body
      text where our 300px cap allowed 10.5, so Bluebook shows a figure about

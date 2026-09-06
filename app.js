@@ -2528,6 +2528,7 @@
   }
 
   let lastRenderedQKey = null;   // which question the divider width belongs to
+  let figZoomPct = 100;          // figure zoom level, keyed the same way (attachFigureHandlers)
   function renderQuestionView(){
     /* Any rebuild detaches the nodes the highlight popup points at, so dismiss
        it first — otherwise a swatch click would recolour a span that is no
@@ -2567,6 +2568,7 @@
     if(lastRenderedQKey !== qKey){
       lastRenderedQKey = qKey;
       el("paneLeft").style.width = "";
+      figZoomPct = 100;   // figure zoom follows the same rule: reset per question, kept across rebuilds
     }
 
     const left = el("paneLeft");
@@ -3614,20 +3616,40 @@
   /* ---- Figure zoom / expand ---- */
   function attachFigureHandlers(q){
     if(!q.figure) return;
-    let pct = 100;
     const img = el("figImg");
-    /* At 100% the CSS fit rules own the size, so the whole diagram is visible
-       without scrolling. Any other zoom level is an explicit request for a
-       different size, so the width is set and the height cap released — that
-       is the only point at which the frame is allowed to scroll. */
+    /* Zoom level lives in figZoomPct (renderQuestionView), so it survives the
+       in-place rebuilds this question gets — flagging, the ABC toggle, a
+       cross-out — and resets when the question changes, exactly like the
+       divider. `fit` is the width the CSS fit rules give the image at 100%,
+       measured on the way out of 100%; zoom levels scale THAT, not the
+       wrapper. A figure narrower than the wrapper renders at natural size
+       (width:auto never upscales), so a wrapper percentage would grow it on
+       zoom OUT — 20 of the library's 112 figures are narrower than the 440px
+       wrapper. Falls back to a wrapper percentage only if the image has no
+       layout yet (fit measures 0). */
+    let pct = figZoomPct, fit = 0;
+    const measureFit = ()=>{ fit = img.getBoundingClientRect().width; };
+    /* At 100% the CSS fit rules own the size (.fig-imgwrap img — see the note
+       there), so the whole diagram is visible without scrolling. Any other
+       level sets an explicit width and releases BOTH caps; the released
+       image overflows inside .fig-imgwrap, the scroll container. */
     const apply = ()=>{
-      if(pct === 100){ img.style.width = ""; img.style.maxHeight = ""; }
-      else { img.style.width = pct + "%"; img.style.maxHeight = "none"; }
+      if(pct === 100){ img.style.width = ""; img.style.maxWidth = ""; img.style.maxHeight = ""; }
+      else {
+        img.style.width = fit ? Math.round(fit * pct / 100) + "px" : pct + "%";
+        img.style.maxWidth = "none"; img.style.maxHeight = "none";
+      }
       el("figPct").textContent = pct + "%";
+      figZoomPct = pct;
     };
-    el("figZin").addEventListener("click", ()=>{ pct = Math.min(300, pct + 25); apply(); });
-    el("figZout").addEventListener("click", ()=>{ pct = Math.max(50, pct - 25); apply(); });
-    el("figReset").addEventListener("click", ()=>{ pct = 100; apply(); });
+    const setPct = p=>{
+      if(pct === 100 && p !== 100) measureFit();   // leaving 100%: the image is at its fit size right now
+      pct = p; apply();
+    };
+    if(pct !== 100){ measureFit(); apply(); }        // a rebuild handed us a zoomed question: the fresh img is at fit size
+    el("figZin").addEventListener("click", ()=> setPct(Math.min(300, pct + 25)));
+    el("figZout").addEventListener("click", ()=> setPct(Math.max(50, pct - 25)));
+    el("figReset").addEventListener("click", ()=> setPct(100));
     el("figExpand").addEventListener("click", ()=>{
       el("figOverlayImg").src = q.figure;
       show("figOverlay");
