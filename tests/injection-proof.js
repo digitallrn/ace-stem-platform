@@ -825,6 +825,55 @@
 
     $("nameInput") && ([...document.querySelectorAll('[id^=screen-]')].forEach(s => s.classList.add("hidden")),
       $("screen-signin").classList.remove("hidden"), $("signinError").classList.add("hidden"));
+
+    /* ---- canonical-id awareness (2026-09-07): poison BOTH sources the new
+       dashboard surfaces read, BEFORE the dashboard adopts the index (it
+       does so the first time the Practice Sets or Assignments tab renders):
+       - the dedup index (test-data-derived): a hostile ref joins the first
+         Math question's exact class (-> "also in <hostile>"), a hostile
+         family name binds it to the second question (-> "reskin of
+         <hostile>"), and a hostile ref becomes the exact duplicate of the
+         SECOND form's re1-q1 (-> the assignment warning's item list);
+       - a second completed SET record for AS-XSSTEST2 (record-derived):
+         hostile setName / status / submittedAt, whose frozen snapshot
+         carries the hostile ref first (-> seen marks' via text, the
+         warning's source line). Planted before the tutor sign-in so
+         loadFromStorage lists it. */
+    const canonMod = test.modules.find(m => m.section === "Math") || test.modules[0];
+    const canonRef1 = test.testId + ":" + canonMod.questions[0].id;
+    const canonRef2 = test.testId + ":" + canonMod.questions[1].id;
+    const secondForm = (window.TEST_MANIFEST[1] || window.TEST_MANIFEST[0]);
+    const canonRefB = secondForm.testId + ":re1-q1";
+    const HOSTILE_REF = PAYLOAD + ":" + PAYLOAD;
+    const HOSTILE_REF_B = ATTR_PAY + ":" + PAYLOAD;
+    const HOSTILE_FAM = "fam:" + PAYLOAD;
+    if(!window.DEDUP_INDEX || !window.DEDUP_INDEX.items){
+      // repo-root run (nothing inlined): a minimal index the dashboard adopts from memory
+      window.DEDUP_INDEX = { indexVersion: 1, items: {},
+        reference: { forms: window.TEST_MANIFEST.map(t => ({ testId: t.testId })),
+                     banks: (window.BANK_MANIFEST || []).map(b => ({ bankId: b.bankId })) } };
+    }
+    const dIdx = window.DEDUP_INDEX.items;
+    dIdx[canonRef1] = Object.assign({}, dIdx[canonRef1] || {}, { canonical: canonRef1, family: HOSTILE_FAM });
+    dIdx[HOSTILE_REF] = { section: "math", type: "mcq", canonical: canonRef1, family: HOSTILE_FAM };
+    dIdx[canonRef2] = Object.assign({}, dIdx[canonRef2] || {}, { canonical: canonRef2, family: HOSTILE_FAM });
+    dIdx[canonRefB] = Object.assign({}, dIdx[canonRefB] || {}, { canonical: canonRefB });
+    dIdx[HOSTILE_REF_B] = { section: "rw", type: "mcq", canonical: canonRefB };
+    localStorage.setItem("as:attempt:pset-xss2:1700000003:xss3", JSON.stringify({
+      recordVersion: 1, attemptId: "attempt:pset-xss2:1700000003:xss3",
+      student: { code: PAYLOAD, key: "AS-XSSTEST2" },
+      testId: "pset-xss2", testName: PAYLOAD, testVersion: "unversioned",
+      kind: "set", setId: "pset-xss2", setName: PAYLOAD, subject: "rw",
+      releaseOnSubmit: true, assignmentId: null, timing: "untimed",
+      conditions: "self-administered", startedAt: "2026-07-31T16:00:00.000Z",
+      lastSavedAt: PAYLOAD, submittedAt: PAYLOAD,
+      status: "completed", released: true, modules: [],
+      setQuestions: [
+        { ref: HOSTILE_REF_B, source: "form", testId: PAYLOAD, moduleId: PAYLOAD, qid: PAYLOAD, testVersion: PAYLOAD },
+        { ref: canonRefB, source: "form", testId: secondForm.testId, moduleId: "m", qid: "re1-q1", testVersion: "x" }
+      ],
+      answers: {}, score: { correct: 0, graded: 2, noKey: 0 }, client: {}
+    }));
     $("nameInput").value = "acestem-admin";
     $("signinBtn").click();
     await wait(900);
@@ -877,6 +926,68 @@
       results.push({ surface: "Dashboard set builder (hostile name + refs)",
         pass: false, note: "no Edit button for the seeded hostile set" });
     }
+
+    /* Canonical-id surfaces in the builder (2026-09-07): open a NEW set on
+       the first form so the form picker renders every question row with its
+       provenance ("also in" / "reskin of" — index strings) and, with
+       AS-XSSTEST2 selected in the Student filter, its seen mark (record
+       strings: set name, status, date, ref). All escaped -> audit(). */
+    $("dashFilterStudent").value = "AS-XSSTEST2";
+    const setNew = $("setNewBtn");
+    if(setNew){
+      setNew.click();
+      await wait(200);
+      const sbTest = $("sbTest");
+      sbTest.value = test.testId;
+      sbTest.dispatchEvent(new Event("change", { bubbles: true }));
+      await wait(700);                        // the form's questions load, then a re-render
+      results.push(audit("Set builder form picker (hostile provenance refs + seen marks)", $("dashBody")));
+      const provs = [...document.querySelectorAll("#dashBody .canon-prov")];
+      const alsoIn = provs.find(p => p.textContent.indexOf("also in") === 0 && p.textContent.indexOf("PWN") !== -1);
+      const reskin = provs.find(p => p.textContent.indexOf("reskin of") === 0 && p.textContent.indexOf("PWN") !== -1);
+      results.push({ surface: "Provenance strings render the hostile ref as inert text",
+        pass: !!alsoIn && !!reskin && !document.querySelector("#dashBody .canon-prov img") && !window.__XSS_FIRED,
+        note: (alsoIn ? "'also in' present; " : "NO 'also in' row; ") + (reskin ? "'reskin of' present" : "NO 'reskin of' row") });
+      const marks = [...document.querySelectorAll("#dashBody .canon-mark")];
+      const seenMarks = marks.filter(m => m.classList.contains("seen"));
+      const hostileTitle = seenMarks.find(m => (m.getAttribute("title") || "").indexOf("PWN") !== -1);
+      results.push({ surface: "Seen marks carry the record's hostile set name inert (inline via + title attribute)",
+        pass: seenMarks.length > 0 && !!hostileTitle && !window.__XSS_FIRED && !window.__ATTR_FIRED,
+        note: seenMarks.length + " seen mark(s); " + (hostileTitle ? "hostile title inert" : "no mark carried the hostile name") });
+      const bankSeen = [...document.querySelectorAll("#dashBody .setpick-row")]
+        .find(r => r.textContent.indexOf("PWN") !== -1 && r.querySelector(".canon-mark.seen"));
+      results.push({ surface: "Bank picker row marked seen from the completed hostile set record",
+        pass: !!bankSeen, note: bankSeen ? "bank row seen via the set attempt" : "no bank row marked seen" });
+      const cancel = $("sbCancelBtn");
+      if(cancel) cancel.click();
+      await wait(150);
+    } else {
+      results.push({ surface: "Set builder form picker (hostile provenance refs + seen marks)",
+        pass: false, note: "New set button missing" });
+    }
+    /* Assignments tab: the full-test overlap warning for AS-XSSTEST2 on the
+       second form — the source line prints the hostile set name and the item
+       list prints the hostile ref (via the record's snapshot), both escaped. */
+    document.querySelector('#dashTabs [data-tab="assign"]').click();
+    await wait(300);
+    const afCodes = $("afCodes"), afTest = $("afTest");
+    if(afCodes && afTest){
+      [...afCodes.options].forEach(o => { o.selected = o.value === "AS-XSSTEST2"; });
+      afTest.value = secondForm.testId;
+      afCodes.dispatchEvent(new Event("change", { bubbles: true }));
+      await wait(200);
+      const box = $("afOverlap");
+      results.push(audit("Assignment overlap warning (hostile set name, status, date, ref)", box || $("dashBody")));
+      results.push({ surface: "Overlap warning names the seen item through the hostile ref as inert text",
+        pass: !!box && box.textContent.indexOf("has already seen") !== -1 && box.textContent.indexOf("PWN") !== -1 &&
+              !box.querySelector("img") && !box.querySelector("b[data-x]") && !window.__XSS_FIRED,
+        note: box ? (box.textContent.indexOf("has already seen") !== -1 ? "warning rendered, payload inert" : "no warning rendered: " + box.textContent.slice(0, 120))
+                  : "#afOverlap missing" });
+    } else {
+      results.push({ surface: "Assignment overlap warning (hostile set name, status, date, ref)", pass: false, note: "assign form missing" });
+    }
+    document.querySelector('#dashTabs [data-tab="sets"]').click();
+    await wait(200);
     document.querySelector('#dashTabs [data-tab="bank"]').click();
     await wait(300);
     const bankSearch = $("bankSearch");

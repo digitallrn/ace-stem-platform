@@ -159,6 +159,10 @@ function build(store){
     async function loadFromStorage(){ loads.storage++; }
     function render(){ loads.render++; wipeBody(); }
     function renderAll(){ loads.render++; wipeBody(); }
+    /* canonical-id awareness (2026-09-07): createAssignment appends overlap
+       notes; the index is never loaded in this harness, so none. Covered by
+       tests/canonical-index.test.js. */
+    function overlapNotes(){ return []; }
     ${BODY}
     const fns = {};
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}

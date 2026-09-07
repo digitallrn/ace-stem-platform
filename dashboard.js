@@ -110,6 +110,314 @@ window.Dashboard = (function(){
     });
   }
 
+  /* ================= CANONICAL-ID AWARENESS (2026-09-07) =================
+     testdata/dedup-index.js (window.DEDUP_INDEX) is the test-bank repo's
+     canonical-id index: for every <testId>:<qid> and <bankId>:<qid>, the
+     canonical item it duplicates (first shipped) and, for reskins, its
+     family. Everything in this section is a READ-ONLY DERIVATION over that
+     index and the loaded attempt records — nothing here writes a record, a
+     set or an assignment. The index is loaded lazily, by the dashboard only
+     (the Practice Sets and Assignments tabs ask for it), never at startup
+     and never by a sitting. Absent or failed, the marks are simply off and
+     ONE visible notice says so on each tab that uses them — never silent.
+     Index strings (refs, family names) are test-data-derived and set-record
+     refs are record-derived: both are untrusted on the render surface and
+     go through esc()/escAttr() at every innerHTML site (CLAUDE.md escaping
+     contract). tests/canonical-index.test.js pins the derivation. */
+  let dedup = null;              // normalized index, or null
+  let dedupState = "idle";       // "idle" | "loading" | "ready" | "failed"
+  let dedupNote = "";            // why it is not ready, for the notice
+  let seenCache = {};            // code -> seen set; rebuilt every render
+  const DEDUP_FETCH_TIMEOUT_MS = 20000;
+
+  function ensureDedupLoaded(){
+    if(dedupState !== "idle") return;
+    // an inlined build (dist/) or an earlier fetch already registered it
+    if(window.DEDUP_INDEX){ adoptDedup(window.DEDUP_INDEX); return; }
+    dedupState = "loading";
+    const s = document.createElement("script");
+    let done = false;
+    const finish = fn => { if(done) return; done = true; clearTimeout(timer); s.remove(); fn(); };
+    const fail = why => { dedupState = "failed"; dedupNote = why; onDedupSettled(); };
+    const timer = setTimeout(() => finish(() => fail("timed out")), DEDUP_FETCH_TIMEOUT_MS);
+    s.src = "testdata/dedup-index.js";
+    s.async = true;
+    s.onload = () => finish(() => {
+      if(!window.DEDUP_INDEX){ fail("the file loaded but registered nothing"); return; }
+      adoptDedup(window.DEDUP_INDEX);
+      onDedupSettled();
+    });
+    s.onerror = () => finish(() => fail("testdata/dedup-index.js could not be fetched"));
+    document.head.appendChild(s);
+  }
+  function adoptDedup(raw){
+    const n = normalizeDedupIndex(raw);
+    if(n){ dedup = n; dedupState = "ready"; dedupNote = ""; }
+    else { dedupState = "failed"; dedupNote = "the index is malformed"; }
+  }
+  /* After an async load or failure: the Assignments tab keeps its typed form
+     (a full render would wipe the codes and name the tutor is entering) and
+     refreshes only the overlap block; every other tab re-renders. */
+  function onDedupSettled(){
+    if(tab === "assign") refreshAssignOverlap(); else render();
+  }
+  /* Shape-defensive normalization: the index is a committed file, but the
+     dashboard must not throw on a truncated or hand-edited one. Returns null
+     when it is unusable. Class and family members keep the index's own
+     order (shipped order), canonical first. */
+  function normalizeDedupIndex(raw){
+    if(!raw || typeof raw !== "object" || !raw.items || typeof raw.items !== "object") return null;
+    const items = Object.create(null), classes = Object.create(null),
+          fams = Object.create(null), byContainer = Object.create(null);
+    Object.keys(raw.items).forEach(ref => {
+      const it = raw.items[ref];
+      if(!it || typeof it !== "object") return;
+      const canonical = (typeof it.canonical === "string" && it.canonical) ? it.canonical : ref;
+      const family = (typeof it.family === "string" && it.family) ? it.family : null;
+      items[ref] = { canonical: canonical, family: family };
+      (classes[canonical] = classes[canonical] || []).push(ref);
+      if(family) (fams[family] = fams[family] || []).push(ref);
+      const c = splitRef(ref).container;
+      (byContainer[c] = byContainer[c] || []).push(ref);
+    });
+    Object.keys(classes).forEach(c => {
+      const m = classes[c], i = m.indexOf(c);
+      if(i > 0){ m.splice(i, 1); m.unshift(c); }
+    });
+    const refd = (raw.reference && typeof raw.reference === "object") ? raw.reference : {};
+    const listIds = (arr, key) => (Array.isArray(arr) ? arr : []).map(x => x && x[key]).filter(x => typeof x === "string");
+    return { items: items, classes: classes, fams: fams, byContainer: byContainer,
+             forms: listIds(refd.forms, "testId"), banks: listIds(refd.banks, "bankId") };
+  }
+  function splitRef(ref){
+    const s = String(ref == null ? "" : ref), i = s.indexOf(":");
+    return i === -1 ? { container: s, qid: "" } : { container: s.slice(0, i), qid: s.slice(i + 1) };
+  }
+  /* "2026 June Asia v2 re2-q15" for a form ref; "bank-david-core q0001" for
+     a bank ref (the bankId is the identifier David knows). An unknown
+     container prints its raw id. Test names come from the manifest. */
+  function refText(ref){
+    const p = splitRef(ref);
+    const t = testsById[p.container];
+    return (t ? t.testName : p.container) + (p.qid ? " " + p.qid : "");
+  }
+  /* The exact class and family around one ref, or null when the index is
+     not ready or the ref is not in it. alsoIn = the other members of its
+     exact class (same canonical id); reskins = family members OUTSIDE that
+     class (skeleton siblings). */
+  function canonInfo(ref){
+    if(!dedup) return null;
+    const it = dedup.items[ref];
+    if(!it) return null;
+    const cls = dedup.classes[it.canonical] || [ref];
+    const fam = it.family ? (dedup.fams[it.family] || []) : [];
+    return { canonical: it.canonical, family: it.family,
+             alsoIn: cls.filter(x => x !== ref),
+             reskins: fam.filter(x => cls.indexOf(x) === -1) };
+  }
+  /* Provenance for a form question row: "also in <form> <qid>" for every
+     exact duplicate, "reskin of <form> <qid>" for every family sibling. */
+  function provHtml(ref){
+    const ci = canonInfo(ref);
+    if(!ci) return "";
+    const parts = [];
+    if(ci.alsoIn.length) parts.push('<span class="canon-prov">also in ' + ci.alsoIn.map(x => esc(refText(x))).join(", ") + "</span>");
+    if(ci.reskins.length) parts.push('<span class="canon-prov reskin">reskin of ' + ci.reskins.map(x => esc(refText(x))).join(", ") + "</span>");
+    return parts.join(" ");
+  }
+
+  /* ---- the seen set: canonical ids (and family ids) across every COMPLETED
+     attempt of one student, forms and sets alike, with provenance ---- */
+  function completedAttemptsOf(code){
+    return recs.filter(r => r && r.student && r.student.key === code &&
+      (r.status === "completed" || r.status === "timed-out"));
+  }
+  /* The refs an attempt exposed. A FORM sitting exposes the whole form (a
+     completed sitting had every module open, whether or not each question
+     was visited), enumerated from the index by the manifest-resolved testId
+     — no record-derived key is needed. A SET sitting exposed exactly its
+     frozen snapshot (setQuestions[].ref — record-derived, so used only as a
+     lookup key and escaped wherever it is shown). */
+  function attemptRefs(r){
+    if(r.kind === "set"){
+      const src = Array.isArray(r.setQuestions) ? r.setQuestions.map(x => x && x.ref) : Object.keys(r.answers || {});
+      return src.filter(x => typeof x === "string");
+    }
+    const id = (testsById[r.testId] || {}).testId || String(r.testId || "");
+    return (dedup && dedup.byContainer[id]) || [];
+  }
+  function attemptLabel(r){
+    const t = r.kind === "set" ? null : testsById[r.testId];
+    return { attemptId: String(r.attemptId || ""),
+             name: String((t ? t.testName : (r.kind === "set" ? (r.setName || r.testName) : (r.testName || r.testId))) || "?"),
+             when: r.submittedAt || r.lastSavedAt || r.startedAt || null,
+             status: String(r.status || "") };
+  }
+  function seenSetFor(code){
+    if(!dedup || !code) return null;
+    if(seenCache[code]) return seenCache[code];
+    const seen = { canon: Object.create(null), fam: Object.create(null), attempts: 0, unindexed: 0 };
+    completedAttemptsOf(code).forEach(r => {
+      seen.attempts++;
+      const lbl = attemptLabel(r);
+      attemptRefs(r).forEach(ref => {
+        const it = dedup.items[ref];
+        if(!it){ seen.unindexed++; return; }
+        const via = { attemptId: lbl.attemptId, name: lbl.name, when: lbl.when, status: lbl.status, ref: ref };
+        (seen.canon[it.canonical] = seen.canon[it.canonical] || []).push(via);
+        if(it.family) (seen.fam[it.family] = seen.fam[it.family] || []).push(via);
+      });
+    });
+    return (seenCache[code] = seen);
+  }
+  /* seen: this canonical item was in a completed attempt (the same question,
+     or an exact duplicate on another form or in a set). reskin: none of its
+     exact class was, but a family sibling (skeleton reskin) was. unseen:
+     neither. unindexed: the ref is not in the index (an index older than
+     the library) — reported as such, never silently counted as unseen. */
+  function markFor(ref, seen){
+    if(!dedup || !seen) return null;
+    const it = dedup.items[ref];
+    if(!it) return { mark: "unindexed", via: [] };
+    if(seen.canon[it.canonical]) return { mark: "seen", via: seen.canon[it.canonical] };
+    if(it.family && seen.fam[it.family]) return { mark: "reskin", via: seen.fam[it.family] };
+    return { mark: "unseen", via: [] };
+  }
+  function seenCounts(refs, seen){
+    const c = { seen: 0, reskin: 0, unseen: 0, unindexed: 0, total: refs.length };
+    refs.forEach(ref => { const m = markFor(ref, seen); if(m) c[m.mark]++; });
+    return c;
+  }
+  function countsText(c){
+    return c.seen + " seen · " + c.reskin + " reskin · " + c.unseen + " unseen" +
+      (c.unindexed ? " · " + c.unindexed + " not indexed" : "");
+  }
+  const MARK_LABEL = { seen: "seen", reskin: "reskin seen", unseen: "unseen", unindexed: "not indexed" };
+  const MARK_CLASS = { seen: "seen", reskin: "reskin", unseen: "unseen", unindexed: "unidx" };
+  function viaText(v, mark){
+    return (mark === "reskin" ? "reskin in " : "in ") + v.name + " (" + splitRef(v.ref).qid + ", " + v.status + " " + fmtDay(v.when) + ")";
+  }
+  function markHtml(m){
+    if(!m) return "";
+    const title = m.via.length ? m.via.map(v => viaText(v, m.mark)).join("; ")
+      : (m.mark === "unindexed" ? "Not in the canonical-id index — regenerate it after the next export" : "");
+    const first = m.via.length
+      ? ' <span class="canon-via">' + esc(viaText(m.via[0], m.mark)) + (m.via.length > 1 ? " +" + (m.via.length - 1) : "") + "</span>" : "";
+    return ` <span class="canon-mark ${MARK_CLASS[m.mark]}" title="${escAttr(title)}">${MARK_LABEL[m.mark]}</span>${first}`;
+  }
+  /* Marks are for the student chosen in the dashboard's Student filter. */
+  function selectedStudent(){ const el = $("dashFilterStudent"); return el ? el.value : ""; }
+  function setRefKeys(s){
+    return (Array.isArray(s.refs) ? s.refs : []).filter(r => r && typeof r === "object").map(refKey);
+  }
+  /* The one visible notice per tab when marks are off. Ready: nothing —
+     unless the index predates a test or bank the manifests list. */
+  function dedupNoticeHtml(){
+    if(dedupState === "ready"){
+      const missing = (window.TEST_MANIFEST || []).filter(t => t && dedup.forms.indexOf(t.testId) === -1).map(t => t.testName)
+        .concat((window.BANK_MANIFEST || []).filter(b => b && dedup.banks.indexOf(b.bankId) === -1).map(b => b.bankId));
+      return missing.length
+        ? '<p class="canon-notice warn">The canonical-id index predates ' + esc(missing.join(", ")) +
+          ' — those questions show as “not indexed”. Regenerate it in the test-bank repo (dedup_gate.py --library --emit-platform) and redeploy.</p>'
+        : "";
+    }
+    if(dedupState === "failed")
+      return '<p class="canon-notice warn"><b>Canonical-id index unavailable</b> (' + esc(dedupNote) +
+        ') — duplicate provenance and seen/unseen marks are off. Regenerate it in the test-bank repo (dedup_gate.py --library --emit-platform) and redeploy.</p>';
+    return '<p class="canon-notice loading">Loading the canonical-id index…</p>';
+  }
+
+  /* ---- full-test assignment warning: how much of a form the student has
+     already seen, by canonical id and family, and from which attempts ---- */
+  function overlapFor(code, testId){
+    const seen = seenSetFor(code);
+    if(!seen) return null;
+    const id = (testsById[testId] || {}).testId || String(testId || "");
+    const refs = dedup.byContainer[id] || [];
+    const o = { total: refs.length, attempts: seen.attempts, seenItems: [], reskinItems: [], unindexed: 0, sources: [] };
+    const byAtt = Object.create(null);
+    refs.forEach(ref => {
+      const m = markFor(ref, seen);
+      if(m.mark === "unindexed"){ o.unindexed++; return; }
+      if(m.mark !== "seen" && m.mark !== "reskin") return;
+      (m.mark === "seen" ? o.seenItems : o.reskinItems).push({ ref: ref, via: m.via });
+      m.via.forEach(v => {
+        const a = byAtt[v.attemptId] = byAtt[v.attemptId] ||
+          { attemptId: v.attemptId, name: v.name, when: v.when, status: v.status, seen: 0, reskin: 0, refs: Object.create(null) };
+        if(a.refs[ref]) return;              // count each form item once per source attempt
+        a.refs[ref] = true;
+        a[m.mark]++;
+      });
+    });
+    o.sources = Object.keys(byAtt).map(k => byAtt[k])
+      .sort((a, b) => String(a.when || "").localeCompare(String(b.when || "")));
+    return o;
+  }
+  function assignOverlapHtml(codes, testId){
+    ensureDedupLoaded();
+    if(dedupState !== "ready") return dedupNoticeHtml();
+    const t = testsById[testId];
+    const tname = t ? t.testName : String(testId || "");
+    const stale = dedupNoticeHtml();
+    if(!codes.length || !testId)
+      return stale + '<p class="dash-hint">Pick student codes to see how much of ' + esc(tname) +
+        ' each has already seen (by canonical id) in their completed attempts.</p>';
+    return stale + codes.map(code => {
+      const o = overlapFor(code, testId);
+      if(!o) return "";
+      if(!o.attempts)
+        return `<div class="canon-overlap none">${studentCell(code)} — no completed attempts yet, so nothing of ${esc(tname)} has been seen.</div>`;
+      const n = o.seenItems.length + o.reskinItems.length;
+      if(!n)
+        return `<div class="canon-overlap none">${studentCell(code)} — none of ${esc(tname)}’s ${o.total} items appear in their ${o.attempts} completed attempt${o.attempts === 1 ? "" : "s"}.${
+          o.unindexed ? " (" + o.unindexed + " not indexed.)" : ""}</div>`;
+      const src = o.sources.map(a =>
+        `<li>${esc(a.name)} · ${esc(a.status)} ${fmtDay(a.when)} — ${a.seen} identical, ${a.reskin} reskin</li>`).join("");
+      const items = o.seenItems.map(x => `<li>${esc(splitRef(x.ref).qid)} = ${esc(refText(x.via[0].ref))}</li>`).join("") +
+                    o.reskinItems.map(x => `<li>${esc(splitRef(x.ref).qid)} ~ reskin of ${esc(refText(x.via[0].ref))}</li>`).join("");
+      return `<div class="canon-overlap warn">
+        <b>${studentCell(code)} has already seen ${n} of ${esc(tname)}’s ${o.total} items</b> —
+        ${o.seenItems.length} identical (same canonical id) and ${o.reskinItems.length} reskin${o.reskinItems.length === 1 ? "" : "s"}, from:
+        <ul>${src}</ul>
+        <details><summary>Which items</summary><ul class="canon-items">${items}</ul></details>
+        <span class="dash-hint">For information only — nothing is excluded automatically; assign as usual.</span>${
+          o.unindexed ? ' <span class="dash-hint">' + o.unindexed + " of the form’s questions are not in the index.</span>" : ""}
+      </div>`;
+    }).join("");
+  }
+  /* Status-line notes for createAssignment: one per assigned code that has
+     already seen part of the form. Empty when the index is not ready. */
+  function overlapNotes(codes, testId){
+    if(dedupState !== "ready") return [];
+    const out = [];
+    codes.forEach(code => {
+      const o = overlapFor(code, testId);
+      const n = o ? o.seenItems.length + o.reskinItems.length : 0;
+      if(n) out.push(code + " had already seen " + n + " of its " + o.total + " items (" +
+        o.seenItems.length + " identical, " + o.reskinItems.length + " reskin).");
+    });
+    return out;
+  }
+  /* Re-render ONLY the overlap block from the form's current codes + test
+     (the form itself is never rebuilt here, so nothing typed is lost). */
+  function refreshAssignOverlap(){
+    const box = $("afOverlap"), sel = $("afCodes"), free = $("afFree"), t = $("afTest");
+    if(!box || !sel || !free || !t) return;
+    seenCache = {};
+    const typed = free.value.split(/[\s,;]+/).map(s => StudentCode.normalize(s)).filter(c => c && StudentCode.valid(c));
+    const codes = Array.from(new Set(Array.from(sel.selectedOptions).map(o => o.value).concat(typed)));
+    box.innerHTML = assignOverlapHtml(codes, t.value);
+  }
+  /* Is a member of this ref's exact class already in the builder? Form
+     questions only — bank rows are unaffected by the grouping. Returns the
+     key of the member the set holds, or null. */
+  function classInBuilder(k){
+    const it = dedup && builder && dedup.items[k];
+    if(!it) return null;
+    const hit = builder.refs.find(r => { const o = dedup.items[refKey(r)]; return o && o.canonical === it.canonical; });
+    return hit ? refKey(hit) : null;
+  }
+
   /* ---------- helpers ---------- */
   /* The index lives HERE, not on the test object. Hanging it off the test
      mutated the same object app.js keeps in window.__TESTDATA__ and re-caches,
@@ -464,6 +772,7 @@ window.Dashboard = (function(){
   }
 
   function render(){
+    seenCache = {};                          // recs may have changed since the last render
     const body = $("dashBody");
     const rows = filtered();
     if(tab === "attempts") body.innerHTML = viewAttempts(rows);
@@ -914,6 +1223,7 @@ window.Dashboard = (function(){
               title="Save just the display name for the selected code(s) — leaves assignments untouched">Save name only</button>
             <span class="dash-hint" id="afMsg"></span>
           </div>
+          <div class="canon-assign" id="afOverlap">${assignOverlapHtml([], ((window.TEST_MANIFEST || [])[0] || {}).testId || "")}</div>
           ${lastStartCode ? `<div class="af-code">Start code — read this aloud<div class="af-code-big">${esc(lastStartCode)}</div></div>` : ""}
         </div>
         ${rows.length ? `<table class="dtable"><thead><tr>
@@ -1134,6 +1444,10 @@ window.Dashboard = (function(){
     }
     if(prof) notes.push(...prof.messages);
     lastStartCode = assigned.length ? startCode : null;   // never read a code aloud for a sitting that doesn't exist
+    /* canonical-id overlap, repeated in the status line so the warning
+       survives the re-render that empties the form (information only —
+       the assignment was made as asked) */
+    notes.push(...overlapNotes(assigned, testId));
     $("dashStatus").textContent =
       (assigned.length
         ? "Assigned " + testId + " to " + assigned.join(", ") + (AttemptStore.isRemote() ? " (on the server)." : ".")
@@ -1330,8 +1644,13 @@ window.Dashboard = (function(){
   function viewSets(){
     const canWrite = source === "storage";
     if(!canWrite) return '<p class="dash-empty">You\'re viewing a loaded archive file — sets are managed against live storage. Reload from storage first.</p>';
+    /* canonical-id marks (2026-09-07): lazy index, one notice when off, and
+       the seen set of the student chosen in the Student filter */
+    ensureDedupLoaded();
+    const student = selectedStudent();
+    const seen = student ? seenSetFor(student) : null;     // null: no student, or index not ready
     const listHtml = sets.length ? `<table class="dtable"><thead><tr>
-        <th>Set</th><th>Subject</th><th>Questions</th><th>Assigned</th><th>Attempts</th><th></th>
+        <th>Set</th><th>Subject</th><th>Questions</th>${seen ? "<th>Seen by " + esc(codeOptionLabel(student)) + "</th>" : ""}<th>Assigned</th><th>Attempts</th><th></th>
       </tr></thead><tbody>` +
       sets.map(s => {
         const nAssign = assignmentsForSet(s.setId).length;
@@ -1340,6 +1659,7 @@ window.Dashboard = (function(){
           <td><b>${esc(s.name)}</b> <span class="dcode">${esc(s.setId)}</span></td>
           <td>${esc(s.subject === "math" ? "Math" : "R&W")}</td>
           <td>${Array.isArray(s.refs) ? s.refs.length : 0}</td>
+          ${seen ? "<td>" + esc(countsText(seenCounts(setRefKeys(s), seen))) + "</td>" : ""}
           <td>${nAssign}</td>
           <td>${nAtt}</td>
           <td>
@@ -1366,11 +1686,17 @@ window.Dashboard = (function(){
         </tr>`).join("") + "</tbody></table></div>";
     }).join("");
 
+    const marksHint = dedupState !== "ready" ? "" : student
+      ? `<p class="dash-hint">Seen / reskin seen / unseen marks are for ${studentCell(student)} (the Student filter above), from ${seen ? seen.attempts : 0} completed attempt${seen && seen.attempts === 1 ? "" : "s"}.</p>`
+      : '<p class="dash-hint">Pick a student in the Student filter above to mark every question seen / reskin seen / unseen for them.</p>';
+
     return `
       <div class="dcard">
         <h3>Practice Sets</h3>
         <p class="dash-hint">A set is a named, ordered pick of questions from the bank and from published tests —
           one subject per set, sat untimed (or with a time limit you choose at assignment) in the real test UI, no scaled scoring.</p>
+        ${dedupNoticeHtml()}
+        ${marksHint}
         ${listHtml}
         <div class="af-actions">
           <button class="pill" id="setNewBtn" style="padding:9px 22px;">New set</button>
@@ -1384,11 +1710,15 @@ window.Dashboard = (function(){
 
   function viewSetBuilder(){
     const refs = builder.refs;
+    const student = selectedStudent();
+    const seen = student ? seenSetFor(student) : null;
+    const mark = k => seen ? markHtml(markFor(k, seen)) : "";
     const refsHtml = refs.length ? refs.map((ref, i) => {
       const lbl = refLabel(ref);
+      const k = refKey(ref);
       return `<div class="setref-row">
         <span class="setref-n">${i + 1}</span>
-        <span class="setref-main"><b>${esc(lbl.title)}</b>${lbl.sub ? ' <span class="dcode">' + esc(lbl.sub) + "</span>" : ""}
+        <span class="setref-main"><b>${esc(lbl.title)}</b>${lbl.sub ? ' <span class="dcode">' + esc(lbl.sub) + "</span>" : ""}${ref.type === "form" ? " " + provHtml(k) : ""}${mark(k)}
           <span class="bank-stem">${esc(lbl.stem)}</span></span>
         <span class="setref-btns">
           <button class="dash-rel ref-up" data-i="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
@@ -1398,15 +1728,22 @@ window.Dashboard = (function(){
       </div>`;
     }).join("") : '<p class="dash-empty">No questions yet — add from the bank or a test below.</p>';
 
+    const inSet = {};
+    refs.forEach(r => { inSet[refKey(r)] = true; });
+    /* Grouping by canonical id (form questions only — bank rows are
+       unaffected): the set holds ONE entry per canonical item, so a form
+       question whose exact duplicate (same canonical id, on this or another
+       form) is already in the set reads "In set as <that ref>" and cannot
+       be added again. */
+    const heldAs = k => inSet[k] ? k : classInBuilder(k);
+
     /* bank picker: subject-matched, active first, retired flagged */
     const bankEntries = (window.BANK_INDEX && BANK_INDEX.entries || [])
       .filter(e => e.subject === builder.subject);
-    const inSet = {};
-    refs.forEach(r => { inSet[refKey(r)] = true; });
     const bankPickHtml = bankEntries.length ? bankEntries.map(e => `
       <div class="setpick-row${e.retired ? " is-retired" : ""}">
         <span class="setpick-main"><b>${esc(e.ref)}</b> ${bankStatusBadge(e)}
-          <span class="dcode">${esc(e.skill || "")}</span>
+          <span class="dcode">${esc(e.skill || "")}</span>${mark(e.bankId + ":" + e.qid)}
           <span class="bank-stem">${esc(e.stemPreview || "")}</span></span>
         <button class="dash-rel pick-bank" data-bank="${escAttr(e.bankId)}" data-qid="${escAttr(e.qid)}"
           ${inSet[e.bankId + ":" + e.qid] ? "disabled" : ""}>${inSet[e.bankId + ":" + e.qid] ? "Added" : "Add"}</button>
@@ -1425,26 +1762,34 @@ window.Dashboard = (function(){
         formPickHtml = '<p class="dash-hint">Loading questions…</p>';
       } else {
         formPickHtml = full.modules.filter(m => m.section === wantSection).map(m => {
-          const allIn = m.questions.every(q => inSet[builderTestId + ":" + q.id]);
+          const allIn = m.questions.every(q => !!heldAs(builderTestId + ":" + q.id));
           return `<div class="setpick-mod">
             <div class="setpick-modhead"><b>${esc(m.section)} · ${esc(m.moduleLabel)}</b>
               <button class="dash-rel pick-module" data-mod="${escAttr(m.moduleId)}" ${allIn ? "disabled" : ""}>
                 ${allIn ? "All added" : "Add whole module"}</button></div>` +
-            m.questions.map((q, qi) => `
-              <div class="setpick-row">
+            m.questions.map((q, qi) => {
+              const k = builderTestId + ":" + q.id;
+              const held = heldAs(k);
+              const btn = held === k ? "Added" : held ? "In set as " + refText(held) : "Add";
+              return `
+              <div class="setpick-row${held && held !== k ? " is-held" : ""}">
                 <span class="setpick-main"><b>${qi + 1}</b> <span class="dcode">${esc(q.id)}</span> ${esc(q.type || "?")}
-                  ${q.skill ? '<span class="dcode">' + esc(q.skill) + "</span>" : ""}
+                  ${q.skill ? '<span class="dcode">' + esc(q.skill) + "</span>" : ""} ${provHtml(k)}${mark(k)}
                   <span class="bank-stem">${esc(stripTokens(q.questionText))}</span></span>
                 <button class="dash-rel pick-form" data-mod="${escAttr(m.moduleId)}" data-qid="${escAttr(q.id)}"
-                  ${inSet[builderTestId + ":" + q.id] ? "disabled" : ""}>${inSet[builderTestId + ":" + q.id] ? "Added" : "Add"}</button>
-              </div>`).join("") + "</div>";
+                  ${held ? "disabled" : ""}>${esc(btn)}</button>
+              </div>`;
+            }).join("") + "</div>";
         }).join("") || '<p class="dash-empty">That test has no ' + esc(wantSection) + ' modules.</p>';
       }
     }
 
+    const countsHtml = seen
+      ? ` <span class="dcard-sub">${esc(countsText(seenCounts(refs.map(refKey), seen)))} for ${esc(codeOptionLabel(student))}</span>` : "";
+
     return `
       <div class="dcard set-builder">
-        <h3>${builder.setId ? "Edit set" : "New set"}</h3>
+        <h3>${builder.setId ? "Edit set" : "New set"}${countsHtml}</h3>
         <div class="af-grid">
           <label>Name (students see this)
             <input id="sbName" value="${escAttr(builder.name)}" placeholder="Linear equations warm-up" autocomplete="off"></label>
@@ -1678,6 +2023,7 @@ window.Dashboard = (function(){
     if(!builder) return;
     const k = refKey(ref);
     if(builder.refs.some(r => refKey(r) === k)) return;   // no duplicates
+    if(ref.type === "form" && classInBuilder(k)) return; // one entry per canonical item (form questions)
     builder.refs.push(ref);
     render();
   }
@@ -1725,8 +2071,9 @@ window.Dashboard = (function(){
           if(!m) return;
           m.questions.forEach(q => {
             const k = builderTestId + ":" + q.id;
-            if(!builder.refs.some(r => refKey(r) === k))
-              builder.refs.push({ type: "form", testId: builderTestId, moduleId: m.moduleId, qid: q.id });
+            if(builder.refs.some(r => refKey(r) === k)) return;
+            if(classInBuilder(k)) return;        // its exact duplicate is already in the set
+            builder.refs.push({ type: "form", testId: builderTestId, moduleId: m.moduleId, qid: q.id });
           });
           render();
         }));
@@ -1920,6 +2267,11 @@ window.Dashboard = (function(){
       }));
     const cb = $("afCreateBtn");
     if(cb) cb.addEventListener("click", createAssignment);
+    /* canonical-id overlap block follows the chosen codes + test live */
+    const afT = $("afTest"), afC = $("afCodes"), afF = $("afFree");
+    if(afT) afT.addEventListener("change", refreshAssignOverlap);
+    if(afC) afC.addEventListener("change", refreshAssignOverlap);
+    if(afF) afF.addEventListener("input", refreshAssignOverlap);
     const gb = $("afGenBtn");
     if(gb) gb.addEventListener("click", appendGeneratedCode);
     document.querySelectorAll("#dashBody .copy-link").forEach(btn =>

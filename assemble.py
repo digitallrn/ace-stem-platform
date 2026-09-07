@@ -78,6 +78,7 @@ SECRET_PATTERNS = (
 
 MANIFEST_REL = "testdata/manifest.js"
 BANK_MANIFEST_REL = "testdata/bank-manifest.js"
+DEDUP_INDEX_REL = "testdata/dedup-index.js"
 
 
 def inlined_tests(base_dir):
@@ -137,6 +138,27 @@ def inlined_banks(base_dir):
             + "\n".join(blobs) + "\n</script>")
 
 
+def inlined_dedup_index(base_dir):
+    """The canonical-id index (dashboard only), as one <script>, when present.
+
+    The dashboard fetches testdata/dedup-index.js lazily, which a single
+    self-contained file cannot do; its loader checks window.DEDUP_INDEX
+    before the network, so the index rides inline behind the manifest
+    exactly like test content. Absent, nothing is inlined and the dashboard
+    shows its own "index unavailable" notice (never silent) — this build
+    warns rather than fails, because a missing index costs marks, not a
+    sitting. (The Netlify build is stricter: build-site.js allowlists the
+    file and fails when it is missing.)
+    """
+    f = base_dir / DEDUP_INDEX_REL
+    if not f.exists():
+        print("⚠ testdata/dedup-index.js is missing — the dashboard's canonical-id marks will be off in this build")
+        return ""
+    return ("<script>\n/* inlined canonical-id index — see assemble.py. Dashboard-only; "
+            "the loader finds it in memory and never fetches. */\n"
+            + f.read_text(encoding="utf-8") + "\n</script>")
+
+
 def inline(html, base_dir):
     def css_sub(m):
         path = base_dir / m.group(1)
@@ -162,6 +184,11 @@ def inline(html, base_dir):
         # has no origin to download from.
         if name == MANIFEST_REL:
             out += "\n" + inlined_tests(base_dir)
+            # the canonical-id index rides here too (dashboard-only; the loader
+            # checks memory first, so the artifact never fetches it)
+            dedup = inlined_dedup_index(base_dir)
+            if dedup:
+                out += "\n" + dedup
         # bank content rides behind ITS manifest for the same boot-order
         # reason — the artifact must resolve a set's bank refs from memory
         if name == BANK_MANIFEST_REL:
