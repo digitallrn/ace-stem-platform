@@ -180,6 +180,34 @@ archiveFiles.forEach(f => {
   fs.copyFileSync(rel, path.join(OUT, rel));
   copied.push(rel);
 });
+/* The canonical-id index records the build of every form and bank it was
+   generated against. Drift against the manifests is NOT fatal — the
+   dashboard names it in its own notice and degrades to "not indexed" /
+   "may be stale" marks — but a deploy log that says so is the earlier,
+   cheaper signal that `dedup_gate.py --library --emit-platform` was
+   skipped after an export or a testVersion bump. */
+try{
+  const ix = fs.readFileSync(path.join(TESTDATA_DIR, "dedup-index.js"), "utf8");
+  const m = ix.match(/window\.DEDUP_INDEX\s*=\s*(\{[\s\S]*\});\s*$/);
+  const ref = m ? (JSON.parse(m[1]).reference || {}) : {};
+  const forms = Array.isArray(ref.forms) ? ref.forms : [];
+  const mfRaw = fs.readFileSync(path.join(TESTDATA_DIR, "manifest.js"), "utf8");
+  const mfm = mfRaw.match(/window\.TEST_MANIFEST\s*=\s*(\[[\s\S]*\]);\s*$/);
+  const manifest = mfm ? JSON.parse(mfm[1]) : [];
+  const drift = [];
+  manifest.forEach(t => {
+    const f = forms.find(x => x && x.testId === t.testId);
+    if(!f) drift.push(t.testId + " (not in the index)");
+    else if(f.testVersion && t.testVersion && f.testVersion !== t.testVersion)
+      drift.push(t.testId + " (index " + f.testVersion + ", manifest " + t.testVersion + ")");
+  });
+  if(drift.length){
+    console.warn("build-site.js: WARNING — testdata/dedup-index.js is behind the manifest: " + drift.join(", "));
+    console.warn("  The dashboard will show a stale-index notice. Re-run dedup_gate.py --library --emit-platform in the test-bank repo.");
+  }
+}catch(e){
+  console.warn("build-site.js: WARNING — could not compare testdata/dedup-index.js with the manifest: " + e.message);
+}
 if(absent.length){
   die(["These allowlisted files are missing from the checkout: " + absent.join(", "),
        absent.indexOf("config.js") !== -1

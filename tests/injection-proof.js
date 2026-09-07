@@ -835,10 +835,13 @@
          <hostile>"), and a hostile ref becomes the exact duplicate of the
          SECOND form's re1-q1 (-> the assignment warning's item list);
        - a second completed SET record for AS-XSSTEST2 (record-derived):
-         hostile setName / status / submittedAt, whose frozen snapshot
-         carries the hostile ref first (-> seen marks' via text, the
-         warning's source line). Planted before the tutor sign-in so
-         loadFromStorage lists it. */
+         hostile setName / submittedAt, whose frozen snapshot carries the
+         hostile ref first and a real ref on the SECOND form (-> the
+         assignment warning's source line and item list). The builder's
+         seen marks with a hostile title come from the earlier pset-xss1
+         record (completed, holds the bank ref) — the new set is opened on
+         the first form's Math module, where pset-xss2's refs never show.
+         Planted before the tutor sign-in so loadFromStorage lists it. */
     const canonMod = test.modules.find(m => m.section === "Math") || test.modules[0];
     const canonRef1 = test.testId + ":" + canonMod.questions[0].id;
     const canonRef2 = test.testId + ":" + canonMod.questions[1].id;
@@ -848,10 +851,21 @@
     const HOSTILE_REF_B = ATTR_PAY + ":" + PAYLOAD;
     const HOSTILE_FAM = "fam:" + PAYLOAD;
     if(!window.DEDUP_INDEX || !window.DEDUP_INDEX.items){
-      // repo-root run (nothing inlined): a minimal index the dashboard adopts from memory
-      window.DEDUP_INDEX = { indexVersion: 1, items: {},
-        reference: { forms: window.TEST_MANIFEST.map(t => ({ testId: t.testId })),
-                     banks: (window.BANK_MANIFEST || []).map(b => ({ bankId: b.bankId })) } };
+      /* repo-root run (nothing inlined): load the REAL index the way the
+         dashboard would, so the poison rides on top of it and every surface
+         the dist run proves is provable here too; only if the file is
+         genuinely absent fall back to a minimal index that still carries
+         the bank items (the seen marks of the hostile set record depend on
+         them) */
+      await new Promise(res => { const s = document.createElement("script"); s.src = "testdata/dedup-index.js";
+        s.onload = res; s.onerror = res; document.head.appendChild(s); });
+      if(!window.DEDUP_INDEX || !window.DEDUP_INDEX.items){
+        const items = {};
+        ((window.BANK_INDEX && BANK_INDEX.entries) || []).forEach(e => { items[e.bankId + ":" + e.qid] = { section: e.subject, type: e.keyType, canonical: e.bankId + ":" + e.qid }; });
+        window.DEDUP_INDEX = { indexVersion: 1, items: items,
+          reference: { forms: window.TEST_MANIFEST.map(t => ({ testId: t.testId, testVersion: t.testVersion })),
+                       banks: (window.BANK_MANIFEST || []).map(b => ({ bankId: b.bankId, bankVersion: b.bankVersion })) } };
+      }
     }
     const dIdx = window.DEDUP_INDEX.items;
     dIdx[canonRef1] = Object.assign({}, dIdx[canonRef1] || {}, { canonical: canonRef1, family: HOSTILE_FAM });

@@ -159,10 +159,12 @@ function build(store){
     async function loadFromStorage(){ loads.storage++; }
     function render(){ loads.render++; wipeBody(); }
     function renderAll(){ loads.render++; wipeBody(); }
-    /* canonical-id awareness (2026-09-07): createAssignment appends overlap
-       notes; the index is never loaded in this harness, so none. Covered by
-       tests/canonical-index.test.js. */
-    function overlapNotes(){ return []; }
+    /* canonical-id awareness (2026-09-07): createAssignment appends the
+       overlap notes to its status line. The derivation itself is covered by
+       tests/canonical-index.test.js; here the stub returns one sentinel note
+       per assigned code so the STATUS-LINE edge is pinned (see the
+       createAssignment control case). */
+    function overlapNotes(codes, testId){ return codes.map(c => "OVERLAP-NOTE " + c + " " + testId); }
     ${BODY}
     const fns = {};
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
@@ -255,6 +257,8 @@ const noSync = t => !/sync/i.test(t);
     const k = [...s.server.keys()].find(x => x.indexOf("assign:" + C1 + ":a-") === 0);
     check(!!k && s.mirror.has(k) && s.server.get(k).owner === C1 && /^\d{6}$/.test(d.state().lastStartCode) && /^Assigned 202606asiav1 to AS-ABCDEFGH/.test(t) && noSync(t),
       "control: an accepted form assignment lands on the server, then the mirror, with a start code", t);
+    check(t.indexOf("OVERLAP-NOTE " + C1 + " 202606asiav1") !== -1,
+      "control: the canonical-id overlap note for the assigned code reaches the status line (createAssignment -> overlapNotes)", t);
   });
   await run(async () => {
     const s = makeStore({ reject: (op, k) => k.indexOf(C2) !== -1 }); const d = build(s);
@@ -266,6 +270,8 @@ const noSync = t => !/sync/i.test(t);
       "partial: the accepted code is on the server, the rejected code is nowhere");
     check(/Assigned 202606asiav1 to AS-ABCDEFGH/.test(t) && /Not saved — assignment a-\S+ for AS-JKLMNPQR/.test(t),
       "partial: message names the assigned code AND the rejected row (no blanket retry)", t);
+    check(t.indexOf("OVERLAP-NOTE " + C1 + " ") !== -1 && t.indexOf("OVERLAP-NOTE " + C2 + " ") === -1,
+      "partial: the overlap note is computed for the ASSIGNED code only, never for the rejected one", t);
   });
   await run(async () => {
     const s = makeStore({ reject: true }); const d = build(s);

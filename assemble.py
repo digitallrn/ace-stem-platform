@@ -145,10 +145,15 @@ def inlined_dedup_index(base_dir):
     self-contained file cannot do; its loader checks window.DEDUP_INDEX
     before the network, so the index rides inline behind the manifest
     exactly like test content. Absent, nothing is inlined and the dashboard
-    shows its own "index unavailable" notice (never silent) — this build
-    warns rather than fails, because a missing index costs marks, not a
-    sitting. (The Netlify build is stricter: build-site.js allowlists the
-    file and fails when it is missing.)
+    shows its own "index unavailable" notice (never silent). Policy, stated
+    once: the RUNTIME degrades honestly (a notice, marks off) because a
+    missing or failed index costs marks, not a sitting; the BUILDS guard
+    presence of the committed file — build-site.js fails the deploy when
+    the allowlisted file is missing, and this preview build only warns,
+    because dist/ is a hand-around preview and the warning is on the
+    console of the person building it. Freshness is the runtime's job:
+    the dashboard compares the index's recorded testVersions with the
+    manifest and names any drift.
     """
     f = base_dir / DEDUP_INDEX_REL
     if not f.exists():

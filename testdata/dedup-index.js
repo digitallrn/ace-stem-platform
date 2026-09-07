@@ -2131,6 +2131,11 @@ window.DEDUP_INDEX = {
    "keys": {
     "202512usv2:ma1-q9": "DISAGREE",
     "202606asiav2:ma1-q13": "AGREE"
+   },
+   "ledger": {
+    "202512usv2:ma1-q9": [
+     "skeleton-adjudication (David, 2026-09-07)"
+    ]
    }
   },
   "202511asiav1:ma1-q14": {
@@ -9376,6 +9381,11 @@ window.DEDUP_INDEX = {
    ],
    "keys": {
     "202511asiav1:ma1-q13": "DISAGREE"
+   },
+   "ledger": {
+    "202511asiav1:ma1-q13": [
+     "skeleton-adjudication (David, 2026-09-07)"
+    ]
    }
   },
   "202512usv2:ma1-q10": {

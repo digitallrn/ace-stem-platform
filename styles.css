@@ -1426,24 +1426,22 @@
   .setpick-cols > div{ border:1px solid #E3E6EF; border-radius:8px; padding:10px 12px;
     max-height:420px; overflow:auto; }
 
-  /* ---- canonical-id awareness (2026-09-07): provenance + seen marks ---- */
+  /* ---- canonical-id awareness (2026-09-07): provenance + seen marks ----
+     A mark is a .dstatus badge (red .to = seen, amber .warn = reskin, green
+     .ok = unseen) sized for an inline row; a notice or overlap box is an
+     .rv-notice.warn — one palette each, defined once above. */
   .canon-prov{ display:inline-block; color:var(--ink-soft); font-size:11.5px; margin-left:4px; }
   .canon-prov.reskin{ color:#7A5A00; }
-  .canon-mark{ display:inline-block; font-size:10px; font-weight:800; padding:2px 7px; border-radius:20px;
-    text-transform:uppercase; letter-spacing:.3px; vertical-align:middle; }
-  .canon-mark.seen{ background:#FBE9EB; color:var(--cb-red); }
-  .canon-mark.reskin{ background:#FFF3D6; color:#8A6D00; }
-  .canon-mark.unseen{ background:#E3F3E8; color:#1E7A43; }
-  .canon-mark.unidx{ background:#EEF0F5; color:var(--ink-soft); }
+  .canon-mark{ font-size:10px; padding:2px 7px; letter-spacing:.3px; vertical-align:middle; }
+  .canon-mark.unindexed{ background:#EEF0F5; color:var(--ink-soft); }
   .canon-via{ color:var(--ink-soft); font-size:11.5px; }
   .setpick-row.is-held{ opacity:.62; }
-  .canon-notice{ margin:8px 0; padding:8px 12px; border-radius:8px; font-size:13px; line-height:1.45; border:1px solid; }
-  .canon-notice.warn{ background:#FFF7E0; border-color:#E3C55A; color:#6b5200; }
-  .canon-notice.loading{ background:#EEF0F5; border-color:#D5D9E4; color:var(--ink-soft); }
+  .canon-notice{ margin:8px 0; padding:8px 12px; font-size:13px; line-height:1.45; }
+  .canon-notice.loading{ border:1px solid #D5D9E4; border-radius:8px; background:#EEF0F5; color:var(--ink-soft); }
   .canon-assign{ margin-top:10px; }
-  .canon-overlap{ margin:8px 0 0; padding:10px 14px; border-radius:8px; font-size:13.5px; line-height:1.5; border:1px solid; }
-  .canon-overlap.warn{ background:#FFF7E0; border-color:#E3C55A; color:#6b5200; }
-  .canon-overlap.none{ background:#F4F6FA; border-color:#E3E6EF; color:var(--ink-soft); }
+  .canon-overlap{ margin:8px 0 0; padding:10px 14px; font-size:13.5px; line-height:1.5; }
+  .canon-overlap.none{ border:1px solid #E3E6EF; border-radius:8px; background:#F4F6FA; color:var(--ink-soft); }
   .canon-overlap ul{ margin:4px 0 4px 18px; padding:0; }
   .canon-overlap details{ margin:4px 0; }
+  .canon-overlap .canon-items{ max-height:220px; overflow:auto; font-size:12.5px; }
   .canon-overlap .canon-items{ max-height:220px; overflow:auto; font-size:12.5px; }
