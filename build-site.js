@@ -191,15 +191,25 @@ try{
   const m = ix.match(/window\.DEDUP_INDEX\s*=\s*(\{[\s\S]*\});\s*$/);
   const ref = m ? (JSON.parse(m[1]).reference || {}) : {};
   const forms = Array.isArray(ref.forms) ? ref.forms : [];
+  const banks = Array.isArray(ref.banks) ? ref.banks : [];
   const mfRaw = fs.readFileSync(path.join(TESTDATA_DIR, "manifest.js"), "utf8");
   const mfm = mfRaw.match(/window\.TEST_MANIFEST\s*=\s*(\[[\s\S]*\]);\s*$/);
   const manifest = mfm ? JSON.parse(mfm[1]) : [];
+  const bmRaw = fs.readFileSync(path.join(TESTDATA_DIR, "bank-manifest.js"), "utf8");
+  const bmm = bmRaw.match(/window.BANK_MANIFESTs*=s*([[sS]*]);s*$/);
+  const bankManifest = bmm ? JSON.parse(bmm[1]) : [];
   const drift = [];
   manifest.forEach(t => {
     const f = forms.find(x => x && x.testId === t.testId);
     if(!f) drift.push(t.testId + " (not in the index)");
     else if(f.testVersion && t.testVersion && f.testVersion !== t.testVersion)
       drift.push(t.testId + " (index " + f.testVersion + ", manifest " + t.testVersion + ")");
+  });
+  bankManifest.forEach(b => {
+    const f = banks.find(x => x && x.bankId === b.bankId);
+    if(!f) drift.push(b.bankId + " (bank not in the index)");
+    else if(f.bankVersion && b.bankVersion && f.bankVersion !== b.bankVersion)
+      drift.push(b.bankId + " (index " + f.bankVersion + ", bank manifest " + b.bankVersion + ")");
   });
   if(drift.length){
     console.warn("build-site.js: WARNING — testdata/dedup-index.js is behind the manifest: " + drift.join(", "));

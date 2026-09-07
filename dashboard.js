@@ -349,7 +349,9 @@ window.Dashboard = (function(){
   }
   /* The caveat every surface prints when part of a student's history could
      not be compared (a form the index predates, a renamed id the manifest
-     no longer maps, a crafted ref). */
+     no longer maps, a crafted ref). Not covered here, said once in the
+     hints instead: the seen set is derived from the attempts IN STORAGE —
+     a sitting removed by archive-then-delete (§7b) no longer counts. */
   function seenCaveat(seen){
     if(!seen || !seen.unindexed) return "";
     const which = seen.attempts === 1 ? "their completed attempt"
@@ -476,7 +478,7 @@ window.Dashboard = (function(){
       if(!o.total)
         return `<div class="canon-overlap none">${studentCell(code)} — ${esc(tname)} is not in the canonical-id index, so nothing can be compared.${caveat}</div>`;
       if(!o.attempts)
-        return `<div class="canon-overlap none">${studentCell(code)} — no completed attempts yet, so nothing of ${esc(tname)} has been seen.</div>`;
+        return `<div class="canon-overlap none">${studentCell(code)} — no completed attempts in storage (sittings archived and deleted no longer count), so nothing of ${esc(tname)} has been seen.</div>`;
       const n = o.seenItems.length + o.reskinItems.length;
       if(!n)
         return `<div class="canon-overlap none">${studentCell(code)} — none of ${esc(tname)}’s ${o.total} items appear in their ${o.attempts} completed attempt${o.attempts === 1 ? "" : "s"}.${
@@ -1841,7 +1843,7 @@ window.Dashboard = (function(){
     }).join("");
 
     const marksHint = dedupState !== "ready" ? "" : student
-      ? `<p class="dash-hint">Seen / reskin seen / unseen marks are for ${studentCell(student)} (the Student filter above), from ${seen ? seen.attempts : 0} completed attempt${seen && seen.attempts === 1 ? "" : "s"}.${
+      ? `<p class="dash-hint">Seen / reskin seen / unseen marks are for ${studentCell(student)} (the Student filter above), from ${seen ? seen.attempts : 0} completed attempt${seen && seen.attempts === 1 ? "" : "s"} in storage — sittings archived and deleted no longer count.${
           seen && seen.unindexed ? " " + esc(seenCaveat(seen)) : ""}</p>`
       : '<p class="dash-hint">Pick a student in the Student filter above to mark every question seen / reskin seen / unseen for them.</p>';
 
@@ -2468,8 +2470,11 @@ window.Dashboard = (function(){
       $("dashDetail").classList.add("hidden");
     });
     $("dashDetail").addEventListener("click", e => { if(e.target.id === "dashDetail") $("dashDetail").classList.add("hidden"); });
-    $("dashFilterTest").addEventListener("change", render);
-    $("dashFilterStudent").addEventListener("change", render);
+    /* the filters live outside #dashBody, so re-rendering keeps their own
+       values; the forms INSIDE the body are DOM-only and the Sets hint sends
+       the tutor to the Student filter mid-form — keep what they typed */
+    $("dashFilterTest").addEventListener("change", renderKeepingInputs);
+    $("dashFilterStudent").addEventListener("change", renderKeepingInputs);
     $("dashLoadFile").addEventListener("change", e => { if(e.target.files[0]) loadFromFile(e.target.files[0]); });
     $("dashTabs").querySelectorAll("button").forEach(b =>
       b.addEventListener("click", () => {

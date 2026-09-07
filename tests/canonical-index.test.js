@@ -238,7 +238,8 @@ run("proof", () => {
   check(!!none && none.seenItems.length === 0 && none.reskinItems.length === 0,
     "control: 2025 March US v1 shares nothing with 202506asiav2 — zero overlap");
   const mh = d.fns.markHtml(m13);
-  check(mh.indexOf('class="dstatus to canon-mark seen"') !== -1 && mh.indexOf("completed Sep") !== -1 && (mh.match(/completed Sep/g) || []).length === 2,
+  const whenText = d.fns.attemptLabel(formRec("202506asiav2")).whenText;   // locale-formatted by fmtDay; never "—" for a real date
+  check(mh.indexOf('class="dstatus to canon-mark seen"') !== -1 && whenText !== "—" && mh.split("completed " + whenText).length - 1 === 2,
     "a seen mark borrows the .dstatus palette and prints the attempt's date, formatted once, in the badge title and the inline via", mh);
 });
 
@@ -463,7 +464,7 @@ run("degrade", () => {
         d6.$("afCodes").selectedOptions.length === 1 && d6.$("afCodes").selectedOptions[0].value === CODE,
     "settling on the Assignments tab re-renders once and RESTORES every typed value and the multi-select", JSON.stringify([d6.loads.render, d6.$("afFree").value, d6.$("afName").value]));
   check(d6.$("afOverlap").innerHTML.indexOf("has already seen 25 of") !== -1 && d6.$("afOverlap").innerHTML.indexOf("AS-ABCDEFGH") !== -1 &&
-        d6.$("afOverlap").innerHTML.indexOf("junk") === -1 && d6.$("afOverlap").innerHTML.indexOf("no completed attempts yet") !== -1,
+        d6.$("afOverlap").innerHTML.indexOf("junk") === -1 && d6.$("afOverlap").innerHTML.indexOf("no completed attempts in storage") !== -1,
     "…and recomputes the overlap block from the restored codes (typed codes parsed exactly as Create assignment parses them)");
   const d7 = build({ fetch: "ok", fetched: REAL_INDEX, tab: "sets" });
   d7.$("saFree").value = "AS-ABCDEFGH"; d7.$("saLimit").value = "30"; d7.$("saHold").checked = true; d7.els.saCodes = mkSelect([CODE], [CODE]);
