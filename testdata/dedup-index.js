@@ -27,7 +27,7 @@ window.DEDUP_INDEX = {
   "forms": [
    {
     "testId": "202606asiav1",
-    "testVersion": "2026-08-19-a",
+    "testVersion": "2026-09-08-a",
     "shippedOrder": 0,
     "itemCount": 98
    },
@@ -69,7 +69,7 @@ window.DEDUP_INDEX = {
    },
    {
     "testId": "202506asiav2",
-    "testVersion": "2026-09-04-a",
+    "testVersion": "2026-09-08-a",
     "shippedOrder": 7,
     "itemCount": 98
    },
@@ -81,7 +81,7 @@ window.DEDUP_INDEX = {
    },
    {
     "testId": "202503usv2",
-    "testVersion": "2026-09-04-a",
+    "testVersion": "2026-09-08-a",
     "shippedOrder": 9,
     "itemCount": 98
    },
@@ -126,9 +126,9 @@ window.DEDUP_INDEX = {
   ]
  },
  "itemCount": 1470,
- "canonicalCount": 1429,
- "exactPairCount": 44,
- "skeletonPairCount": 145,
+ "canonicalCount": 1427,
+ "exactPairCount": 46,
+ "skeletonPairCount": 143,
  "relatedPairCount": 20,
  "familyCount": 142,
  "items": {
@@ -406,15 +406,23 @@ window.DEDUP_INDEX = {
    "type": "mcq",
    "canonical": "202606asiav1:re2-q10",
    "family": "fam:202606asiav1:re2-q10",
-   "skeleton": [
+   "exact": [
     {
      "ref": "202603asiav1:re2-q10",
-     "rule": "S",
+     "rule": "E1",
      "shared": 94,
      "jaccard": 1.0,
      "contain": 1.0
     }
-   ]
+   ],
+   "keys": {
+    "202603asiav1:re2-q10": "AGREE"
+   },
+   "ledger": {
+    "202603asiav1:re2-q10": [
+     "sibling-reskin (David (class ruling), 2026-09-08)"
+    ]
+   }
   },
   "202606asiav1:re2-q11": {
    "section": "rw",
@@ -2605,17 +2613,25 @@ window.DEDUP_INDEX = {
   "202603asiav1:re2-q10": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202603asiav1:re2-q10",
+   "canonical": "202606asiav1:re2-q10",
    "family": "fam:202606asiav1:re2-q10",
-   "skeleton": [
+   "exact": [
     {
      "ref": "202606asiav1:re2-q10",
-     "rule": "S",
+     "rule": "E1",
      "shared": 94,
      "jaccard": 1.0,
      "contain": 1.0
     }
-   ]
+   ],
+   "keys": {
+    "202606asiav1:re2-q10": "AGREE"
+   },
+   "ledger": {
+    "202606asiav1:re2-q10": [
+     "sibling-reskin (David (class ruling), 2026-09-08)"
+    ]
+   }
   },
   "202603asiav1:re2-q11": {
    "section": "rw",
@@ -5783,15 +5799,23 @@ window.DEDUP_INDEX = {
    "type": "mcq",
    "canonical": "202506asiav2:re2-q8",
    "family": "fam:202506asiav2:re2-q8",
-   "skeleton": [
+   "exact": [
     {
      "ref": "202506asiav4:re2-q7",
-     "rule": "S",
+     "rule": "E2",
      "shared": 95,
      "jaccard": 1.0,
      "contain": 1.0
     }
-   ]
+   ],
+   "keys": {
+    "202506asiav4:re2-q7": "AGREE"
+   },
+   "ledger": {
+    "202506asiav4:re2-q7": [
+     "sibling-reskin (David (class ruling), 2026-09-08)"
+    ]
+   }
   },
   "202506asiav2:re2-q9": {
    "section": "rw",
@@ -9928,17 +9952,25 @@ window.DEDUP_INDEX = {
   "202506asiav4:re2-q7": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202506asiav4:re2-q7",
+   "canonical": "202506asiav2:re2-q8",
    "family": "fam:202506asiav2:re2-q8",
-   "skeleton": [
+   "exact": [
     {
      "ref": "202506asiav2:re2-q8",
-     "rule": "S",
+     "rule": "E2",
      "shared": 95,
      "jaccard": 1.0,
      "contain": 1.0
     }
-   ]
+   ],
+   "keys": {
+    "202506asiav2:re2-q8": "AGREE"
+   },
+   "ledger": {
+    "202506asiav2:re2-q8": [
+     "sibling-reskin (David (class ruling), 2026-09-08)"
+    ]
+   }
   },
   "202506asiav4:re2-q8": {
    "section": "rw",
@@ -12763,9 +12795,7 @@ window.DEDUP_INDEX = {
    ],
    "exactClasses": [
     [
-     "202506asiav2:re2-q8"
-    ],
-    [
+     "202506asiav2:re2-q8",
      "202506asiav4:re2-q7"
     ]
    ]
@@ -13929,9 +13959,7 @@ window.DEDUP_INDEX = {
    ],
    "exactClasses": [
     [
-     "202606asiav1:re2-q10"
-    ],
-    [
+     "202606asiav1:re2-q10",
      "202603asiav1:re2-q10"
     ]
    ]

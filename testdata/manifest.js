@@ -9,7 +9,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202606asiav1",
   "testName": "2026 June Asia v1",
-  "testVersion": "2026-08-19-a",
+  "testVersion": "2026-09-08-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -151,7 +151,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202506asiav2",
   "testName": "2025 June Asia v2",
-  "testVersion": "2026-09-04-a",
+  "testVersion": "2026-09-08-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -191,7 +191,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202503usv2",
   "testName": "2025 March US v2",
-  "testVersion": "2026-09-04-a",
+  "testVersion": "2026-09-08-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
