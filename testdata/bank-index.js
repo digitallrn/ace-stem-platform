@@ -6,7 +6,7 @@
    (containerType distinguishes them). */
 window.BANK_INDEX = {
  "indexVersion": 1,
- "questionCount": 188,
+ "questionCount": 206,
  "activeCount": 188,
  "entries": [
   {
@@ -50,8 +50,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m1-q13"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0188",
    "stemPreview": "What is the x coordinate of the x- intercept of line k?"
   },
   {
@@ -65,8 +65,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m1-q14"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0199",
    "stemPreview": "An equation of the graph shown is y = (-3/8) (x - p)² + 6, where p is an intege…"
   },
   {
@@ -95,8 +95,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m1-q17"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0200",
    "stemPreview": "In triangle PQR, the sine of angle Q is 1/2. What is the length of PQ?"
   },
   {
@@ -110,8 +110,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m1-q18"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0189",
    "stemPreview": "Which function gives the number of points awarded for a correct answer x second…"
   },
   {
@@ -155,8 +155,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m1-q21"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0190",
    "stemPreview": "Which equation correctly expresses v in terms of t and w?"
   },
   {
@@ -170,8 +170,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m1-q22"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0191",
    "stemPreview": "The table shows three values of x and their corresponding values of gx, where g…"
   },
   {
@@ -245,8 +245,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q1"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0192",
    "stemPreview": "The table shows the frequency of each data value in a data set. Which data valu…"
   },
   {
@@ -275,8 +275,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q12"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0201",
    "stemPreview": "In the figure, lines m and n are parallel and line t intersects both lines. Wha…"
   },
   {
@@ -290,8 +290,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q14"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0193",
    "stemPreview": "If a sandwich is selected at random, which expression represents the probabilit…"
   },
   {
@@ -305,8 +305,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q15"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0194",
    "stemPreview": "What is the value of h(4)?"
   },
   {
@@ -320,8 +320,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q16"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0195",
    "stemPreview": "What is the slope of line k?"
   },
   {
@@ -350,8 +350,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q20"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0196",
    "stemPreview": "What was the population of this city in 1742?"
   },
   {
@@ -440,8 +440,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q7"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0197",
    "stemPreview": "A certain salmon shark can swim at a maximum speed of 16 meters per second. At…"
   },
   {
@@ -455,8 +455,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q9"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0198",
    "stemPreview": "Which expression is equivalent to 240x² + 56?"
   },
   {
@@ -485,8 +485,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:rw1-q10"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0202",
    "stemPreview": "According to the graph, the lowest-priced nuts were _____ Which choice most eff…"
   },
   {
@@ -500,8 +500,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:rw1-q12"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0203",
    "stemPreview": "Which consideration, if true, should make the farmer most hesitant to rely on w…"
   },
   {
@@ -665,8 +665,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:rw2-q10"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0204",
    "stemPreview": "Which choice most effectively uses data from the table to complete the statemen…"
   },
   {
@@ -2735,8 +2735,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q8"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0205",
    "stemPreview": "Based on the graph, which of the following is closest to the predicted depth be…"
   },
   {
@@ -2813,6 +2813,276 @@ window.BANK_INDEX = {
    "retired": false,
    "supersededBy": null,
    "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0188",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0188",
+   "subject": "math",
+   "skill": "Linear equations in two variables",
+   "tags": [
+    "src:202608asiav1:m1-q13"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "What is the x coordinate of the x- intercept of line k?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0189",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0189",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608asiav1:m1-q18"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which function gives the number of points awarded for a correct answer x second…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0190",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0190",
+   "subject": "math",
+   "skill": "Equivalent expressions",
+   "tags": [
+    "src:202608asiav1:m1-q21"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which equation correctly expresses v in terms of t and w?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0191",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0191",
+   "subject": "math",
+   "skill": "Linear functions",
+   "tags": [
+    "src:202608asiav1:m1-q22"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The table shows three values of x and their corresponding values of gx, where g…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0192",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0192",
+   "subject": "math",
+   "skill": "One-variable data: Distributions and measures of center and spread",
+   "tags": [
+    "src:202608asiav1:m2-q1"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The table shows the frequency of each data value in a data set. Which data valu…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0193",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0193",
+   "subject": "math",
+   "skill": "Probability and conditional probability",
+   "tags": [
+    "src:202608asiav1:m2-q14"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "If a sandwich is selected at random, which expression represents the probabilit…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0194",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0194",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608asiav1:m2-q15"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "What is the value of h(4)?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0195",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0195",
+   "subject": "math",
+   "skill": "Linear equations in two variables",
+   "tags": [
+    "src:202608asiav1:m2-q16"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "What is the slope of line k?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0196",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0196",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608asiav1:m2-q20"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "What was the population of this city in 1742?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0197",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0197",
+   "subject": "math",
+   "skill": "Ratios, rates, proportional relationships, and units",
+   "tags": [
+    "src:202608asiav1:m2-q7"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "A certain salmon shark can swim at a maximum speed of 16 meters per second. At…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0198",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0198",
+   "subject": "math",
+   "skill": "Equivalent expressions",
+   "tags": [
+    "src:202608asiav1:m2-q9"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which expression is equivalent to 240x² + 56?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0199",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0199",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608asiav1:m1-q14"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "An equation of the graph shown is y = (-3/8) (x - p)² + 6, where p is an intege…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0200",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0200",
+   "subject": "math",
+   "skill": "Right triangles and trigonometry",
+   "tags": [
+    "src:202608asiav1:m1-q17"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "In triangle PQR, the sine of angle Q is 1/2. What is the length of PQ?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0201",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0201",
+   "subject": "math",
+   "skill": "Lines, angles, and triangles",
+   "tags": [
+    "src:202608asiav1:m2-q12"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "In the figure, lines m and n are parallel and line t intersects both lines. Wha…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0202",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0202",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav1:rw1-q10"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "According to the graph, the lowest-priced nuts were _____ Which choice most eff…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0203",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0203",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav1:rw1-q12"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which consideration, if true, should make the farmer most hesitant to rely on w…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0204",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0204",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav1:rw2-q10"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice most effectively uses data from the table to complete the statemen…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0205",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0205",
+   "subject": "math",
+   "skill": "Two-variable data: Models and scatterplots",
+   "tags": [
+    "src:202608asiav1:m2-q8"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Based on the graph, which of the following is closest to the predicted depth be…"
   },
   {
    "ref": "bank-david-core:q0001",
