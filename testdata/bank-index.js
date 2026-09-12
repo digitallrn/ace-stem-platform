@@ -6,7 +6,7 @@
    (containerType distinguishes them). */
 window.BANK_INDEX = {
  "indexVersion": 1,
- "questionCount": 206,
+ "questionCount": 214,
  "activeCount": 188,
  "entries": [
   {
@@ -860,8 +860,8 @@ window.BANK_INDEX = {
     "src:202608asiav2:m1-q14"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0207",
    "stemPreview": "In triangle PQR, the sine of ∠Q is 1/2. What is the length of segment PQ?"
   },
   {
@@ -1055,8 +1055,8 @@ window.BANK_INDEX = {
     "src:202608asiav2:m2-q22"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0208",
    "stemPreview": "In the figure, AB, DE, and CF are parallel. If 202° < x + y + z < 215 °, which…"
   },
   {
@@ -1085,8 +1085,8 @@ window.BANK_INDEX = {
     "src:202608asiav2:m2-q9"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0206",
    "stemPreview": "The height of a right circular cylinder is 47 inches, and the circumference of…"
   },
   {
@@ -1475,8 +1475,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:rw1-q6"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0209",
    "stemPreview": "Common name Average mass (kg) Capable of flight? Which choice most effectively…"
   },
   {
@@ -1895,8 +1895,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:rw1-q16"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0210",
    "stemPreview": "Film name Visible light allowed through Glare reduction Based on the window-fil…"
   },
   {
@@ -2225,8 +2225,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m1-q21"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0211",
    "stemPreview": "The shaded region shown represents the solutions to which inequality?"
   },
   {
@@ -2300,8 +2300,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m2-q18"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0212",
    "stemPreview": "x y -16 -46 5 38 The table shows two values of x and their corresponding values…"
   },
   {
@@ -2315,8 +2315,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m2-q2"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0213",
    "stemPreview": "The shaded region shown represents the solutions to which inequality? 18 y 16 1…"
   },
   {
@@ -3083,6 +3083,126 @@ window.BANK_INDEX = {
    "retired": false,
    "supersededBy": null,
    "stemPreview": "Based on the graph, which of the following is closest to the predicted depth be…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0206",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0206",
+   "subject": "math",
+   "skill": "Area and volume",
+   "tags": [
+    "src:202608asiav2:m2-q9"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The height of a right circular cylinder is 47 inches, and the circumference of…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0207",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0207",
+   "subject": "math",
+   "skill": "Right triangles and trigonometry",
+   "tags": [
+    "src:202608asiav2:m1-q14"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "In triangle PQR, the sine of ∠Q is 1/2. What is the length of segment PQ?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0208",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0208",
+   "subject": "math",
+   "skill": "Lines, angles, and triangles",
+   "tags": [
+    "src:202608asiav2:m2-q22"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "In the figure, AB, DE, and CF are parallel. If 202° < x + y + z < 215 °, which…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0209",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0209",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav3:rw1-q6"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Common name Average mass (kg) Capable of flight? Which choice most effectively…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0210",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0210",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav4:rw1-q16"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Film name Visible light allowed through Glare reduction Based on the window-fil…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0211",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0211",
+   "subject": "math",
+   "skill": "Linear inequalities in one or two variables",
+   "tags": [
+    "src:202608usv1:m1-q21"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The shaded region shown represents the solutions to which inequality?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0212",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0212",
+   "subject": "math",
+   "skill": "Linear equations in two variables",
+   "tags": [
+    "src:202608usv1:m2-q18"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "x y -16 -46 5 38 The table shows two values of x and their corresponding values…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0213",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0213",
+   "subject": "math",
+   "skill": "Linear inequalities in one or two variables",
+   "tags": [
+    "src:202608usv1:m2-q2"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The shaded region shown represents the solutions to which inequality? 18 y 16 1…"
   },
   {
    "ref": "bank-david-core:q0001",
