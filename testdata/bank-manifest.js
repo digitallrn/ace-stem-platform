@@ -18,5 +18,19 @@ window.BANK_MANIFEST = [
    "rw": 0,
    "math": 1
   }
+ },
+ {
+  "bankId": "bank-202608-salvage",
+  "type": "bank",
+  "owner": "david",
+  "bankName": "2026 August salvage",
+  "bankVersion": "sha-7868fe698e9e",
+  "questionCount": 187,
+  "activeCount": 187,
+  "retiredCount": 0,
+  "subjectCounts": {
+   "rw": 79,
+   "math": 108
+  }
  }
 ];

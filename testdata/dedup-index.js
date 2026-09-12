@@ -20,8 +20,8 @@ window.DEDUP_INDEX = {
   "boilerplate_form_df": 3
  },
  "boilerplate": {
-  "sha256": "bb09bb94836aa756cd480cf4243b476d7f93d81a0f6c2f7c9ccdba8dcf875f82",
-  "count": 204
+  "sha256": "bce0190d8f5aa208e5aeb257ab1e520ca4ea9b4f252cc996c597f7839dcca28c",
+  "count": 233
  },
  "reference": {
   "forms": [
@@ -146,15 +146,21 @@ window.DEDUP_INDEX = {
     "bankVersion": "sha-23154ea489a4",
     "shippedOrder": 19,
     "questionCount": 1
+   },
+   {
+    "bankId": "bank-202608-salvage",
+    "bankVersion": "sha-7868fe698e9e",
+    "shippedOrder": 20,
+    "questionCount": 187
    }
   ]
  },
- "itemCount": 1861,
- "canonicalCount": 1809,
+ "itemCount": 2048,
+ "canonicalCount": 1996,
  "exactPairCount": 58,
- "skeletonPairCount": 232,
- "relatedPairCount": 42,
- "familyCount": 194,
+ "skeletonPairCount": 270,
+ "relatedPairCount": 60,
+ "familyCount": 226,
  "items": {
   "202606asiav1:re1-q1": {
    "section": "rw",
@@ -950,9 +956,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202608intv1:re1-q18",
      "rule": "S",
-     "shared": 60,
-     "jaccard": 0.504,
-     "contain": 0.723
+     "shared": 59,
+     "jaccard": 0.492,
+     "contain": 0.702
     }
    ]
   },
@@ -1334,9 +1340,25 @@ window.DEDUP_INDEX = {
     {
      "ref": "202512usv2:re2-q25",
      "rule": "S",
-     "shared": 67,
-     "jaccard": 0.798,
-     "contain": 0.893
+     "shared": 66,
+     "jaccard": 0.795,
+     "contain": 0.892
+    }
+   ],
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0095",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.121,
+     "contain": 0.231
+    },
+    {
+     "ref": "bank-202608-salvage:q0130",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.118,
+     "contain": 0.221
     }
    ]
   },
@@ -1467,7 +1489,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202603asiav1:ma2-q5",
      "rule": "E1",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -1476,7 +1498,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma1-q3",
      "rule": "S",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -1530,7 +1552,7 @@ window.DEDUP_INDEX = {
      "ref": "202506asiav2:ma2-q16",
      "rule": "S",
      "shared": 24,
-     "jaccard": 0.571,
+     "jaccard": 0.6,
      "contain": 0.75
     }
    ]
@@ -2399,7 +2421,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma1-q19",
      "rule": "S",
-     "shared": 13,
+     "shared": 8,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -3023,7 +3045,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202508asiav1:ma1-q12",
      "rule": "S",
-     "shared": 26,
+     "shared": 23,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -3037,7 +3059,17 @@ window.DEDUP_INDEX = {
   "202603asiav1:ma1-q16": {
    "section": "math",
    "type": "spr",
-   "canonical": "202603asiav1:ma1-q16"
+   "canonical": "202603asiav1:ma1-q16",
+   "family": "fam:202603asiav1:ma1-q16",
+   "skeleton": [
+    {
+     "ref": "202508asiav1:ma1-q13",
+     "rule": "S",
+     "shared": 10,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202603asiav1:ma1-q17": {
    "section": "math",
@@ -3123,7 +3155,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202606asiav2:ma1-q16",
      "rule": "E1",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -3132,7 +3164,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma1-q3",
      "rule": "S",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -3222,17 +3254,24 @@ window.DEDUP_INDEX = {
    "family": "fam:202603asiav1:ma2-q11",
    "skeleton": [
     {
+     "ref": "202503usv1:ma1-q16",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.273,
+     "contain": 0.5
+    },
+    {
      "ref": "202503usv2:ma1-q15",
      "rule": "S",
      "shared": 6,
-     "jaccard": 0.24,
+     "jaccard": 0.273,
      "contain": 0.5
     },
     {
      "ref": "202510usv3:ma2-q7",
      "rule": "S",
      "shared": 6,
-     "jaccard": 0.24,
+     "jaccard": 0.273,
      "contain": 0.5
     }
    ]
@@ -3696,7 +3735,17 @@ window.DEDUP_INDEX = {
   "202510usv3:ma1-q6": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202510usv3:ma1-q6"
+   "canonical": "202510usv3:ma1-q6",
+   "family": "fam:202510usv3:ma1-q6",
+   "skeleton": [
+    {
+     "ref": "202412asiav1:ma1-q9",
+     "rule": "S",
+     "shared": 9,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202510usv3:ma1-q7": {
    "section": "math",
@@ -3742,7 +3791,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202608usv0:ma2-q4",
      "rule": "S",
-     "shared": 8,
+     "shared": 7,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -3772,14 +3821,14 @@ window.DEDUP_INDEX = {
     {
      "ref": "202408usv2:ma2-q15",
      "rule": "S",
-     "shared": 7,
-     "jaccard": 0.583,
-     "contain": 0.778
+     "shared": 6,
+     "jaccard": 0.545,
+     "contain": 0.75
     },
     {
      "ref": "202506asiav4:ma1-q11",
      "rule": "S",
-     "shared": 9,
+     "shared": 8,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -3856,16 +3905,23 @@ window.DEDUP_INDEX = {
     {
      "ref": "202503usv2:ma1-q16",
      "rule": "S",
-     "shared": 5,
-     "jaccard": 0.357,
-     "contain": 0.625
+     "shared": 6,
+     "jaccard": 0.545,
+     "contain": 0.75
     },
     {
      "ref": "202506asiav4:ma2-q5",
      "rule": "S",
-     "shared": 5,
-     "jaccard": 0.385,
-     "contain": 0.714
+     "shared": 7,
+     "jaccard": 0.778,
+     "contain": 1.0
+    },
+    {
+     "ref": "202506usv1:ma1-q10",
+     "rule": "S",
+     "shared": 8,
+     "jaccard": 0.615,
+     "contain": 0.889
     }
    ]
   },
@@ -3929,7 +3985,7 @@ window.DEDUP_INDEX = {
      "ref": "202503usv1:ma1-q16",
      "rule": "S",
      "shared": 11,
-     "jaccard": 0.786,
+     "jaccard": 0.846,
      "contain": 0.917
     },
     {
@@ -3943,7 +3999,7 @@ window.DEDUP_INDEX = {
      "ref": "202603asiav1:ma2-q11",
      "rule": "S",
      "shared": 6,
-     "jaccard": 0.24,
+     "jaccard": 0.273,
      "contain": 0.5
     }
    ]
@@ -4002,9 +4058,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202503usv1:ma2-q16",
      "rule": "S",
-     "shared": 31,
-     "jaccard": 0.646,
-     "contain": 0.795
+     "shared": 39,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -4061,7 +4117,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202406intv1:ma2-q18",
      "rule": "S",
-     "shared": 22,
+     "shared": 20,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -4504,7 +4560,16 @@ window.DEDUP_INDEX = {
   "202508asiav1:re2-q25": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202508asiav1:re2-q25"
+   "canonical": "202508asiav1:re2-q25",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0162",
+     "rule": "R",
+     "shared": 29,
+     "jaccard": 0.176,
+     "contain": 0.319
+    }
+   ]
   },
   "202508asiav1:re2-q26": {
    "section": "rw",
@@ -4615,7 +4680,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202603asiav1:ma1-q14",
      "rule": "S",
-     "shared": 26,
+     "shared": 23,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -4624,7 +4689,17 @@ window.DEDUP_INDEX = {
   "202508asiav1:ma1-q13": {
    "section": "math",
    "type": "spr",
-   "canonical": "202508asiav1:ma1-q13"
+   "canonical": "202508asiav1:ma1-q13",
+   "family": "fam:202603asiav1:ma1-q16",
+   "skeleton": [
+    {
+     "ref": "202603asiav1:ma1-q16",
+     "rule": "S",
+     "shared": 10,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202508asiav1:ma1-q14": {
    "section": "math",
@@ -5462,7 +5537,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202511asiav1:ma2-q14",
      "rule": "S",
-     "shared": 13,
+     "shared": 8,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -5502,9 +5577,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma2-q1",
      "rule": "S",
-     "shared": 8,
-     "jaccard": 0.348,
-     "contain": 0.533
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -5533,7 +5608,24 @@ window.DEDUP_INDEX = {
   "202509asiav4:ma2-q3": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202509asiav4:ma2-q3"
+   "canonical": "202509asiav4:ma2-q3",
+   "family": "fam:202509asiav4:ma2-q3",
+   "skeleton": [
+    {
+     "ref": "202406intv1:ma1-q5",
+     "rule": "S",
+     "shared": 15,
+     "jaccard": 0.429,
+     "contain": 0.625
+    },
+    {
+     "ref": "202509asiav2:ma2-q3",
+     "rule": "S",
+     "shared": 26,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202509asiav4:ma2-q4": {
    "section": "math",
@@ -5545,15 +5637,28 @@ window.DEDUP_INDEX = {
      "ref": "202509asiav2:ma2-q4",
      "rule": "S",
      "shared": 48,
-     "jaccard": 0.774,
-     "contain": 0.873
+     "jaccard": 0.8,
+     "contain": 0.889
     }
-   ]
+   ],
+   "keys": {
+    "202509asiav2:ma2-q4": "AGREE"
+   }
   },
   "202509asiav4:ma2-q5": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202509asiav4:ma2-q5"
+   "canonical": "202509asiav4:ma2-q5",
+   "family": "fam:202509asiav4:ma2-q5",
+   "skeleton": [
+    {
+     "ref": "202509asiav2:ma2-q5",
+     "rule": "S",
+     "shared": 21,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202509asiav4:ma2-q6": {
    "section": "math",
@@ -5564,9 +5669,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma2-q6",
      "rule": "E2",
-     "shared": 25,
-     "jaccard": 0.439,
-     "contain": 0.61
+     "shared": 41,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "keys": {
@@ -5625,12 +5730,32 @@ window.DEDUP_INDEX = {
   "202509asiav4:ma2-q9": {
    "section": "math",
    "type": "spr",
-   "canonical": "202509asiav4:ma2-q9"
+   "canonical": "202509asiav4:ma2-q9",
+   "family": "fam:202509asiav4:ma2-q9",
+   "skeleton": [
+    {
+     "ref": "202509asiav2:ma2-q9",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 0.5,
+     "contain": 0.667
+    }
+   ]
   },
   "202509asiav4:ma2-q10": {
    "section": "math",
    "type": "spr",
-   "canonical": "202509asiav4:ma2-q10"
+   "canonical": "202509asiav4:ma2-q10",
+   "family": "fam:202509asiav4:ma2-q10",
+   "skeleton": [
+    {
+     "ref": "202408usv2:ma1-q8",
+     "rule": "S",
+     "shared": 12,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202509asiav4:ma2-q11": {
    "section": "math",
@@ -5641,9 +5766,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma2-q10",
      "rule": "S",
-     "shared": 36,
-     "jaccard": 0.692,
-     "contain": 0.837
+     "shared": 43,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -5656,7 +5781,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma2-q11",
      "rule": "S",
-     "shared": 17,
+     "shared": 15,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -5671,15 +5796,15 @@ window.DEDUP_INDEX = {
     {
      "ref": "202408usv2:ma2-q12",
      "rule": "S",
-     "shared": 37,
-     "jaccard": 0.755,
-     "contain": 0.902
+     "shared": 41,
+     "jaccard": 1.0,
+     "contain": 1.0
     },
     {
      "ref": "202509asiav2:ma2-q12",
      "rule": "S",
      "shared": 36,
-     "jaccard": 0.72,
+     "jaccard": 0.783,
      "contain": 0.878
     }
    ],
@@ -5703,7 +5828,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma2-q13",
      "rule": "S",
-     "shared": 16,
+     "shared": 15,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -5751,9 +5876,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma2-q16",
      "rule": "S",
-     "shared": 24,
-     "jaccard": 0.353,
-     "contain": 0.571
+     "shared": 40,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -6948,7 +7073,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202506usv1:ma2-q9",
      "rule": "S",
-     "shared": 56,
+     "shared": 51,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -7010,7 +7135,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202506usv1:ma2-q12",
      "rule": "S",
-     "shared": 34,
+     "shared": 32,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -7036,7 +7161,7 @@ window.DEDUP_INDEX = {
      "ref": "202606asiav2:ma1-q20",
      "rule": "S",
      "shared": 24,
-     "jaccard": 0.571,
+     "jaccard": 0.6,
      "contain": 0.75
     }
    ]
@@ -7090,14 +7215,14 @@ window.DEDUP_INDEX = {
     {
      "ref": "202503usv2:ma2-q20",
      "rule": "S",
-     "shared": 20,
-     "jaccard": 0.714,
-     "contain": 0.909
+     "shared": 19,
+     "jaccard": 0.704,
+     "contain": 0.905
     },
     {
      "ref": "202506usv1:ma2-q22",
      "rule": "S",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -7280,7 +7405,16 @@ window.DEDUP_INDEX = {
   "202503usv1:re1-q27": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202503usv1:re1-q27"
+   "canonical": "202503usv1:re1-q27",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0052",
+     "rule": "R",
+     "shared": 34,
+     "jaccard": 0.23,
+     "contain": 0.391
+    }
+   ]
   },
   "202503usv1:re2-q1": {
    "section": "rw",
@@ -7592,8 +7726,8 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav2:ma1-q19",
      "rule": "S",
-     "shared": 11,
-     "jaccard": 0.917,
+     "shared": 12,
+     "jaccard": 1.0,
      "contain": 1.0
     }
    ]
@@ -7681,15 +7815,22 @@ window.DEDUP_INDEX = {
      "ref": "202503usv2:ma1-q15",
      "rule": "S",
      "shared": 11,
-     "jaccard": 0.786,
+     "jaccard": 0.846,
      "contain": 0.917
     },
     {
      "ref": "202510usv3:ma2-q7",
      "rule": "S",
      "shared": 11,
-     "jaccard": 0.786,
+     "jaccard": 0.846,
      "contain": 0.917
+    },
+    {
+     "ref": "202603asiav1:ma2-q11",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.273,
+     "contain": 0.5
     }
    ]
   },
@@ -7853,7 +7994,7 @@ window.DEDUP_INDEX = {
      "ref": "202503usv2:ma1-q13",
      "rule": "S",
      "shared": 42,
-     "jaccard": 0.667,
+     "jaccard": 0.689,
      "contain": 0.824
     }
    ]
@@ -7917,9 +8058,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202510usv3:ma2-q15",
      "rule": "S",
-     "shared": 31,
-     "jaccard": 0.646,
-     "contain": 0.795
+     "shared": 39,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -8527,7 +8668,7 @@ window.DEDUP_INDEX = {
      "ref": "202503usv1:ma2-q7",
      "rule": "S",
      "shared": 42,
-     "jaccard": 0.667,
+     "jaccard": 0.689,
      "contain": 0.824
     }
    ]
@@ -8565,7 +8706,7 @@ window.DEDUP_INDEX = {
      "ref": "202503usv1:ma1-q16",
      "rule": "S",
      "shared": 11,
-     "jaccard": 0.786,
+     "jaccard": 0.846,
      "contain": 0.917
     },
     {
@@ -8579,7 +8720,7 @@ window.DEDUP_INDEX = {
      "ref": "202603asiav1:ma2-q11",
      "rule": "S",
      "shared": 6,
-     "jaccard": 0.24,
+     "jaccard": 0.273,
      "contain": 0.5
     }
    ]
@@ -8607,9 +8748,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202510usv3:ma1-q20",
      "rule": "S",
-     "shared": 5,
-     "jaccard": 0.357,
-     "contain": 0.625
+     "shared": 6,
+     "jaccard": 0.545,
+     "contain": 0.75
     }
    ]
   },
@@ -8820,16 +8961,16 @@ window.DEDUP_INDEX = {
     {
      "ref": "202506asiav2:ma2-q22",
      "rule": "S",
-     "shared": 20,
-     "jaccard": 0.714,
-     "contain": 0.909
+     "shared": 19,
+     "jaccard": 0.704,
+     "contain": 0.905
     },
     {
      "ref": "202506usv1:ma2-q22",
      "rule": "S",
-     "shared": 20,
-     "jaccard": 0.714,
-     "contain": 0.909
+     "shared": 19,
+     "jaccard": 0.704,
+     "contain": 0.905
     }
    ]
   },
@@ -9255,14 +9396,14 @@ window.DEDUP_INDEX = {
     {
      "ref": "202603asiav1:ma2-q5",
      "rule": "S",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     },
     {
      "ref": "202606asiav2:ma1-q16",
      "rule": "S",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -9379,8 +9520,8 @@ window.DEDUP_INDEX = {
     {
      "ref": "202503usv1:ma1-q8",
      "rule": "S",
-     "shared": 11,
-     "jaccard": 0.917,
+     "shared": 12,
+     "jaccard": 1.0,
      "contain": 1.0
     }
    ]
@@ -9409,9 +9550,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma2-q1",
      "rule": "S",
-     "shared": 8,
-     "jaccard": 0.348,
-     "contain": 0.533
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -9441,7 +9582,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "202509asiav2:ma2-q3",
-   "family": "fam:202509asiav2:ma2-q3",
+   "family": "fam:202509asiav4:ma2-q3",
    "skeleton": [
     {
      "ref": "202406intv1:ma1-q5",
@@ -9449,6 +9590,13 @@ window.DEDUP_INDEX = {
      "shared": 15,
      "jaccard": 0.429,
      "contain": 0.625
+    },
+    {
+     "ref": "202509asiav4:ma2-q3",
+     "rule": "S",
+     "shared": 26,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
@@ -9467,15 +9615,28 @@ window.DEDUP_INDEX = {
      "ref": "202509asiav4:ma2-q4",
      "rule": "S",
      "shared": 48,
-     "jaccard": 0.774,
-     "contain": 0.873
+     "jaccard": 0.8,
+     "contain": 0.889
     }
-   ]
+   ],
+   "keys": {
+    "202509asiav4:ma2-q4": "AGREE"
+   }
   },
   "202509asiav2:ma2-q5": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202509asiav2:ma2-q5"
+   "canonical": "202509asiav2:ma2-q5",
+   "family": "fam:202509asiav4:ma2-q5",
+   "skeleton": [
+    {
+     "ref": "202509asiav4:ma2-q5",
+     "rule": "S",
+     "shared": 21,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202509asiav2:ma2-q6": {
    "section": "math",
@@ -9486,9 +9647,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma2-q6",
      "rule": "E2",
-     "shared": 25,
-     "jaccard": 0.439,
-     "contain": 0.61
+     "shared": 41,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "keys": {
@@ -9547,7 +9708,17 @@ window.DEDUP_INDEX = {
   "202509asiav2:ma2-q9": {
    "section": "math",
    "type": "spr",
-   "canonical": "202509asiav2:ma2-q9"
+   "canonical": "202509asiav2:ma2-q9",
+   "family": "fam:202509asiav4:ma2-q9",
+   "skeleton": [
+    {
+     "ref": "202509asiav4:ma2-q9",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 0.5,
+     "contain": 0.667
+    }
+   ]
   },
   "202509asiav2:ma2-q10": {
    "section": "math",
@@ -9558,9 +9729,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma2-q11",
      "rule": "S",
-     "shared": 36,
-     "jaccard": 0.692,
-     "contain": 0.837
+     "shared": 43,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -9573,7 +9744,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma2-q12",
      "rule": "S",
-     "shared": 17,
+     "shared": 15,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -9596,7 +9767,7 @@ window.DEDUP_INDEX = {
      "ref": "202509asiav4:ma2-q13",
      "rule": "S",
      "shared": 36,
-     "jaccard": 0.72,
+     "jaccard": 0.783,
      "contain": 0.878
     }
    ],
@@ -9615,7 +9786,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma2-q15",
      "rule": "S",
-     "shared": 16,
+     "shared": 15,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -9663,9 +9834,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma2-q18",
      "rule": "S",
-     "shared": 24,
-     "jaccard": 0.353,
-     "contain": 0.571
+     "shared": 40,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ]
   },
@@ -9922,9 +10093,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202408usv2:re2-q24",
      "rule": "R",
-     "shared": 18,
-     "jaccard": 0.173,
-     "contain": 0.3
+     "shared": 19,
+     "jaccard": 0.183,
+     "contain": 0.311
     }
    ]
   },
@@ -10185,16 +10356,41 @@ window.DEDUP_INDEX = {
     {
      "ref": "202606asiav2:re2-q26",
      "rule": "S",
-     "shared": 67,
-     "jaccard": 0.798,
-     "contain": 0.893
+     "shared": 66,
+     "jaccard": 0.795,
+     "contain": 0.892
+    }
+   ],
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0095",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.12,
+     "contain": 0.231
+    },
+    {
+     "ref": "bank-202608-salvage:q0130",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.117,
+     "contain": 0.221
     }
    ]
   },
   "202512usv2:re2-q26": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202512usv2:re2-q26"
+   "canonical": "202512usv2:re2-q26",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0162",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.099,
+     "contain": 0.2
+    }
+   ]
   },
   "202512usv2:re2-q27": {
    "section": "rw",
@@ -10540,7 +10736,17 @@ window.DEDUP_INDEX = {
   "202512usv2:ma2-q14": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202512usv2:ma2-q14"
+   "canonical": "202512usv2:ma2-q14",
+   "family": "fam:202512usv2:ma2-q14",
+   "skeleton": [
+    {
+     "ref": "202506asiav4:ma2-q3",
+     "rule": "S",
+     "shared": 20,
+     "jaccard": 0.556,
+     "contain": 0.714
+    }
+   ]
   },
   "202512usv2:ma2-q15": {
    "section": "math",
@@ -11494,14 +11700,14 @@ window.DEDUP_INDEX = {
     {
      "ref": "202408usv2:ma2-q15",
      "rule": "S",
-     "shared": 7,
-     "jaccard": 0.583,
-     "contain": 0.778
+     "shared": 6,
+     "jaccard": 0.545,
+     "contain": 0.75
     },
     {
      "ref": "202510usv3:ma1-q16",
      "rule": "S",
-     "shared": 9,
+     "shared": 8,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -11551,7 +11757,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202406intv1:ma2-q20",
      "rule": "S",
-     "shared": 29,
+     "shared": 28,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -11632,7 +11838,17 @@ window.DEDUP_INDEX = {
   "202506asiav4:ma2-q3": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202506asiav4:ma2-q3"
+   "canonical": "202506asiav4:ma2-q3",
+   "family": "fam:202512usv2:ma2-q14",
+   "skeleton": [
+    {
+     "ref": "202512usv2:ma2-q14",
+     "rule": "S",
+     "shared": 20,
+     "jaccard": 0.556,
+     "contain": 0.714
+    }
+   ]
   },
   "202506asiav4:ma2-q4": {
    "section": "math",
@@ -11677,9 +11893,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202510usv3:ma1-q20",
      "rule": "S",
-     "shared": 5,
-     "jaccard": 0.385,
-     "contain": 0.714
+     "shared": 7,
+     "jaccard": 0.778,
+     "contain": 1.0
     }
    ]
   },
@@ -11862,9 +12078,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202608usv0:re1-q3",
      "rule": "E2",
-     "shared": 53,
-     "jaccard": 0.726,
-     "contain": 0.841
+     "shared": 45,
+     "jaccard": 0.556,
+     "contain": 0.714
     }
    ],
    "keys": {
@@ -12011,9 +12227,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202606asiav2:re1-q12",
      "rule": "S",
-     "shared": 60,
-     "jaccard": 0.504,
-     "contain": 0.723
+     "shared": 59,
+     "jaccard": 0.492,
+     "contain": 0.702
     }
    ]
   },
@@ -12040,7 +12256,16 @@ window.DEDUP_INDEX = {
   "202608intv1:re1-q23": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202608intv1:re1-q23"
+   "canonical": "202608intv1:re1-q23",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0046",
+     "rule": "R",
+     "shared": 33,
+     "jaccard": 0.234,
+     "contain": 0.384
+    }
+   ]
   },
   "202608intv1:re1-q24": {
    "section": "rw",
@@ -12293,7 +12518,25 @@ window.DEDUP_INDEX = {
   "202608intv1:re2-q23": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202608intv1:re2-q23"
+   "canonical": "202608intv1:re2-q23",
+   "family": "fam:202608intv1:re2-q23",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0140",
+     "rule": "S+",
+     "shared": 24,
+     "jaccard": 0.231,
+     "contain": 0.375
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0140": "AGREE"
+   },
+   "ledger": {
+    "bank-202608-salvage:q0140": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ]
+   }
   },
   "202608intv1:re2-q24": {
    "section": "rw",
@@ -12311,6 +12554,13 @@ window.DEDUP_INDEX = {
      "shared": 38,
      "jaccard": 0.26,
      "contain": 0.427
+    },
+    {
+     "ref": "bank-202608-salvage:q0164",
+     "rule": "R",
+     "shared": 35,
+     "jaccard": 0.23,
+     "contain": 0.38
     }
    ]
   },
@@ -12349,12 +12599,30 @@ window.DEDUP_INDEX = {
   "202608intv1:ma1-q1": {
    "section": "math",
    "type": "spr",
-   "canonical": "202608intv1:ma1-q1"
+   "canonical": "202608intv1:ma1-q1",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0065",
+     "rule": "R",
+     "shared": 22,
+     "jaccard": 0.196,
+     "contain": 0.355
+    }
+   ]
   },
   "202608intv1:ma1-q2": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202608intv1:ma1-q2"
+   "canonical": "202608intv1:ma1-q2",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0005",
+     "rule": "R",
+     "shared": 22,
+     "jaccard": 0.244,
+     "contain": 0.423
+    }
+   ]
   },
   "202608intv1:ma1-q3": {
    "section": "math",
@@ -12700,9 +12968,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202608intv1:re1-q4",
      "rule": "E2",
-     "shared": 53,
-     "jaccard": 0.726,
-     "contain": 0.841
+     "shared": 45,
+     "jaccard": 0.556,
+     "contain": 0.714
     }
    ],
    "keys": {
@@ -13096,6 +13364,13 @@ window.DEDUP_INDEX = {
      "shared": 38,
      "jaccard": 0.26,
      "contain": 0.427
+    },
+    {
+     "ref": "bank-202608-salvage:q0164",
+     "rule": "R",
+     "shared": 33,
+     "jaccard": 0.223,
+     "contain": 0.371
     }
    ]
   },
@@ -13169,7 +13444,32 @@ window.DEDUP_INDEX = {
   "202608usv0:ma1-q4": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202608usv0:ma1-q4"
+   "canonical": "202608usv0:ma1-q4",
+   "family": "fam:202608usv0:ma1-q4",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0013",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0078",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "bank-202608-salvage:q0013": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ],
+    "bank-202608-salvage:q0078": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ]
+   }
   },
   "202608usv0:ma1-q5": {
    "section": "math",
@@ -13344,7 +13644,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202510usv3:ma1-q12",
      "rule": "S",
-     "shared": 8,
+     "shared": 7,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -13481,7 +13781,16 @@ window.DEDUP_INDEX = {
   "202408usv2:re1-q2": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202408usv2:re1-q2"
+   "canonical": "202408usv2:re1-q2",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0132",
+     "rule": "R",
+     "shared": 23,
+     "jaccard": 0.277,
+     "contain": 0.489
+    }
+   ]
   },
   "202408usv2:re1-q3": {
    "section": "rw",
@@ -13951,9 +14260,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202512usv2:re1-q24",
      "rule": "R",
-     "shared": 18,
-     "jaccard": 0.173,
-     "contain": 0.3
+     "shared": 19,
+     "jaccard": 0.183,
+     "contain": 0.311
     }
    ]
   },
@@ -14065,7 +14374,17 @@ window.DEDUP_INDEX = {
   "202408usv2:ma1-q8": {
    "section": "math",
    "type": "spr",
-   "canonical": "202408usv2:ma1-q8"
+   "canonical": "202408usv2:ma1-q8",
+   "family": "fam:202509asiav4:ma2-q10",
+   "skeleton": [
+    {
+     "ref": "202509asiav4:ma2-q10",
+     "rule": "S",
+     "shared": 12,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202408usv2:ma1-q9": {
    "section": "math",
@@ -14321,9 +14640,9 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma2-q13",
      "rule": "S",
-     "shared": 37,
-     "jaccard": 0.755,
-     "contain": 0.902
+     "shared": 41,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
@@ -14354,16 +14673,16 @@ window.DEDUP_INDEX = {
     {
      "ref": "202506asiav4:ma1-q11",
      "rule": "S",
-     "shared": 7,
-     "jaccard": 0.583,
-     "contain": 0.778
+     "shared": 6,
+     "jaccard": 0.545,
+     "contain": 0.75
     },
     {
      "ref": "202510usv3:ma1-q16",
      "rule": "S",
-     "shared": 7,
-     "jaccard": 0.583,
-     "contain": 0.778
+     "shared": 6,
+     "jaccard": 0.545,
+     "contain": 0.75
     }
    ],
    "ledger": {
@@ -15067,6 +15386,13 @@ window.DEDUP_INDEX = {
      "shared": 7,
      "jaccard": 0.583,
      "contain": 1.0
+    },
+    {
+     "ref": "202510usv3:ma1-q20",
+     "rule": "S",
+     "shared": 8,
+     "jaccard": 0.615,
+     "contain": 0.889
     }
    ]
   },
@@ -15231,7 +15557,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202506asiav2:ma2-q10",
      "rule": "S",
-     "shared": 56,
+     "shared": 51,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -15261,7 +15587,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202506asiav2:ma2-q14",
      "rule": "S",
-     "shared": 34,
+     "shared": 32,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -15370,14 +15696,14 @@ window.DEDUP_INDEX = {
     {
      "ref": "202503usv2:ma2-q20",
      "rule": "S",
-     "shared": 20,
-     "jaccard": 0.714,
-     "contain": 0.909
+     "shared": 19,
+     "jaccard": 0.704,
+     "contain": 0.905
     },
     {
      "ref": "202506asiav2:ma2-q22",
      "rule": "S",
-     "shared": 22,
+     "shared": 21,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -15988,7 +16314,17 @@ window.DEDUP_INDEX = {
   "202412asiav1:ma1-q9": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202412asiav1:ma1-q9"
+   "canonical": "202412asiav1:ma1-q9",
+   "family": "fam:202510usv3:ma1-q6",
+   "skeleton": [
+    {
+     "ref": "202510usv3:ma1-q6",
+     "rule": "S",
+     "shared": 9,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ]
   },
   "202412asiav1:ma1-q10": {
    "section": "math",
@@ -16835,10 +17171,17 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "202406intv1:ma1-q5",
-   "family": "fam:202509asiav2:ma2-q3",
+   "family": "fam:202509asiav4:ma2-q3",
    "skeleton": [
     {
      "ref": "202509asiav2:ma2-q3",
+     "rule": "S",
+     "shared": 15,
+     "jaccard": 0.429,
+     "contain": 0.625
+    },
+    {
+     "ref": "202509asiav4:ma2-q3",
      "rule": "S",
      "shared": 15,
      "jaccard": 0.429,
@@ -17153,7 +17496,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202510usv3:ma2-q19",
      "rule": "S",
-     "shared": 22,
+     "shared": 20,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -17193,7 +17536,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202506asiav4:ma1-q16",
      "rule": "S",
-     "shared": 29,
+     "shared": 28,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -17243,6 +17586,1899 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "bank-david-core:q0001",
+   "retired": false
+  },
+  "bank-202608-salvage:q0001": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0001",
+   "retired": false
+  },
+  "bank-202608-salvage:q0002": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0002",
+   "retired": false
+  },
+  "bank-202608-salvage:q0003": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0003",
+   "retired": false
+  },
+  "bank-202608-salvage:q0004": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0004",
+   "family": "fam:bank-202608-salvage:q0004",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0081",
+     "rule": "S",
+     "shared": 19,
+     "jaccard": 0.679,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0005": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0005",
+   "related": [
+    {
+     "ref": "202608intv1:ma1-q2",
+     "rule": "R",
+     "shared": 22,
+     "jaccard": 0.244,
+     "contain": 0.423
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0006": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0006",
+   "retired": false
+  },
+  "bank-202608-salvage:q0007": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0007",
+   "family": "fam:bank-202608-salvage:q0007",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0068",
+     "rule": "S",
+     "shared": 81,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0008": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0008",
+   "retired": false
+  },
+  "bank-202608-salvage:q0009": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0009",
+   "retired": false
+  },
+  "bank-202608-salvage:q0010": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0010",
+   "family": "fam:bank-202608-salvage:q0010",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0181",
+     "rule": "S",
+     "shared": 20,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0011": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0011",
+   "retired": false
+  },
+  "bank-202608-salvage:q0012": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0012",
+   "family": "fam:bank-202608-salvage:q0012",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0112",
+     "rule": "S",
+     "shared": 12,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0013": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0013",
+   "family": "fam:202608usv0:ma1-q4",
+   "skeleton": [
+    {
+     "ref": "202608usv0:ma1-q4",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0078",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202608usv0:ma1-q4": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ],
+    "bank-202608-salvage:q0078": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ]
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0014": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0014",
+   "retired": false
+  },
+  "bank-202608-salvage:q0015": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0015",
+   "retired": false
+  },
+  "bank-202608-salvage:q0016": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0016",
+   "retired": false
+  },
+  "bank-202608-salvage:q0017": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0017",
+   "family": "fam:bank-202608-salvage:q0017",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0144",
+     "rule": "S",
+     "shared": 4,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0144": "AGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0018": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0018",
+   "retired": false
+  },
+  "bank-202608-salvage:q0019": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0019",
+   "retired": false
+  },
+  "bank-202608-salvage:q0020": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0020",
+   "retired": false
+  },
+  "bank-202608-salvage:q0021": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0021",
+   "retired": false
+  },
+  "bank-202608-salvage:q0022": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0022",
+   "retired": false
+  },
+  "bank-202608-salvage:q0023": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0023",
+   "family": "fam:bank-202608-salvage:q0023",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0146",
+     "rule": "S",
+     "shared": 25,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0024": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0024",
+   "family": "fam:bank-202608-salvage:q0024",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0122",
+     "rule": "S",
+     "shared": 103,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0025": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0025",
+   "retired": false
+  },
+  "bank-202608-salvage:q0026": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0026",
+   "retired": false
+  },
+  "bank-202608-salvage:q0027": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0027",
+   "retired": false
+  },
+  "bank-202608-salvage:q0028": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0028",
+   "retired": false
+  },
+  "bank-202608-salvage:q0029": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0029",
+   "family": "fam:bank-202608-salvage:q0029",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0079",
+     "rule": "S",
+     "shared": 14,
+     "jaccard": 0.412,
+     "contain": 0.609
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0030": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0030",
+   "retired": false
+  },
+  "bank-202608-salvage:q0031": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0031",
+   "retired": false
+  },
+  "bank-202608-salvage:q0032": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0032",
+   "retired": false
+  },
+  "bank-202608-salvage:q0033": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0033",
+   "retired": false
+  },
+  "bank-202608-salvage:q0034": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0034",
+   "retired": false
+  },
+  "bank-202608-salvage:q0035": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0035",
+   "retired": false
+  },
+  "bank-202608-salvage:q0036": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0036",
+   "retired": false
+  },
+  "bank-202608-salvage:q0037": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0037",
+   "retired": false
+  },
+  "bank-202608-salvage:q0038": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0038",
+   "family": "fam:bank-202608-salvage:q0038",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0104",
+     "rule": "S",
+     "shared": 18,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0039": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0039",
+   "retired": false
+  },
+  "bank-202608-salvage:q0040": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0040",
+   "retired": false
+  },
+  "bank-202608-salvage:q0041": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0041",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0131",
+     "rule": "R",
+     "shared": 25,
+     "jaccard": 0.195,
+     "contain": 0.333
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0042": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0042",
+   "retired": false
+  },
+  "bank-202608-salvage:q0043": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0043",
+   "family": "fam:bank-202608-salvage:q0043",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0097",
+     "rule": "S",
+     "shared": 79,
+     "jaccard": 0.622,
+     "contain": 0.767
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0044": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0044",
+   "family": "fam:bank-202608-salvage:q0044",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0137",
+     "rule": "S",
+     "shared": 33,
+     "jaccard": 0.355,
+     "contain": 0.825
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0137": "AGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0045": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0045",
+   "family": "fam:bank-202608-salvage:q0045",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0135",
+     "rule": "S",
+     "shared": 81,
+     "jaccard": 0.44,
+     "contain": 0.618
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0046": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0046",
+   "related": [
+    {
+     "ref": "202608intv1:re1-q23",
+     "rule": "R",
+     "shared": 33,
+     "jaccard": 0.234,
+     "contain": 0.384
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0047": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0047",
+   "family": "fam:bank-202608-salvage:q0047",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0090",
+     "rule": "S",
+     "shared": 47,
+     "jaccard": 0.922,
+     "contain": 0.959
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0048": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0048",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0160",
+     "rule": "R",
+     "shared": 30,
+     "jaccard": 0.286,
+     "contain": 0.484
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0049": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0049",
+   "retired": false
+  },
+  "bank-202608-salvage:q0050": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0050",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0095",
+     "rule": "R",
+     "shared": 19,
+     "jaccard": 0.168,
+     "contain": 0.292
+    },
+    {
+     "ref": "bank-202608-salvage:q0130",
+     "rule": "R",
+     "shared": 18,
+     "jaccard": 0.154,
+     "contain": 0.269
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0051": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0051",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0094",
+     "rule": "R",
+     "shared": 36,
+     "jaccard": 0.257,
+     "contain": 0.414
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0052": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0052",
+   "related": [
+    {
+     "ref": "202503usv1:re1-q27",
+     "rule": "R",
+     "shared": 34,
+     "jaccard": 0.23,
+     "contain": 0.391
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0053": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0053",
+   "retired": false
+  },
+  "bank-202608-salvage:q0054": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0054",
+   "family": "fam:bank-202608-salvage:q0054",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0141",
+     "rule": "S",
+     "shared": 53,
+     "jaccard": 0.431,
+     "contain": 0.609
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0141": "AGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0055": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0055",
+   "retired": false
+  },
+  "bank-202608-salvage:q0056": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0056",
+   "family": "fam:bank-202608-salvage:q0056",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0074",
+     "rule": "S",
+     "shared": 23,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0057": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0057",
+   "retired": false
+  },
+  "bank-202608-salvage:q0058": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0058",
+   "retired": false
+  },
+  "bank-202608-salvage:q0059": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0059",
+   "retired": false
+  },
+  "bank-202608-salvage:q0060": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0060",
+   "retired": false
+  },
+  "bank-202608-salvage:q0061": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0061",
+   "retired": false
+  },
+  "bank-202608-salvage:q0062": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0062",
+   "retired": false
+  },
+  "bank-202608-salvage:q0063": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0063",
+   "retired": false
+  },
+  "bank-202608-salvage:q0064": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0064",
+   "retired": false
+  },
+  "bank-202608-salvage:q0065": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0065",
+   "related": [
+    {
+     "ref": "202608intv1:ma1-q1",
+     "rule": "R",
+     "shared": 22,
+     "jaccard": 0.196,
+     "contain": 0.355
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0066": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0066",
+   "retired": false
+  },
+  "bank-202608-salvage:q0067": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0067",
+   "retired": false
+  },
+  "bank-202608-salvage:q0068": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0068",
+   "family": "fam:bank-202608-salvage:q0007",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0007",
+     "rule": "S",
+     "shared": 81,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0069": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0069",
+   "family": "fam:bank-202608-salvage:q0069",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0087",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.357,
+     "contain": 0.556
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0070": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0070",
+   "retired": false
+  },
+  "bank-202608-salvage:q0071": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0071",
+   "retired": false
+  },
+  "bank-202608-salvage:q0072": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0072",
+   "family": "fam:bank-202608-salvage:q0072",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0114",
+     "rule": "S",
+     "shared": 25,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0073": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0073",
+   "retired": false
+  },
+  "bank-202608-salvage:q0074": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0074",
+   "family": "fam:bank-202608-salvage:q0056",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0056",
+     "rule": "S",
+     "shared": 23,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0075": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0075",
+   "family": "fam:bank-202608-salvage:q0075",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0145",
+     "rule": "S",
+     "shared": 59,
+     "jaccard": 0.855,
+     "contain": 0.922
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0076": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0076",
+   "retired": false
+  },
+  "bank-202608-salvage:q0077": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0077",
+   "family": "fam:bank-202608-salvage:q0077",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0156",
+     "rule": "S",
+     "shared": 17,
+     "jaccard": 0.378,
+     "contain": 0.548
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0156": "DISAGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0078": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0078",
+   "family": "fam:202608usv0:ma1-q4",
+   "skeleton": [
+    {
+     "ref": "202608usv0:ma1-q4",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0013",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202608usv0:ma1-q4": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ],
+    "bank-202608-salvage:q0013": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ]
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0079": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0079",
+   "family": "fam:bank-202608-salvage:q0029",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0029",
+     "rule": "S",
+     "shared": 14,
+     "jaccard": 0.412,
+     "contain": 0.609
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0080": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0080",
+   "retired": false
+  },
+  "bank-202608-salvage:q0081": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0081",
+   "family": "fam:bank-202608-salvage:q0004",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0004",
+     "rule": "S",
+     "shared": 19,
+     "jaccard": 0.679,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0082": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0082",
+   "retired": false
+  },
+  "bank-202608-salvage:q0083": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0083",
+   "retired": false
+  },
+  "bank-202608-salvage:q0084": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0084",
+   "retired": false
+  },
+  "bank-202608-salvage:q0085": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0085",
+   "retired": false
+  },
+  "bank-202608-salvage:q0086": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0086",
+   "retired": false
+  },
+  "bank-202608-salvage:q0087": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0087",
+   "family": "fam:bank-202608-salvage:q0069",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0069",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.357,
+     "contain": 0.556
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0088": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0088",
+   "family": "fam:bank-202608-salvage:q0088",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0157",
+     "rule": "S",
+     "shared": 23,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0089": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0089",
+   "retired": false
+  },
+  "bank-202608-salvage:q0090": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0090",
+   "family": "fam:bank-202608-salvage:q0047",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0047",
+     "rule": "S",
+     "shared": 47,
+     "jaccard": 0.922,
+     "contain": 0.959
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0091": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0091",
+   "retired": false
+  },
+  "bank-202608-salvage:q0092": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0092",
+   "retired": false
+  },
+  "bank-202608-salvage:q0093": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0093",
+   "retired": false
+  },
+  "bank-202608-salvage:q0094": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0094",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0051",
+     "rule": "R",
+     "shared": 36,
+     "jaccard": 0.257,
+     "contain": 0.414
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0095": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0095",
+   "family": "fam:bank-202608-salvage:q0095",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0130",
+     "rule": "S",
+     "shared": 41,
+     "jaccard": 0.446,
+     "contain": 0.631
+    }
+   ],
+   "related": [
+    {
+     "ref": "202512usv2:re2-q25",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.12,
+     "contain": 0.231
+    },
+    {
+     "ref": "202606asiav2:re2-q26",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.121,
+     "contain": 0.231
+    },
+    {
+     "ref": "bank-202608-salvage:q0050",
+     "rule": "R",
+     "shared": 19,
+     "jaccard": 0.168,
+     "contain": 0.292
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0096": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0096",
+   "retired": false
+  },
+  "bank-202608-salvage:q0097": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0097",
+   "family": "fam:bank-202608-salvage:q0043",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0043",
+     "rule": "S",
+     "shared": 79,
+     "jaccard": 0.622,
+     "contain": 0.767
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0098": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0098",
+   "retired": false
+  },
+  "bank-202608-salvage:q0099": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0099",
+   "retired": false
+  },
+  "bank-202608-salvage:q0100": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0100",
+   "retired": false
+  },
+  "bank-202608-salvage:q0101": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0101",
+   "retired": false
+  },
+  "bank-202608-salvage:q0102": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0102",
+   "retired": false
+  },
+  "bank-202608-salvage:q0103": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0103",
+   "retired": false
+  },
+  "bank-202608-salvage:q0104": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0104",
+   "family": "fam:bank-202608-salvage:q0038",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0038",
+     "rule": "S",
+     "shared": 18,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0105": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0105",
+   "retired": false
+  },
+  "bank-202608-salvage:q0106": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0106",
+   "retired": false
+  },
+  "bank-202608-salvage:q0107": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0107",
+   "retired": false
+  },
+  "bank-202608-salvage:q0108": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0108",
+   "retired": false
+  },
+  "bank-202608-salvage:q0109": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0109",
+   "retired": false
+  },
+  "bank-202608-salvage:q0110": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0110",
+   "retired": false
+  },
+  "bank-202608-salvage:q0111": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0111",
+   "retired": false
+  },
+  "bank-202608-salvage:q0112": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0112",
+   "family": "fam:bank-202608-salvage:q0012",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0012",
+     "rule": "S",
+     "shared": 12,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0113": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0113",
+   "family": "fam:bank-202608-salvage:q0113",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0155",
+     "rule": "S",
+     "shared": 21,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0155": "DISAGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0114": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0114",
+   "family": "fam:bank-202608-salvage:q0072",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0072",
+     "rule": "S",
+     "shared": 25,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0115": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0115",
+   "retired": false
+  },
+  "bank-202608-salvage:q0116": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0116",
+   "retired": false
+  },
+  "bank-202608-salvage:q0117": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0117",
+   "retired": false
+  },
+  "bank-202608-salvage:q0118": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0118",
+   "retired": false
+  },
+  "bank-202608-salvage:q0119": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0119",
+   "retired": false
+  },
+  "bank-202608-salvage:q0120": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0120",
+   "retired": false
+  },
+  "bank-202608-salvage:q0121": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0121",
+   "retired": false
+  },
+  "bank-202608-salvage:q0122": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0122",
+   "family": "fam:bank-202608-salvage:q0024",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0024",
+     "rule": "S",
+     "shared": 103,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0123": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0123",
+   "retired": false
+  },
+  "bank-202608-salvage:q0124": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0124",
+   "retired": false
+  },
+  "bank-202608-salvage:q0125": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0125",
+   "retired": false
+  },
+  "bank-202608-salvage:q0126": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0126",
+   "retired": false
+  },
+  "bank-202608-salvage:q0127": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0127",
+   "retired": false
+  },
+  "bank-202608-salvage:q0128": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0128",
+   "retired": false
+  },
+  "bank-202608-salvage:q0129": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0129",
+   "retired": false
+  },
+  "bank-202608-salvage:q0130": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0130",
+   "family": "fam:bank-202608-salvage:q0095",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0095",
+     "rule": "S",
+     "shared": 41,
+     "jaccard": 0.446,
+     "contain": 0.631
+    }
+   ],
+   "related": [
+    {
+     "ref": "202512usv2:re2-q25",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.117,
+     "contain": 0.221
+    },
+    {
+     "ref": "202606asiav2:re2-q26",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.118,
+     "contain": 0.221
+    },
+    {
+     "ref": "bank-202608-salvage:q0050",
+     "rule": "R",
+     "shared": 18,
+     "jaccard": 0.154,
+     "contain": 0.269
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0131": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0131",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0041",
+     "rule": "R",
+     "shared": 25,
+     "jaccard": 0.195,
+     "contain": 0.333
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0132": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0132",
+   "related": [
+    {
+     "ref": "202408usv2:re1-q2",
+     "rule": "R",
+     "shared": 23,
+     "jaccard": 0.277,
+     "contain": 0.489
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0133": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0133",
+   "retired": false
+  },
+  "bank-202608-salvage:q0134": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0134",
+   "retired": false
+  },
+  "bank-202608-salvage:q0135": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0135",
+   "family": "fam:bank-202608-salvage:q0045",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0045",
+     "rule": "S",
+     "shared": 81,
+     "jaccard": 0.44,
+     "contain": 0.618
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0136": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0136",
+   "retired": false
+  },
+  "bank-202608-salvage:q0137": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0137",
+   "family": "fam:bank-202608-salvage:q0044",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0044",
+     "rule": "S",
+     "shared": 33,
+     "jaccard": 0.355,
+     "contain": 0.825
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0044": "AGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0138": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0138",
+   "retired": false
+  },
+  "bank-202608-salvage:q0139": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0139",
+   "retired": false
+  },
+  "bank-202608-salvage:q0140": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0140",
+   "family": "fam:202608intv1:re2-q23",
+   "skeleton": [
+    {
+     "ref": "202608intv1:re2-q23",
+     "rule": "S+",
+     "shared": 24,
+     "jaccard": 0.231,
+     "contain": 0.375
+    }
+   ],
+   "keys": {
+    "202608intv1:re2-q23": "AGREE"
+   },
+   "ledger": {
+    "202608intv1:re2-q23": [
+     "skeleton-adjudication (David, 2026-09-12)"
+    ]
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0141": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0141",
+   "family": "fam:bank-202608-salvage:q0054",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0054",
+     "rule": "S",
+     "shared": 53,
+     "jaccard": 0.431,
+     "contain": 0.609
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0054": "AGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0142": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0142",
+   "retired": false
+  },
+  "bank-202608-salvage:q0143": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0143",
+   "retired": false
+  },
+  "bank-202608-salvage:q0144": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0144",
+   "family": "fam:bank-202608-salvage:q0017",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0017",
+     "rule": "S",
+     "shared": 4,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0017": "AGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0145": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0145",
+   "family": "fam:bank-202608-salvage:q0075",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0075",
+     "rule": "S",
+     "shared": 59,
+     "jaccard": 0.855,
+     "contain": 0.922
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0146": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0146",
+   "family": "fam:bank-202608-salvage:q0023",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0023",
+     "rule": "S",
+     "shared": 25,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0147": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0147",
+   "retired": false
+  },
+  "bank-202608-salvage:q0148": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0148",
+   "retired": false
+  },
+  "bank-202608-salvage:q0149": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0149",
+   "retired": false
+  },
+  "bank-202608-salvage:q0150": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0150",
+   "retired": false
+  },
+  "bank-202608-salvage:q0151": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0151",
+   "retired": false
+  },
+  "bank-202608-salvage:q0152": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0152",
+   "retired": false
+  },
+  "bank-202608-salvage:q0153": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0153",
+   "retired": false
+  },
+  "bank-202608-salvage:q0154": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0154",
+   "retired": false
+  },
+  "bank-202608-salvage:q0155": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0155",
+   "family": "fam:bank-202608-salvage:q0113",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0113",
+     "rule": "S",
+     "shared": 21,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0113": "DISAGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0156": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0156",
+   "family": "fam:bank-202608-salvage:q0077",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0077",
+     "rule": "S",
+     "shared": 17,
+     "jaccard": 0.378,
+     "contain": 0.548
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0077": "DISAGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0157": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0157",
+   "family": "fam:bank-202608-salvage:q0088",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0088",
+     "rule": "S",
+     "shared": 23,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0158": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0158",
+   "family": "fam:bank-202608-salvage:q0158",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0185",
+     "rule": "S",
+     "shared": 29,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0159": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0159",
+   "retired": false
+  },
+  "bank-202608-salvage:q0160": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0160",
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0048",
+     "rule": "R",
+     "shared": 30,
+     "jaccard": 0.286,
+     "contain": 0.484
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0161": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0161",
+   "retired": false
+  },
+  "bank-202608-salvage:q0162": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0162",
+   "related": [
+    {
+     "ref": "202508asiav1:re2-q25",
+     "rule": "R",
+     "shared": 29,
+     "jaccard": 0.176,
+     "contain": 0.319
+    },
+    {
+     "ref": "202512usv2:re2-q26",
+     "rule": "R",
+     "shared": 15,
+     "jaccard": 0.099,
+     "contain": 0.2
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0163": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0163",
+   "retired": false
+  },
+  "bank-202608-salvage:q0164": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0164",
+   "related": [
+    {
+     "ref": "202608intv1:re2-q25",
+     "rule": "R",
+     "shared": 35,
+     "jaccard": 0.23,
+     "contain": 0.38
+    },
+    {
+     "ref": "202608usv0:re2-q23",
+     "rule": "R",
+     "shared": 33,
+     "jaccard": 0.223,
+     "contain": 0.371
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0165": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0165",
+   "retired": false
+  },
+  "bank-202608-salvage:q0166": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0166",
+   "retired": false
+  },
+  "bank-202608-salvage:q0167": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0167",
+   "retired": false
+  },
+  "bank-202608-salvage:q0168": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0168",
+   "retired": false
+  },
+  "bank-202608-salvage:q0169": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0169",
+   "retired": false
+  },
+  "bank-202608-salvage:q0170": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0170",
+   "retired": false
+  },
+  "bank-202608-salvage:q0171": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0171",
+   "retired": false
+  },
+  "bank-202608-salvage:q0172": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0172",
+   "retired": false
+  },
+  "bank-202608-salvage:q0173": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0173",
+   "retired": false
+  },
+  "bank-202608-salvage:q0174": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0174",
+   "family": "fam:bank-202608-salvage:q0174",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0177",
+     "rule": "S",
+     "shared": 47,
+     "jaccard": 0.333,
+     "contain": 0.522
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0175": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0175",
+   "retired": false
+  },
+  "bank-202608-salvage:q0176": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0176",
+   "retired": false
+  },
+  "bank-202608-salvage:q0177": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0177",
+   "family": "fam:bank-202608-salvage:q0174",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0174",
+     "rule": "S",
+     "shared": 47,
+     "jaccard": 0.333,
+     "contain": 0.522
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0178": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0178",
+   "retired": false
+  },
+  "bank-202608-salvage:q0179": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0179",
+   "retired": false
+  },
+  "bank-202608-salvage:q0180": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0180",
+   "retired": false
+  },
+  "bank-202608-salvage:q0181": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0181",
+   "family": "fam:bank-202608-salvage:q0010",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0010",
+     "rule": "S",
+     "shared": 20,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0182": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0182",
+   "retired": false
+  },
+  "bank-202608-salvage:q0183": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0183",
+   "retired": false
+  },
+  "bank-202608-salvage:q0184": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0184",
+   "retired": false
+  },
+  "bank-202608-salvage:q0185": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "bank-202608-salvage:q0185",
+   "family": "fam:bank-202608-salvage:q0158",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0158",
+     "rule": "S",
+     "shared": 29,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "retired": false
+  },
+  "bank-202608-salvage:q0186": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0186",
+   "retired": false
+  },
+  "bank-202608-salvage:q0187": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0187",
    "retired": false
   }
  },
@@ -18577,21 +20813,6 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
-  "fam:202509asiav2:ma2-q3": {
-   "canonical": "202509asiav2:ma2-q3",
-   "members": [
-    "202509asiav2:ma2-q3",
-    "202406intv1:ma1-q5"
-   ],
-   "exactClasses": [
-    [
-     "202509asiav2:ma2-q3"
-    ],
-    [
-     "202406intv1:ma1-q5"
-    ]
-   ]
-  },
   "fam:202509asiav4:ma1-q10": {
    "canonical": "202509asiav4:ma1-q10",
    "members": [
@@ -18653,6 +20874,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202509asiav2:ma2-q1"
+    ]
+   ]
+  },
+  "fam:202509asiav4:ma2-q10": {
+   "canonical": "202509asiav4:ma2-q10",
+   "members": [
+    "202509asiav4:ma2-q10",
+    "202408usv2:ma1-q8"
+   ],
+   "exactClasses": [
+    [
+     "202509asiav4:ma2-q10"
+    ],
+    [
+     "202408usv2:ma1-q8"
     ]
    ]
   },
@@ -18799,6 +21035,25 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202509asiav4:ma2-q3": {
+   "canonical": "202509asiav4:ma2-q3",
+   "members": [
+    "202509asiav4:ma2-q3",
+    "202509asiav2:ma2-q3",
+    "202406intv1:ma1-q5"
+   ],
+   "exactClasses": [
+    [
+     "202509asiav4:ma2-q3"
+    ],
+    [
+     "202509asiav2:ma2-q3"
+    ],
+    [
+     "202406intv1:ma1-q5"
+    ]
+   ]
+  },
   "fam:202509asiav4:ma2-q4": {
    "canonical": "202509asiav4:ma2-q4",
    "members": [
@@ -18811,6 +21066,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202509asiav2:ma2-q4"
+    ]
+   ]
+  },
+  "fam:202509asiav4:ma2-q5": {
+   "canonical": "202509asiav4:ma2-q5",
+   "members": [
+    "202509asiav4:ma2-q5",
+    "202509asiav2:ma2-q5"
+   ],
+   "exactClasses": [
+    [
+     "202509asiav4:ma2-q5"
+    ],
+    [
+     "202509asiav2:ma2-q5"
     ]
    ]
   },
@@ -18843,6 +21113,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202506asiav4:ma2-q1"
+    ]
+   ]
+  },
+  "fam:202509asiav4:ma2-q9": {
+   "canonical": "202509asiav4:ma2-q9",
+   "members": [
+    "202509asiav4:ma2-q9",
+    "202509asiav2:ma2-q9"
+   ],
+   "exactClasses": [
+    [
+     "202509asiav4:ma2-q9"
+    ],
+    [
+     "202509asiav2:ma2-q9"
     ]
    ]
   },
@@ -18981,6 +21266,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202506usv1:ma1-q10"
+    ]
+   ]
+  },
+  "fam:202510usv3:ma1-q6": {
+   "canonical": "202510usv3:ma1-q6",
+   "members": [
+    "202510usv3:ma1-q6",
+    "202412asiav1:ma1-q9"
+   ],
+   "exactClasses": [
+    [
+     "202510usv3:ma1-q6"
+    ],
+    [
+     "202412asiav1:ma1-q9"
     ]
    ]
   },
@@ -19300,6 +21600,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202512usv2:ma2-q14": {
+   "canonical": "202512usv2:ma2-q14",
+   "members": [
+    "202512usv2:ma2-q14",
+    "202506asiav4:ma2-q3"
+   ],
+   "exactClasses": [
+    [
+     "202512usv2:ma2-q14"
+    ],
+    [
+     "202506asiav4:ma2-q3"
+    ]
+   ]
+  },
   "fam:202512usv2:ma2-q15": {
    "canonical": "202512usv2:ma2-q15",
    "members": [
@@ -19453,6 +21768,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202508asiav1:ma1-q12"
+    ]
+   ]
+  },
+  "fam:202603asiav1:ma1-q16": {
+   "canonical": "202603asiav1:ma1-q16",
+   "members": [
+    "202603asiav1:ma1-q16",
+    "202508asiav1:ma1-q13"
+   ],
+   "exactClasses": [
+    [
+     "202603asiav1:ma1-q16"
+    ],
+    [
+     "202508asiav1:ma1-q13"
     ]
    ]
   },
@@ -20202,6 +22532,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202608intv1:re2-q23": {
+   "canonical": "202608intv1:re2-q23",
+   "members": [
+    "202608intv1:re2-q23",
+    "bank-202608-salvage:q0140"
+   ],
+   "exactClasses": [
+    [
+     "202608intv1:re2-q23"
+    ],
+    [
+     "bank-202608-salvage:q0140"
+    ]
+   ]
+  },
   "fam:202608intv1:re2-q27": {
    "canonical": "202608intv1:re2-q27",
    "members": [
@@ -20246,6 +22591,385 @@ window.DEDUP_INDEX = {
     ],
     [
      "202406intv1:ma1-q3"
+    ]
+   ]
+  },
+  "fam:202608usv0:ma1-q4": {
+   "canonical": "202608usv0:ma1-q4",
+   "members": [
+    "202608usv0:ma1-q4",
+    "bank-202608-salvage:q0013",
+    "bank-202608-salvage:q0078"
+   ],
+   "exactClasses": [
+    [
+     "202608usv0:ma1-q4"
+    ],
+    [
+     "bank-202608-salvage:q0013"
+    ],
+    [
+     "bank-202608-salvage:q0078"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0004": {
+   "canonical": "bank-202608-salvage:q0004",
+   "members": [
+    "bank-202608-salvage:q0004",
+    "bank-202608-salvage:q0081"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0004"
+    ],
+    [
+     "bank-202608-salvage:q0081"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0007": {
+   "canonical": "bank-202608-salvage:q0007",
+   "members": [
+    "bank-202608-salvage:q0007",
+    "bank-202608-salvage:q0068"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0007"
+    ],
+    [
+     "bank-202608-salvage:q0068"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0010": {
+   "canonical": "bank-202608-salvage:q0010",
+   "members": [
+    "bank-202608-salvage:q0010",
+    "bank-202608-salvage:q0181"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0010"
+    ],
+    [
+     "bank-202608-salvage:q0181"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0012": {
+   "canonical": "bank-202608-salvage:q0012",
+   "members": [
+    "bank-202608-salvage:q0012",
+    "bank-202608-salvage:q0112"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0012"
+    ],
+    [
+     "bank-202608-salvage:q0112"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0017": {
+   "canonical": "bank-202608-salvage:q0017",
+   "members": [
+    "bank-202608-salvage:q0017",
+    "bank-202608-salvage:q0144"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0017"
+    ],
+    [
+     "bank-202608-salvage:q0144"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0023": {
+   "canonical": "bank-202608-salvage:q0023",
+   "members": [
+    "bank-202608-salvage:q0023",
+    "bank-202608-salvage:q0146"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0023"
+    ],
+    [
+     "bank-202608-salvage:q0146"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0024": {
+   "canonical": "bank-202608-salvage:q0024",
+   "members": [
+    "bank-202608-salvage:q0024",
+    "bank-202608-salvage:q0122"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0024"
+    ],
+    [
+     "bank-202608-salvage:q0122"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0029": {
+   "canonical": "bank-202608-salvage:q0029",
+   "members": [
+    "bank-202608-salvage:q0029",
+    "bank-202608-salvage:q0079"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0029"
+    ],
+    [
+     "bank-202608-salvage:q0079"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0038": {
+   "canonical": "bank-202608-salvage:q0038",
+   "members": [
+    "bank-202608-salvage:q0038",
+    "bank-202608-salvage:q0104"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0038"
+    ],
+    [
+     "bank-202608-salvage:q0104"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0043": {
+   "canonical": "bank-202608-salvage:q0043",
+   "members": [
+    "bank-202608-salvage:q0043",
+    "bank-202608-salvage:q0097"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0043"
+    ],
+    [
+     "bank-202608-salvage:q0097"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0044": {
+   "canonical": "bank-202608-salvage:q0044",
+   "members": [
+    "bank-202608-salvage:q0044",
+    "bank-202608-salvage:q0137"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0044"
+    ],
+    [
+     "bank-202608-salvage:q0137"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0045": {
+   "canonical": "bank-202608-salvage:q0045",
+   "members": [
+    "bank-202608-salvage:q0045",
+    "bank-202608-salvage:q0135"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0045"
+    ],
+    [
+     "bank-202608-salvage:q0135"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0047": {
+   "canonical": "bank-202608-salvage:q0047",
+   "members": [
+    "bank-202608-salvage:q0047",
+    "bank-202608-salvage:q0090"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0047"
+    ],
+    [
+     "bank-202608-salvage:q0090"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0054": {
+   "canonical": "bank-202608-salvage:q0054",
+   "members": [
+    "bank-202608-salvage:q0054",
+    "bank-202608-salvage:q0141"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0054"
+    ],
+    [
+     "bank-202608-salvage:q0141"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0056": {
+   "canonical": "bank-202608-salvage:q0056",
+   "members": [
+    "bank-202608-salvage:q0056",
+    "bank-202608-salvage:q0074"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0056"
+    ],
+    [
+     "bank-202608-salvage:q0074"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0069": {
+   "canonical": "bank-202608-salvage:q0069",
+   "members": [
+    "bank-202608-salvage:q0069",
+    "bank-202608-salvage:q0087"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0069"
+    ],
+    [
+     "bank-202608-salvage:q0087"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0072": {
+   "canonical": "bank-202608-salvage:q0072",
+   "members": [
+    "bank-202608-salvage:q0072",
+    "bank-202608-salvage:q0114"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0072"
+    ],
+    [
+     "bank-202608-salvage:q0114"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0075": {
+   "canonical": "bank-202608-salvage:q0075",
+   "members": [
+    "bank-202608-salvage:q0075",
+    "bank-202608-salvage:q0145"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0075"
+    ],
+    [
+     "bank-202608-salvage:q0145"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0077": {
+   "canonical": "bank-202608-salvage:q0077",
+   "members": [
+    "bank-202608-salvage:q0077",
+    "bank-202608-salvage:q0156"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0077"
+    ],
+    [
+     "bank-202608-salvage:q0156"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0088": {
+   "canonical": "bank-202608-salvage:q0088",
+   "members": [
+    "bank-202608-salvage:q0088",
+    "bank-202608-salvage:q0157"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0088"
+    ],
+    [
+     "bank-202608-salvage:q0157"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0095": {
+   "canonical": "bank-202608-salvage:q0095",
+   "members": [
+    "bank-202608-salvage:q0095",
+    "bank-202608-salvage:q0130"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0095"
+    ],
+    [
+     "bank-202608-salvage:q0130"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0113": {
+   "canonical": "bank-202608-salvage:q0113",
+   "members": [
+    "bank-202608-salvage:q0113",
+    "bank-202608-salvage:q0155"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0113"
+    ],
+    [
+     "bank-202608-salvage:q0155"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0158": {
+   "canonical": "bank-202608-salvage:q0158",
+   "members": [
+    "bank-202608-salvage:q0158",
+    "bank-202608-salvage:q0185"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0158"
+    ],
+    [
+     "bank-202608-salvage:q0185"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0174": {
+   "canonical": "bank-202608-salvage:q0174",
+   "members": [
+    "bank-202608-salvage:q0174",
+    "bank-202608-salvage:q0177"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0174"
+    ],
+    [
+     "bank-202608-salvage:q0177"
     ]
    ]
   }
