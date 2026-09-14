@@ -6,8 +6,8 @@
    (containerType distinguishes them). */
 window.BANK_INDEX = {
  "indexVersion": 1,
- "questionCount": 214,
- "activeCount": 188,
+ "questionCount": 244,
+ "activeCount": 187,
  "entries": [
   {
    "ref": "bank-202608-salvage:q0001",
@@ -1295,8 +1295,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:m2-q4"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0214",
    "stemPreview": "The scatterplot shows the relationship between two variables, x and y. Which of…"
   },
   {
@@ -1610,8 +1610,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:m1-q14"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0215",
    "stemPreview": "In right triangle PQR, angle R is a right angle, PR = 36, and sin Q = 1/2. What…"
   },
   {
@@ -2045,8 +2045,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:rw2-q23"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0216",
    "stemPreview": "Highly Traveled Commercial Airline Routes in 2017–18 Location Distance 2018 201…"
   },
   {
@@ -2060,8 +2060,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:rw2-q24"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0217",
    "stemPreview": "Examples of Hoards Found in Scotland and Wales Hoard name Date of contents Year…"
   },
   {
@@ -2210,8 +2210,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m1-q18"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0218",
    "stemPreview": "The graph shows the height above ground, in meters, of a ball x seconds after t…"
   },
   {
@@ -2510,8 +2510,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q11"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0219",
    "stemPreview": "Which of the following is an equation of the resulting graph?"
   },
   {
@@ -2525,8 +2525,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:rw1-q19"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0220",
    "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
   },
   {
@@ -2540,8 +2540,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:rw2-q1"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0221",
    "stemPreview": "Which choice completes the text with the most logical and precise word or phras…"
   },
   {
@@ -2555,8 +2555,8 @@ window.BANK_INDEX = {
     "src:202608asiav2:m1-q9"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0222",
    "stemPreview": "g = 12-(x)/(23) The equation shown gives the estimated amount of gas g, in gall…"
   },
   {
@@ -2570,8 +2570,8 @@ window.BANK_INDEX = {
     "src:202608asiav2:m2-q5"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0223",
    "stemPreview": "The table shows three values of x and their corresponding values of g(x), where…"
   },
   {
@@ -2585,8 +2585,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:m2-q15"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0224",
    "stemPreview": "y < -4x y \\ge 45 There are three points (-12, n), where n is an integer, that a…"
   },
   {
@@ -2600,8 +2600,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:m2-q3"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0225",
    "stemPreview": "What is the x‑ intercept of the graph of y=(28-x)/(ax+b) in the xy‑ plane, wher…"
   },
   {
@@ -2615,8 +2615,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:rw2-q10"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0226",
    "stemPreview": "Which choice most logically completes the text?"
   },
   {
@@ -2630,8 +2630,8 @@ window.BANK_INDEX = {
     "src:202608usv1:rw2-q18"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0227",
    "stemPreview": "Which finding, if true, would most directly support the student’s claim?"
   },
   {
@@ -2645,8 +2645,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:m2-q19"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0228",
    "stemPreview": "x^{2} + 16x + y^{2} = 12y + 101 In the xy-plane, the graph of the given equatio…"
   },
   {
@@ -2660,8 +2660,8 @@ window.BANK_INDEX = {
     "src:202608usv1:rw2-q11"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0229",
    "stemPreview": "Which choice most logically completes the text?"
   },
   {
@@ -2675,8 +2675,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m1-q19"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0230",
    "stemPreview": "The table shows the distribution of height, in centimeters, of 25 objects. Heig…"
   },
   {
@@ -2690,8 +2690,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m2-q12"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0231",
    "stemPreview": "y = 2 (x - d)(x + d)(x + g)(x - d) In the given equation, d and g are distinct…"
   },
   {
@@ -2705,8 +2705,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m2-q16"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0232",
    "stemPreview": "In the xy-plane, the graph of function f, where y = f(x), has exactly 8 x-inter…"
   },
   {
@@ -2720,8 +2720,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:m2-q9"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0233",
    "stemPreview": "t(v - 89) + t = w The given equation relates the positive numbers w, t, and v.…"
   },
   {
@@ -2750,8 +2750,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:rw2-q20"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0234",
    "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
   },
   {
@@ -2765,8 +2765,8 @@ window.BANK_INDEX = {
     "src:202608asiav2:m1-q6"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0235",
    "stemPreview": "(8y + 6) - (5y + 1) The given expression is equivalent to by + c, where b and c…"
   },
   {
@@ -2780,8 +2780,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:m2-q10"
    ],
    "keyType": "spr",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0236",
    "stemPreview": "Line j in the xy-plane passes through the points (9, 0) and (0, 6). Line k pass…"
   },
   {
@@ -2795,7 +2795,7 @@ window.BANK_INDEX = {
     "src:202608asiav3:rw1-q9"
    ],
    "keyType": "mcq",
-   "retired": false,
+   "retired": true,
    "supersededBy": null,
    "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
   },
@@ -2810,8 +2810,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:rw2-q25"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0237",
    "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
   },
   {
@@ -3080,8 +3080,8 @@ window.BANK_INDEX = {
     "src:202608asiav1:m2-q8"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0238",
    "stemPreview": "Based on the graph, which of the following is closest to the predicted depth be…"
   },
   {
@@ -3140,8 +3140,8 @@ window.BANK_INDEX = {
     "src:202608asiav3:rw1-q6"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0239",
    "stemPreview": "Common name Average mass (kg) Capable of flight? Which choice most effectively…"
   },
   {
@@ -3155,8 +3155,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:rw1-q16"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0240",
    "stemPreview": "Film name Visible light allowed through Glare reduction Based on the window-fil…"
   },
   {
@@ -3170,8 +3170,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m1-q21"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0241",
    "stemPreview": "The shaded region shown represents the solutions to which inequality?"
   },
   {
@@ -3185,8 +3185,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m2-q18"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0242",
    "stemPreview": "x y -16 -46 5 38 The table shows two values of x and their corresponding values…"
   },
   {
@@ -3200,9 +3200,465 @@ window.BANK_INDEX = {
     "src:202608usv1:m2-q2"
    ],
    "keyType": "mcq",
+   "retired": true,
+   "supersededBy": "q0243",
+   "stemPreview": "The shaded region shown represents the solutions to which inequality? 18 y 16 1…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0214",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0214",
+   "subject": "math",
+   "skill": "Two-variable data: Models and scatterplots",
+   "tags": [
+    "src:202608asiav3:m2-q4"
+   ],
+   "keyType": "mcq",
    "retired": false,
    "supersededBy": null,
-   "stemPreview": "The shaded region shown represents the solutions to which inequality? 18 y 16 1…"
+   "stemPreview": "The scatterplot shows the relationship between two variables, x and y. Which of…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0215",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0215",
+   "subject": "math",
+   "skill": "Right triangles and trigonometry",
+   "tags": [
+    "src:202608asiav4:m1-q14"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "In right triangle PQR, angle R is a right angle, PR = 36, and sin Q = 1/2. What…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0216",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0216",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav4:rw2-q23"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice most effectively uses data from the table to complete the example?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0217",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0217",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav4:rw2-q24"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice most effectively uses data from the table to complete the statemen…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0218",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0218",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608usv1:m1-q18"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The graph shows the height above ground, in meters, of a ball x seconds after t…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0219",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0219",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608asiav1:m2-q11"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which of the following is an equation of the resulting graph?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0220",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0220",
+   "subject": "rw",
+   "skill": "Form, Structure, and Sense",
+   "tags": [
+    "src:202608asiav1:rw1-q19"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0221",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0221",
+   "subject": "rw",
+   "skill": "Words in Context",
+   "tags": [
+    "src:202608asiav1:rw2-q1"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice completes the text with the most logical and precise word or phras…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0222",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0222",
+   "subject": "math",
+   "skill": "Linear equations in two variables",
+   "tags": [
+    "src:202608asiav2:m1-q9"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "g = 12-(x)/(23) The equation shown gives the estimated amount of gas g, in gall…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0223",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0223",
+   "subject": "math",
+   "skill": "Linear functions",
+   "tags": [
+    "src:202608asiav2:m2-q5"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The table shows three values of x and their corresponding values of g(x), where…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0224",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0224",
+   "subject": "math",
+   "skill": "Linear inequalities in one or two variables",
+   "tags": [
+    "src:202608asiav3:m2-q15"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "y < -4x y \\ge 45 There are three points (-12, n), where n is an integer, that a…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0225",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0225",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608asiav3:m2-q3"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "What is the x‑ intercept of the graph of y=(28-x)/(ax+b) in the xy‑ plane, wher…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0226",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0226",
+   "subject": "rw",
+   "skill": "Inferences",
+   "tags": [
+    "src:202608asiav3:rw2-q10"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice most logically completes the text?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0227",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0227",
+   "subject": "rw",
+   "skill": "Command of Evidence (Textual)",
+   "tags": [
+    "src:202608usv1:rw2-q18"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which finding, if true, would most directly support the student’s claim?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0228",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0228",
+   "subject": "math",
+   "skill": "Circles",
+   "tags": [
+    "src:202608asiav4:m2-q19"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "x^{2} + 16x + y^{2} = 12y + 101 In the xy-plane, the graph of the given equatio…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0229",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0229",
+   "subject": "rw",
+   "skill": "Inferences",
+   "tags": [
+    "src:202608usv1:rw2-q11"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice most logically completes the text?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0230",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0230",
+   "subject": "math",
+   "skill": "One-variable data: Distributions and measures of center and spread",
+   "tags": [
+    "src:202608usv1:m1-q19"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The table shows the distribution of height, in centimeters, of 25 objects. Heig…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0231",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0231",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608usv1:m2-q12"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "y = 2 (x - d)(x + d)(x + g)(x - d) In the given equation, d and g are distinct…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0232",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0232",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608usv1:m2-q16"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "In the xy-plane, the graph of function f, where y = f(x), has exactly 8 x-inter…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0233",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0233",
+   "subject": "math",
+   "skill": "Equivalent expressions",
+   "tags": [
+    "src:202608asiav4:m2-q9"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "t(v - 89) + t = w The given equation relates the positive numbers w, t, and v.…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0234",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0234",
+   "subject": "rw",
+   "skill": "Form, Structure, and Sense",
+   "tags": [
+    "src:202608asiav1:rw2-q20"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0235",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0235",
+   "subject": "math",
+   "skill": "Equivalent expressions",
+   "tags": [
+    "src:202608asiav2:m1-q6"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "(8y + 6) - (5y + 1) The given expression is equivalent to by + c, where b and c…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0236",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0236",
+   "subject": "math",
+   "skill": "Systems of two linear equations in two variables",
+   "tags": [
+    "src:202608asiav3:m2-q10"
+   ],
+   "keyType": "spr",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Line j in the xy-plane passes through the points (9, 0) and (0, 6). Line k pass…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0237",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0237",
+   "subject": "rw",
+   "skill": "Boundaries",
+   "tags": [
+    "src:202608asiav3:rw2-q25"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0238",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0238",
+   "subject": "math",
+   "skill": "Two-variable data: Models and scatterplots",
+   "tags": [
+    "src:202608asiav1:m2-q8",
+    "fig:recrop"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Based on the graph, which of the following is closest to the predicted depth be…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0239",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0239",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav3:rw1-q6",
+    "fig:recrop"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice most effectively uses data from the table to complete the example?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0240",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0240",
+   "subject": "rw",
+   "skill": "Command of Evidence (Quantitative)",
+   "tags": [
+    "src:202608asiav4:rw1-q16",
+    "fig:recrop"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Based on the window-film technician’s recommendation and the data in the table,…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0241",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0241",
+   "subject": "math",
+   "skill": "Linear inequalities in one or two variables",
+   "tags": [
+    "src:202608usv1:m1-q21",
+    "fig:recrop"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The shaded region shown represents the solutions to which inequality?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0242",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0242",
+   "subject": "math",
+   "skill": "Linear equations in two variables",
+   "tags": [
+    "src:202608usv1:m2-q18",
+    "fig:recrop"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The table shows two values of x and their corresponding values of y. In the xy-…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0243",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0243",
+   "subject": "math",
+   "skill": "Linear inequalities in one or two variables",
+   "tags": [
+    "src:202608usv1:m2-q2",
+    "fig:recrop"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "The shaded region shown represents the solutions to which inequality?"
   },
   {
    "ref": "bank-david-core:q0001",
