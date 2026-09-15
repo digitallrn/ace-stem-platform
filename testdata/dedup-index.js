@@ -149,18 +149,18 @@ window.DEDUP_INDEX = {
    },
    {
     "bankId": "bank-202608-salvage",
-    "bankVersion": "sha-b5bc476bcb75",
+    "bankVersion": "sha-c373526f5b01",
     "shippedOrder": 20,
-    "questionCount": 244
+    "questionCount": 245
    }
   ]
  },
- "itemCount": 2105,
+ "itemCount": 2106,
  "canonicalCount": 2003,
- "exactPairCount": 112,
+ "exactPairCount": 113,
  "skeletonPairCount": 295,
  "relatedPairCount": 60,
- "familyCount": 263,
+ "familyCount": 264,
  "items": {
   "202606asiav1:re1-q1": {
    "section": "rw",
@@ -20246,6 +20246,24 @@ window.DEDUP_INDEX = {
    "section": "rw",
    "type": "mcq",
    "canonical": "bank-202608-salvage:q0186",
+   "family": "fam:bank-202608-salvage:q0186",
+   "exact": [
+    {
+     "ref": "bank-202608-salvage:q0245",
+     "rule": "E1",
+     "shared": 58,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0245": "DISAGREE"
+   },
+   "ledger": {
+    "bank-202608-salvage:q0245": [
+     "key-ruling (David, 2026-09-15)"
+    ]
+   },
    "retired": true
   },
   "bank-202608-salvage:q0187": {
@@ -21604,6 +21622,30 @@ window.DEDUP_INDEX = {
    "keys": {
     "bank-202608-salvage:q0179": "AGREE",
     "bank-202608-salvage:q0231": "AGREE"
+   },
+   "retired": false
+  },
+  "bank-202608-salvage:q0245": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0186",
+   "family": "fam:bank-202608-salvage:q0186",
+   "exact": [
+    {
+     "ref": "bank-202608-salvage:q0186",
+     "rule": "E1",
+     "shared": 58,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0186": "DISAGREE"
+   },
+   "ledger": {
+    "bank-202608-salvage:q0186": [
+     "key-ruling (David, 2026-09-15)"
+    ]
    },
    "retired": false
   }
@@ -25618,6 +25660,19 @@ window.DEDUP_INDEX = {
     [
      "bank-202608-salvage:q0184",
      "bank-202608-salvage:q0235"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0186": {
+   "canonical": "bank-202608-salvage:q0186",
+   "members": [
+    "bank-202608-salvage:q0186",
+    "bank-202608-salvage:q0245"
+   ],
+   "exactClasses": [
+    [
+     "bank-202608-salvage:q0186",
+     "bank-202608-salvage:q0245"
     ]
    ]
   },

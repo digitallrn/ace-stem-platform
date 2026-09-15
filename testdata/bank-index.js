@@ -6,8 +6,8 @@
    (containerType distinguishes them). */
 window.BANK_INDEX = {
  "indexVersion": 1,
- "questionCount": 245,
- "activeCount": 187,
+ "questionCount": 246,
+ "activeCount": 188,
  "entries": [
   {
    "ref": "bank-202608-salvage:q0001",
@@ -3674,6 +3674,21 @@ window.BANK_INDEX = {
    "retired": false,
    "supersededBy": null,
    "stemPreview": "y = 2(x - d)(x + d)(x + g)(x - d) In the given equation, d and g are distinct p…"
+  },
+  {
+   "ref": "bank-202608-salvage:q0245",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0245",
+   "subject": "rw",
+   "skill": "Boundaries",
+   "tags": [
+    "src:202608asiav3:rw1-q9"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "Which choice completes the text so that it conforms to the conventions of Stand…"
   },
   {
    "ref": "bank-david-core:q0001",
