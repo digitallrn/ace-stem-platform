@@ -149,15 +149,15 @@ window.DEDUP_INDEX = {
    },
    {
     "bankId": "bank-202608-salvage",
-    "bankVersion": "sha-ca2894bf6359",
+    "bankVersion": "sha-b5bc476bcb75",
     "shippedOrder": 20,
-    "questionCount": 243
+    "questionCount": 244
    }
   ]
  },
- "itemCount": 2104,
+ "itemCount": 2105,
  "canonicalCount": 2003,
- "exactPairCount": 110,
+ "exactPairCount": 112,
  "skeletonPairCount": 295,
  "relatedPairCount": 60,
  "familyCount": 263,
@@ -20080,10 +20080,18 @@ window.DEDUP_INDEX = {
      "shared": 32,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0244",
+     "rule": "E1",
+     "shared": 32,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "keys": {
-    "bank-202608-salvage:q0231": "AGREE"
+    "bank-202608-salvage:q0231": "AGREE",
+    "bank-202608-salvage:q0244": "AGREE"
    },
    "retired": true
   },
@@ -21277,12 +21285,20 @@ window.DEDUP_INDEX = {
      "shared": 32,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0244",
+     "rule": "E1",
+     "shared": 32,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "keys": {
-    "bank-202608-salvage:q0179": "AGREE"
+    "bank-202608-salvage:q0179": "AGREE",
+    "bank-202608-salvage:q0244": "AGREE"
    },
-   "retired": false
+   "retired": true
   },
   "bank-202608-salvage:q0232": {
    "section": "math",
@@ -21562,6 +21578,33 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "bank-202608-salvage:q0243",
+   "retired": false
+  },
+  "bank-202608-salvage:q0244": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "bank-202608-salvage:q0179",
+   "family": "fam:bank-202608-salvage:q0179",
+   "exact": [
+    {
+     "ref": "bank-202608-salvage:q0179",
+     "rule": "E1",
+     "shared": 32,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0231",
+     "rule": "E1",
+     "shared": 32,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "bank-202608-salvage:q0179": "AGREE",
+    "bank-202608-salvage:q0231": "AGREE"
+   },
    "retired": false
   }
  },
@@ -25513,12 +25556,14 @@ window.DEDUP_INDEX = {
    "canonical": "bank-202608-salvage:q0179",
    "members": [
     "bank-202608-salvage:q0179",
-    "bank-202608-salvage:q0231"
+    "bank-202608-salvage:q0231",
+    "bank-202608-salvage:q0244"
    ],
    "exactClasses": [
     [
      "bank-202608-salvage:q0179",
-     "bank-202608-salvage:q0231"
+     "bank-202608-salvage:q0231",
+     "bank-202608-salvage:q0244"
     ]
    ]
   },

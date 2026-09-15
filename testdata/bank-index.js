@@ -6,7 +6,7 @@
    (containerType distinguishes them). */
 window.BANK_INDEX = {
  "indexVersion": 1,
- "questionCount": 244,
+ "questionCount": 245,
  "activeCount": 187,
  "entries": [
   {
@@ -3470,8 +3470,8 @@ window.BANK_INDEX = {
     "src:202608usv1:m2-q12"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0244",
    "stemPreview": "y = 2 (x - d)(x + d)(x + g)(x - d) In the given equation, d and g are distinct…"
   },
   {
@@ -3659,6 +3659,21 @@ window.BANK_INDEX = {
    "retired": false,
    "supersededBy": null,
    "stemPreview": "The shaded region shown represents the solutions to which inequality?"
+  },
+  {
+   "ref": "bank-202608-salvage:q0244",
+   "containerType": "bank",
+   "bankId": "bank-202608-salvage",
+   "qid": "q0244",
+   "subject": "math",
+   "skill": "Nonlinear functions",
+   "tags": [
+    "src:202608usv1:m2-q12"
+   ],
+   "keyType": "mcq",
+   "retired": false,
+   "supersededBy": null,
+   "stemPreview": "y = 2(x - d)(x + d)(x + g)(x - d) In the given equation, d and g are distinct p…"
   },
   {
    "ref": "bank-david-core:q0001",
