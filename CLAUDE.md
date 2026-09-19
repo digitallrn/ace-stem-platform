@@ -95,7 +95,11 @@ dashboard); and a device that never comes online after a deletion keeps
 working from its cache. **Deploy order: app first, then the migration** (the
 HEAD client reads `student deleted` as an outage and signs in from cache).
 The one thing no test can reach is the authenticated tutor call itself — the
-migration header names the two non-destructive human probes.
+migration header names the non-destructive human probes (A: the tutor call is
+permitted; B: markers are permanent; D: the untagged-record rule runs as
+written) and an optional full run C. Async flows (a content fetch, a set
+resolve or resume, a review open) capture `state.sessionGen` and bail if the
+session ended under them — keep that fence on any new await in a start path.
 
 ## Read first
 `SCHEMA-v1.2.md` — the data contract. It's authoritative over instinct,
