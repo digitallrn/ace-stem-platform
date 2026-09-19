@@ -16,6 +16,7 @@
     moduleState: {},             // moduleId -> {answers, flags:Set, eliminated:{qid:Set}, passageHtml:{qid:html}}
     timerInterval: null,
     readyTimer: null,            // the loading→ready delay; cleared if the session ends underneath it
+    sessionGen: 0,               // bumped when a session ends; async flows compare it before continuing
     timeRemainingSec: 0,
     timerHidden: false,
     /* Countdown/elapsed are anchored to absolute performance.now() timestamps
@@ -439,13 +440,19 @@
      student state, land on sign-in and say why. Nothing recorded on this
      device is removed. */
   async function endDeletedSession(){
-    /* tear the sitting down FIRST, synchronously, so nothing can interleave:
-       the module clock, the break clock, the pending ready-screen timer */
+    /* FIRST: retire the session generation, synchronously. Every async flow
+       that can still be in flight (a content fetch, a set resolve, a resume
+       beat, a review open) captured the old value and checks it before it
+       touches the screen or the recorder — so nothing that resolves after
+       this line can start a sitting or paint over the sign-in screen. */
+    state.sessionGen++;
+    /* then tear the sitting down, still synchronously: the module clock, the
+       break clock, the pending ready-screen timer, the review/test chrome */
     clearInterval(state.timerInterval); state.timerInterval = null;
     clearInterval(state.breakInterval); state.breakInterval = null;
     state.timerRunning = false;
     if(state.readyTimer){ clearTimeout(state.readyTimer); state.readyTimer = null; }
-    hide("fiveMinPopup");
+    resetTestChrome();
     /* then the recorder: drain its last local save and drop its handle, so
        no tab-hide/close flush can rebuild a retired code's record (same
        contract as entering review) — while currentTest is still set */
@@ -607,6 +614,7 @@
   /* Student sign-out: forgets the device session only. Their recorded work is
      untouched — in local mode it is the only copy. */
   el("homeSignoutBtn").addEventListener("click", ()=>{
+    state.sessionGen++;                  // a fetch still in flight belongs to the old session
     forgetSession();
     AttemptStore.clearRefused();
     state.userName = "Student";
@@ -1417,19 +1425,23 @@
     if(assignmentState(a) !== "ready"){ renderHome(); return; }
     showOnly("screen-loading");
     el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + String(a.setName || "practice set") + "…");
+    const gen = state.sessionGen;          // see withTestContent: a session that ends mid-load lands nowhere
     (async ()=>{
       try{
         const set = await AttemptStore.getSet(state.userName, a.setId);
+        if(gen !== state.sessionGen) return;
         if(!set || typeof set !== "object") throw new Error("set unavailable");
         const subject = set.subject === "math" ? "math" : (set.subject === "rw" ? "rw" : null);
         if(!subject) throw new Error("set malformed");
         const resolved = await resolveSetRefs(set);
+        if(gen !== state.sessionGen) return;
         const limit = num(a.timeLimitMinutes);
         const test = syntheticSetTest(String(set.setId || a.setId),
           set.name || a.setName, subject, resolved.questions, (limit && limit > 0) ? limit : 0);
         el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
         startSetFlowLoaded(test, a, subject, resolved.provenance, (limit && limit > 0) ? limit : 0);
       }catch(e){
+        if(gen !== state.sessionGen) return;
         el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
         showTestLoadError({ testName: String(a.setName || "this practice set") },
           ()=> startSetFlow(a), undefined, e);
@@ -1482,13 +1494,16 @@
     if(!record || record.kind !== "set") return false;
     if(!(record.resume || record.checkpoint)) return false;
     showOnly("screen-loading");
+    const gen = state.sessionGen;          // see withTestContent
     buildSetTestFromRecord(record, true).then(built => {
+      if(gen !== state.sessionGen) return;
       if(!resumeTestFlowLoaded(built.test, record)){
         state.currentTest = null;
         renderHome();
         showOnly("screen-home");
       }
     }).catch(e => {
+      if(gen !== state.sessionGen) return;
       showTestLoadError({ testName: String(record.setName || record.testName || "this practice set") },
         ()=> resumeSetFlow(record), undefined, e);
     });
@@ -1541,17 +1556,21 @@
     if(!record || record.kind !== "set") return;
     if(isTombstonedRecord(record)) return;       // deleted by the tutor: no review surface
     showOnly("screen-loading");
+    const gen = state.sessionGen;                // see withTestContent
     let built;
     try{
       built = await buildSetTestFromRecord(record, false);
     }catch(e){
+      if(gen !== state.sessionGen) return;
       showTestLoadError({ testName: String(record.setName || record.testName || "this practice set") },
         ()=> openSetReview(record, origin), origin === "dashboard" ? "dashboard" : undefined, e);
       return;
     }
+    if(gen !== state.sessionGen) return;
     /* Same detach contract as openReviewMode: drain any unpersisted write,
        then drop the recorder's handle so a replay can never write. */
     await Attempts.detach();
+    if(gen !== state.sessionGen) return;
     const rows = buildScoreRows(built.test, record).rows;
     const rowByQid = {};
     rows.forEach(r => { rowByQid[r.q.id] = r; });
@@ -1633,13 +1652,20 @@
   async function withTestContent(entry, onReady, origin, pinVersion){
     showOnly("screen-loading");
     el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + (entry ? entry.testName : "test") + "…");
+    /* the session this load belongs to: if it ends while the fetch is in
+       flight (the tutor deleted the code, or the student signed out), the
+       content must land nowhere — no ready screen, no recorder, no retry
+       screen painted over sign-in */
+    const gen = state.sessionGen;
     try{
       const full = await loadTest(entry, pinVersion);
+      if(gen !== state.sessionGen) return;
       // restore the standing instruction: this screen is reused by the normal
       // start/resume beat, which must not inherit a stale "Loading X…"
       el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
       onReady(full);
     }catch(e){
+      if(gen !== state.sessionGen) return;
       el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
       showTestLoadError(entry, () => withTestContent(entry, onReady, origin, pinVersion), origin, e);
     }
@@ -2294,7 +2320,9 @@
     const idx = Math.min(resume.moduleIndex || 0, test.modules.length - 1);
     delete state.resumeRecords[test.testId];
     showOnly("screen-loading");
-    setTimeout(()=>{
+    /* stored like startTestFlowLoaded's beat, so an ended session cancels it */
+    state.readyTimer = setTimeout(()=>{
+      state.readyTimer = null;
       /* beginModule runs after the loading beat, i.e. after this function has
          already returned true. If a malformed blob makes it throw, the student
          would sit on the loading screen forever, so land them home instead —
@@ -4690,7 +4718,9 @@
     if(!test.modules || !test.modules.length) return;
     /* Awaited: detach drains any unpersisted write before letting go of the
        record, so entering review can never strand a finished sitting. */
+    const gen = state.sessionGen;
     await Attempts.detach();
+    if(gen !== state.sessionGen) return;         // the session ended under the await: no review over sign-in
     const rowByQid = {};
     rows.forEach(r => { rowByQid[r.q.id] = r; });
     /* Score Details scrolls with the DOCUMENT — #screen-scoredetails has no
@@ -4737,23 +4767,32 @@
     }
   }
 
-  function exitReviewMode(failed){
-    if(!state.reviewMode) return;
-    const scroll = state.reviewMode.sdScroll || 0;
-    const setMode = state.reviewMode.setMode === true;
-    const setOrigin = state.reviewMode.origin;
+  /* Everything Review Mode (or a live sitting) leaves in the test chrome that
+     the next beginModule does NOT rebuild. Shared by exitReviewMode and
+     endDeletedSession — a deletion verdict can land while a review is open,
+     and the review's Back button must not leak into the next live sitting on
+     that device (the leak the openReviewMode note guards against). */
+  function resetTestChrome(){
     closeDirections(); closeQnav(); closeCalc(); closeRef(); hide("figOverlay");
     setLineReader(false);
+    hide("fiveMinPopup");
     hide("rvBackBtn");
     el("rvBackBtn").textContent = "‹ Score Details";   // set review relabels it
     // live-test chrome comes back with the next beginModule; un-hide the
     // timer toggle so nothing depends on that
     el("timerBtn").classList.remove("hidden");
     el("tBody").classList.remove("review-mode");
+    lastRenderedQKey = null;
+  }
+  function exitReviewMode(failed){
+    if(!state.reviewMode) return;
+    const scroll = state.reviewMode.sdScroll || 0;
+    const setMode = state.reviewMode.setMode === true;
+    const setOrigin = state.reviewMode.origin;
+    resetTestChrome();
     state.reviewMode = null;
     state.currentTest = null;
     state.moduleState = {};
-    lastRenderedQKey = null;
     /* Set review has no Score Details behind it (contract 5): Back lands
        where the review was opened from — the dashboard for a tutor, home for
        a student. Home renders immediately from current state, then refreshes

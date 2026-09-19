@@ -69,12 +69,13 @@
 -- the bug fixed at 25ef8f7).
 --
 -- DEPLOY ORDER: APP FIRST, then this migration. App before migration is
--- inert: the dashboard's delete reports "Not deleted — … the server rejected
--- it (HTTP 404)" and no student RPC changes. Migration BEFORE the app is
--- NOT safe: the client at HEAD treats a 400 'student deleted' as an outage
--- and signs a deleted student in from its cached rows, and its sync queue
--- backs a refused write off for ever. So: push, confirm the deploy is live,
--- then apply this file.
+-- inert: the dashboard's delete reports "Not deleted — … the server has no
+-- delete function yet — the 2026-09-18 migration has not been applied. This
+-- browser's copy is unchanged." (from PostgREST's 404 / PGRST202) and no
+-- student RPC changes. Migration BEFORE the app is NOT safe: the client at
+-- HEAD treats a 400 'student deleted' as an outage and signs a deleted
+-- student in from its cached rows, and its sync queue backs a refused write
+-- off for ever. So: push, confirm the deploy is live, then apply this file.
 --
 -- HUMAN CHECKS after both are live. The authenticated tutor call cannot be
 -- machine-verified past the password boundary (tests/tombstone-live-proof.js
@@ -102,6 +103,23 @@
 --        ERROR:  tombstones are permanent
 --      The probe row stays for ever — that is the property being checked.
 --      It names no record and no student, so no surface ever shows it.
+--
+--   D. THE UNTAGGED-RECORD RULE (assignmentsAtDeletion) RUNS AS WRITTEN. The
+--      app cannot produce an untagged attempt any more, so seed one in the
+--      SQL editor under a code OUTSIDE the issuable alphabet (it holds O/0/1,
+--      so it can never be a real or issuable code):
+--        insert into records (key, owner_code, value) values
+--          ('attempt:probe:1:zzzz',    'AS-PROBE0001', '{"status":"completed","testId":"probe-t","student":{"key":"AS-PROBE0001"}}'),
+--          ('assign:AS-PROBE0001:a-1', 'AS-PROBE0001', '{"assignmentId":"a-1","testId":"probe-t"}'),
+--          ('assign:AS-PROBE0001:a-2', 'AS-PROBE0001', '{"assignmentId":"a-2","testId":"probe-t"}'),
+--          ('assign:AS-PROBE0001:a-3', 'AS-PROBE0001', '{"assignmentId":"a-3","testId":"probe-other"}'),
+--          ('assign:AS-PROBE0001:__none', 'AS-PROBE0001', '{}');
+--      then, from the signed-in dashboard console exactly as in A:
+--        await AttemptStore.adminRpc("fn_tombstone_attempt", { p_key: "attempt:probe:1:zzzz" })
+--      must RESOLVE to a marker whose assignmentsAtDeletion is exactly
+--      ["a-1","a-2"] — not a-3 (other test), not the __none sentinel.
+--      Afterwards delete the five seeded attempt:/assign: rows (never the
+--      tomb: row — it is permanent, and names no real student, like B's).
 --
 --   C. OPTIONAL full run on a throwaway code that has a finished attempt:
 --      dashboard → Attempts → open it → "Delete this attempt…" → type the
@@ -218,7 +236,9 @@ begin
       from public.records a
      where a.owner_code = v_owner
        and a.key like 'assign:' || v_owner || ':%'
-       and a.key not like '%:__none'
+       -- the vestigial sentinel row, excluded by EXACT key: `_` is a LIKE
+       -- wildcard, so a pattern would also drop any id ending in "?none"
+       and a.key <> 'assign:' || v_owner || ':__none'
        and a.value ->> 'testId' = v_rec.value ->> 'testId';
   end if;
 

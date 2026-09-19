@@ -39,9 +39,13 @@ const { execFileSync } = require("child_process");
 const { extractFn, extractConst } = require("./extract-helper");
 
 const repo = path.join(__dirname, "..");
-const attemptsSrc = fs.readFileSync(path.join(repo, "attempts.js"), "utf8");
-const appSrc = fs.readFileSync(path.join(repo, "app.js"), "utf8");
-const dashSrc = fs.readFileSync(path.join(repo, "dashboard.js"), "utf8");
+/* sources are read with LF endings whatever the checkout produced (a Windows
+   clone with core.autocrlf=true holds CRLF): the SQL controls below splice
+   exact multi-line text, and must not depend on the line-ending mode */
+const readLf = p => fs.readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+const attemptsSrc = readLf(path.join(repo, "attempts.js"));
+const appSrc = readLf(path.join(repo, "app.js"));
+const dashSrc = readLf(path.join(repo, "dashboard.js"));
 /* The LIVE definition of each function is whichever migration re-creates it
    LAST (same rule tests/set-release-rule.test.js applies). The contract is
    checked against the tombstone migration's text AND against the newest
@@ -50,10 +54,10 @@ const dashSrc = fs.readFileSync(path.join(repo, "dashboard.js"), "utf8");
    silently shipping. */
 const MIG_DIR = path.join(repo, "supabase", "migrations");
 const MIGRATION = path.join(MIG_DIR, "2026-09-18_tombstones.sql");
-const sqlSrc = fs.readFileSync(MIGRATION, "utf8");
+const sqlSrc = readLf(MIGRATION);
 function newestDefining(fn){
   const files = fs.readdirSync(MIG_DIR).filter(f => /\.sql$/.test(f)).sort()
-    .filter(f => new RegExp("create or replace function public\\." + fn + "\\s*\\(").test(fs.readFileSync(path.join(MIG_DIR, f), "utf8")));
+    .filter(f => new RegExp("create or replace function public\\." + fn + "\\s*\\(").test(readLf(path.join(MIG_DIR, f))));
   return files.length ? files[files.length - 1] : null;
 }
 
@@ -235,6 +239,20 @@ function sqlContract(sql){
     }
   }
   if(!/'attempt'\)/.test(fnBody(sql, "fn_tombstone_attempt") || "")) out.push("fn_tombstone_attempt: does not pin reason 'attempt' (finished-only)");
+  /* the untagged-record rule: which assignments existed at deletion, computed
+     for records WITHOUT an assignmentId, by owner + exact testId, sentinel
+     excluded by exact key (not a LIKE pattern — `_` is a wildcard) */
+  const anyBody = fnBody(sql, "fn_tombstone_attempt_any") || "";
+  const vat = /if v_rec\.value ->> 'assignmentId' is null then([\s\S]*?)end if;/.exec(anyBody);
+  if(!vat) out.push("fn_tombstone_attempt_any: no assignmentsAtDeletion block for untagged records");
+  else {
+    const b = vat[1];
+    if(!/jsonb_agg\(split_part\(a\.key, ':', 3\)/.test(b)) out.push("assignmentsAtDeletion: does not collect assignment ids");
+    if(!/a\.owner_code = v_owner/.test(b) || !/a\.key like 'assign:' \|\| v_owner \|\| ':%'/.test(b)) out.push("assignmentsAtDeletion: not scoped to the owner's assignment rows");
+    if(!/a\.value ->> 'testId' = v_rec\.value ->> 'testId'/.test(b)) out.push("assignmentsAtDeletion: not scoped to the record's testId");
+    if(!/a\.key <> 'assign:' \|\| v_owner \|\| ':__none'/.test(b) || /not like '%:__none'/.test(b)) out.push("assignmentsAtDeletion: the __none sentinel is not excluded by exact key");
+  }
+  if(!/'assignmentsAtDeletion', v_at\)/.test(anyBody)) out.push("fn_tombstone_attempt_any: the marker does not carry assignmentsAtDeletion");
   if(/p_reason/.test((fnBody(sql, "fn_tombstone_attempt") || "").split("as $$")[0])) out.push("fn_tombstone_attempt: exposes a reason argument");
   if(!/not in \('completed', 'timed-out'\) then\s*\n?\s*raise exception 'attempt is in progress'/.test(fnBody(sql, "fn_tombstone_attempt_any") || "")) out.push("fn_tombstone_attempt_any: no finished-only refusal for reason 'attempt'");
   for(const fn of ["fn_get_assignments", "fn_get_own_attempts", "fn_get_profile", "fn_get_set", "fn_insert_bug", "fn_upsert_attempt"]){
@@ -331,6 +349,12 @@ function sqlContract(sql){
         sqlSrc.replace("create trigger records_protect_tombstones\n  before update or delete on public.records\n  for each row execute function public.fn_protect_tombstones();",
           "-- create trigger records_protect_tombstones before update or delete on public.records for each row execute function public.fn_protect_tombstones();"),
         /no BEFORE UPDATE OR DELETE trigger/],
+      ["assignmentsAtDeletion no longer scoped to the record's testId",
+        sqlSrc.replace("       and a.value ->> 'testId' = v_rec.value ->> 'testId';\n  end if;", ";\n  end if;"),
+        /not scoped to the record's testId/],
+      ["the __none sentinel excluded by a LIKE pattern (underscores are wildcards)",
+        sqlSrc.replace("       and a.key <> 'assign:' || v_owner || ':__none'\n", "       and a.key not like '%:__none'\n"),
+        /sentinel is not excluded by exact key/],
       ["the role check of fn_tombstone_student commented out on one line",
         sqlSrc.replace(/(create or replace function public\.fn_tombstone_student[\s\S]*?)  if coalesce\(v_claims ->> 'role', ''\) <> 'authenticated' then\n    raise exception 'tutor sign-in required';\n  end if;\n/, "$1  -- if coalesce(v_claims ->> 'role', '') <> 'authenticated' then raise exception 'tutor sign-in required'; end if;\n"),
         /fn_tombstone_student: no in-function authenticated-role check/],
@@ -687,6 +711,22 @@ function sqlContract(sql){
       check(/AttemptStore\.clearRefused\(\);/.test(extractFn(appSrc, "endDeletedSession")) && /AttemptStore\.clearRefused\(\);/.test(extractFn(appSrc, "signInWithCode")),
         "app.js clears it when a deleted session ends and when a new session signs in");
     }
+    /* per-code scoping: the pill asks for the signed-in code's own count, so
+       a refusal for someone else's stale write on a shared device never
+       reddens this student's pill; no code = the device total */
+    {
+      const w = loadAttempts({ config: REAL_CFG, fetch: async (url) => /fn_upsert_attempt/.test(url) ? { status: 400, body: { message: "student deleted" } } : { status: 200, body: [] } });
+      await w.AS.set("attempt:t1:100:aaaa", rec("attempt:t1:100:aaaa"));
+      await w.AS.set("attempt:t1:101:bbbb", rec("attempt:t1:101:bbbb", { student: { code: OTHER, key: OTHER } }));
+      await w.flush();
+      check(w.AS.syncState(CODE).refused === 1 && w.AS.syncState(OTHER).refused === 1, "syncState(code) counts only that code's refusal", JSON.stringify([w.AS.syncState(CODE), w.AS.syncState(OTHER)]));
+      check(w.AS.syncState("as-7k4m9pxr").refused === 1, "the code lookup is case-folded");
+      check(w.AS.syncState("AS-ZZZZZZZZ").refused === 0, "a third code reads 0 — another student's refusal does not redden this pill");
+      check(w.AS.syncState().refused === 2, "no code = the device total");
+      w.AS.clearRefused();
+      check(w.AS.syncState(CODE).refused === 0 && w.AS.syncState().refused === 0, "clearRefused() clears every code");
+      check(/AttemptStore\.syncState\(state\.userName\)/.test(extractFn(appSrc, "updateSyncTag")), "the pill asks for the signed-in code's count");
+    }
     const kept = await drive(500, "attempt deleted");
     check(kept.q.length === 1 && kept.q[0].tries === 1 && kept.state.refused === 0, "control: the same words on a 5xx are NOT a verdict — kept with backoff");
     const kept2 = await drive(400, "not your record");
@@ -726,18 +766,83 @@ function sqlContract(sql){
     check(Array.isArray(v3) && v3.length === 1 && w3.ls.getItem("devstore:__assignsync:" + CODE) !== null, "control: a 5xx with a sync marker falls back to the cached list (offline behaviour unchanged)");
     const w4 = loadAttempts({ config: REAL_CFG, fetch: async () => ({ status: 400, body: { message: "invalid code" } }) });
     check((await w4.AT.assignments(CODE)) === "unavailable", "control: a different 4xx is \"unavailable\", never \"deleted\"");
+    /* a device that already HOLDS the student marker (mirrored by the
+       dashboard on a shared laptop) stays closed when the server is
+       unreachable — the marker is permanent, so it beats the cache */
+    const w5 = loadAttempts({ config: REAL_CFG, fetch: async () => ({ status: 500, body: { message: "boom" } }) });
+    w5.ls.setItem("devstore:__assignsync:" + CODE, "2026-09-01T00:00:00.000Z");
+    seedLocal(w5.ls, "assign:" + CODE + ":a1", { assignmentId: "a1", testId: "t1", category: "practice" });
+    seedLocal(w5.ls, "tomb:student:" + CODE, studentTomb(CODE));
+    const v5 = await w5.AT.assignments(CODE);
+    check(v5 === "deleted" && w5.ls.getItem("devstore:__assignsync:" + CODE) === null, "remote, offline: a HELD tomb:student marker answers \"deleted\", never the cached list, and drops the sync marker", String(v5));
+    check((await w5.AT.loadStudentRecords(CODE)) === "deleted", "remote, offline: loadStudentRecords answers \"deleted\" from the held marker");
+    /* and a marker read that FAILS is not "no marker": unavailable, never a cached home */
+    const w6 = loadAttempts({ config: REAL_CFG, fetch: async () => ({ status: 500, body: { message: "boom" } }) });
+    w6.ls.setItem("devstore:__assignsync:" + CODE, "2026-09-01T00:00:00.000Z");
+    seedLocal(w6.ls, "assign:" + CODE + ":a1", { assignmentId: "a1", testId: "t1", category: "practice" });
+    const realGet = w6.ls.getItem.bind(w6.ls);
+    w6.ls.getItem = k => { if(k === "devstore:tomb:student:" + CODE) throw new Error("storage blip"); return realGet(k); };
+    check((await w6.AT.assignments(CODE)) === "unavailable" && (await w6.AT.loadStudentRecords(CODE)) === "unavailable",
+      "remote, offline: a marker read that throws is \"unavailable\" on both reads (fail closed)");
     /* app.js wires the sentinel on every entry */
     check(/if\(assigns === "deleted"\)\{\s*await endDeletedSession\(\);\s*return false;/.test(extractFn(appSrc, "signInWithCode")),
       "signInWithCode (typed code, magic link, saved session all go through it) ends the session on \"deleted\"");
     check(/if\(res === "deleted"\)\{\s*await endDeletedSession\(\);\s*return "deleted";/.test(extractFn(appSrc, "refreshStudentState")),
       "refreshStudentState (every later refresh of a signed-in device) ends the session on \"deleted\"");
     const eds = extractFn(appSrc, "endDeletedSession");
-    check(/forgetSession\(\);/.test(eds) && /showOnly\("screen-signin"\);/.test(eds) && !/AttemptStore\.remove|localStorage\.removeItem|purge/.test(eds),
-      "endDeletedSession forgets the device session and lands on sign-in, and deletes nothing");
-    check(/clearInterval\(state\.timerInterval\)/.test(eds) && /clearInterval\(state\.breakInterval\)/.test(eds) && /clearTimeout\(state\.readyTimer\)/.test(eds)
-      && /await Attempts\.detach\(\)/.test(eds) && /state\.currentTest = null;/.test(eds) && eds.indexOf("Attempts.detach()") < eds.indexOf("state.currentTest = null;"),
-      "endDeletedSession tears the sitting down: clocks and the ready timer cleared, the recorder detached BEFORE currentTest is dropped");
-    check(/state\.readyTimer = setTimeout\(/.test(extractFn(appSrc, "startTestFlowLoaded")), "the loading→ready timer is stored so an ended session can cancel it");
+    check(!/AttemptStore\.remove|localStorage\.removeItem|purge/.test(eds), "endDeletedSession deletes nothing");
+    /* the REAL endDeletedSession, executed against a live-looking state */
+    {
+      const cleared = { intervals: [], timeouts: [] }, hidden = [], shown = [], calls = [];
+      const state = { sessionGen: 3, timerInterval: 7, breakInterval: 8, readyTimer: 9, timerRunning: true, currentTest: { testId: "t1" }, moduleState: { x: 1 },
+        pendingStart: {}, reviewMode: {}, userName: CODE, displayName: "E", assignments: [1], assignAttempts: { a: 1 }, pastAttempts: [1], tombstoned: { a: 1 }, resumeRecords: { a: 1 }, activeAssignment: {} };
+      let sawAtCall = null, sawAfterTick = null;
+      const Attempts = { detach: async () => { sawAtCall = state.currentTest !== null; await new Promise(r => setImmediate(r)); sawAfterTick = state.currentTest !== null; } };
+      const AttemptStore = { clearRefused(){ calls.push("clearRefused"); } };
+      const els = {}; const el = id => els[id] || (els[id] = { value: "x", textContent: "", classList: { add(){}, remove(){} } });
+      const fn = new Function("state", "el", "hide", "showOnly", "forgetSession", "resetTestChrome", "Attempts", "AttemptStore", "clearInterval", "clearTimeout",
+        "async " + extractFn(appSrc, "endDeletedSession") + "\nreturn endDeletedSession;")(
+        state, el, id => hidden.push(id), id => shown.push(id), () => calls.push("forgetSession"), () => calls.push("resetTestChrome"), Attempts, AttemptStore,
+        id => cleared.intervals.push(id), id => cleared.timeouts.push(id));
+      await fn();
+      check(state.sessionGen === 4 && JSON.stringify(cleared.intervals) === "[7,8]" && JSON.stringify(cleared.timeouts) === "[9]" && state.timerRunning === false && state.readyTimer === null,
+        "executed: the generation is retired and both clocks and the ready timer are cleared with their real ids", JSON.stringify(cleared));
+      check(sawAtCall === true && sawAfterTick === true && state.currentTest === null,
+        "executed: the recorder is detached (and awaited) BEFORE currentTest is dropped");
+      check(calls.indexOf("resetTestChrome") !== -1 && calls.indexOf("forgetSession") !== -1 && calls.indexOf("clearRefused") !== -1 && calls.indexOf("resetTestChrome") < calls.indexOf("forgetSession"),
+        "executed: the test chrome is reset, the device session forgotten, the pill cleared", calls.join(","));
+      check(state.userName === "Student" && state.assignments === null && state.pastAttempts.length === 0 && Object.keys(state.tombstoned).length === 0 && state.reviewMode === null && state.pendingStart === null
+        && shown[shown.length - 1] === "screen-signin" && /removed by your tutor/.test(el("signinError").textContent),
+        "executed: every piece of student state is dropped and the sign-in screen carries the message");
+    }
+    check(/state\.readyTimer = setTimeout\(/.test(extractFn(appSrc, "startTestFlowLoaded")) && /state\.readyTimer = setTimeout\(/.test(extractFn(appSrc, "resumeTestFlowLoaded")),
+      "both loading→ready beats (start and resume) are stored so an ended session can cancel them");
+    check(/state\.sessionGen\+\+;/.test(appSrc.slice(appSrc.indexOf('el("homeSignoutBtn")'), appSrc.indexOf('el("homeSignoutBtn")') + 400)), "sign-out retires the session generation too");
+    /* the session fence: content that arrives after the session ended lands nowhere */
+    {
+      let resolveLoad, onReadyCalls = 0; const shown = [];
+      const state = { sessionGen: 1 };
+      const w = new Function("state", "showOnly", "el", "loadTest", "LOADING_DEFAULT_MSG", "showTestLoadError",
+        "async " + extractFn(appSrc, "withTestContent") + "\nreturn withTestContent;")(
+        state, id => shown.push(id), () => ({ textContent: "" }), () => new Promise(r => { resolveLoad = r; }), "msg", () => shown.push("screen-loaderror"));
+      const p = w({ testName: "T1" }, () => onReadyCalls++, "home");
+      state.sessionGen++;                                   // the session ended while the fetch was in flight
+      resolveLoad({ testId: "t1", modules: [{}] });
+      await p;
+      check(onReadyCalls === 0 && shown.join() === "screen-loading", "withTestContent: content resolving after the session ended calls nothing and paints nothing");
+      const state2 = { sessionGen: 1 };
+      let calls2 = 0;
+      const w2 = new Function("state", "showOnly", "el", "loadTest", "LOADING_DEFAULT_MSG", "showTestLoadError",
+        "async " + extractFn(appSrc, "withTestContent") + "\nreturn withTestContent;")(
+        state2, () => {}, () => ({ textContent: "" }), async () => ({ testId: "t1" }), "msg", () => {});
+      await w2({ testName: "T1" }, () => calls2++, "home");
+      check(calls2 === 1, "control: with the session intact the content reaches onReady");
+      for(const fn of ["startSetFlow", "resumeSetFlow", "openSetReview", "openReviewMode"]){
+        const src = extractFn(appSrc, fn);
+        check(/const gen = state\.sessionGen;/.test(src) && (src.match(/if\(gen !== state\.sessionGen\) return;/g) || []).length >= 1,
+          fn + " captures the session generation and bails after its awaits");
+      }
+    }
   });
 
   /* =================== the paged tutor pull =================== */
@@ -836,6 +941,12 @@ function sqlContract(sql){
     AS.adminRpc = async () => { const e = new Error("<img src=x onerror=1> weird"); e.status = 400; throw e; };
     const r3 = await d.tutorTombstone("attempt", A);
     check(/the server refused it \(HTTP 400\)/.test(r3.message) && r3.message.indexOf("<img") === -1, "an unknown 4xx message is never echoed", r3.message);
+    AS.adminRpc = async () => { const e = new Error("Could not find the function public.fn_tombstone_attempt(p_key) in the schema cache"); e.status = 404; throw e; };
+    const r4 = await d.tutorTombstone("attempt", A);
+    check(/^Not deleted — the deletion marker for attempt attempt:t1:100:aaaa: the server has no delete function yet — the 2026-09-18 migration has not been applied\. This browser's copy is unchanged\.$/.test(r4.message) && !/Sign in again/.test(r4.message),
+      "a PostgREST 404 (migration not applied) names the migration, without 'sign in again'", r4.message);
+    AS.adminRpc = async () => { const e = new Error("HTTP 404"); e.status = 404; throw e; };
+    check(/migration has not been applied/.test((await d.tutorTombstone("attempt", A)).message), "a bare 404 reaches the same branch");
   });
 
   /* =================== the Students tab and the confirmation panel, executed =================== */
@@ -855,7 +966,7 @@ function sqlContract(sql){
       "renderConfirmPanel", "confirmDeleteAttempt", "confirmDeleteStudent"];
     const body = "const testsById = {};\n" + NAMES.map(n => extractFn(dashSrc, n)).join("\n\n") +
       "\nconst calls = [];\nasync function deleteAttempt(r){ calls.push(['attempt', r.attemptId]); return { ok: true }; }\nasync function deleteStudent(c){ calls.push(['student', c]); return { ok: true }; }" +
-      "\nreturn { viewStudents, confirmDeleteAttempt, confirmDeleteStudent, calls, set(o){ Object.assign(S, o); tombs = S.tombs; recs = S.recs; assigns = S.assigns; profiles = S.profiles; source = S.source; } };";
+      "\nreturn { viewStudents, confirmDeleteAttempt, confirmDeleteStudent, calls, get openAttemptId(){ return openAttemptId; }, setOpen(id){ openAttemptId = id; }, set(o){ Object.assign(S, o); tombs = S.tombs; recs = S.recs; assigns = S.assigns; profiles = S.profiles; source = S.source; } };";
     const S = { tombs: {}, recs: [], assigns: [], profiles: {}, source: "storage" };
     const d = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date",
       "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, openAttemptId = null;\n" + body)(S, esc, escAttr, StudentCode, $, Date);
@@ -880,7 +991,9 @@ function sqlContract(sql){
        handlers then drive the stub's property, as the browser would */
     const fresh = () => { delete els.dtcGo; delete els.dtcInput; delete els.dtcCancel; delete els.dtcMsg; };
     fresh();
+    d.setOpen(A);                                          // a detail pane was open for A
     d.confirmDeleteStudent(CODE);
+    check(d.openAttemptId === null, "the student panel clears openAttemptId — a lazy load settling can never replace it with openDetail()");
     const p = $("dashDetailBody").innerHTML;
     check(/Delete this student\?/.test(p) && /Erin &lt;K&gt;/.test(p) && new RegExp(CODE).test(p) && /3 on record — 2 finished, 1 in progress, 1 already deleted/.test(p) && /Assignments:<\/b> 1/.test(p),
       "student panel names the (escaped) display name, the code, the attempt counts and the assignment count", p.slice(0, 400));
@@ -900,7 +1013,11 @@ function sqlContract(sql){
     /* the attempt panel */
     d.calls.length = 0;
     fresh();
+    d.setOpen(A);
     d.confirmDeleteAttempt(rec(A));
+    check(d.openAttemptId === null, "the attempt panel clears openAttemptId");
+    d.setOpen(A); $("dtcCancel").click();
+    check(d.openAttemptId === null, "Cancel leaves no stale id behind the hidden pane");
     const q = $("dashDetailBody").innerHTML;
     check(/Delete this attempt\?/.test(q) && /Erin &lt;K&gt;/.test(q) && /T1/.test(q) && /assignment for it stays <b>Completed<\/b>/.test(q),
       "attempt panel names the student, the test and says the assignment stays Completed (tagged attempt)", q.slice(0, 400));
@@ -947,6 +1064,10 @@ function sqlContract(sql){
       "the upload button skips rows of deleted students and marked attempts, by the server's markers and this browser's");
     check(!/tutorDelete\(|adminDelete\(/.test(extractFn(dashSrc, "deleteAttempt")) && !/tutorDelete\(|adminDelete\(/.test(extractFn(dashSrc, "deleteStudent")),
       "neither deletion action calls a hard-delete helper");
+    const wire = stripComments(extractFn(dashSrc, "wire"));
+    check(/if\(e\.target\.id === "dashDetail"\)\{\s*openAttemptId = null;\s*\$\("dashDetail"\)\.classList\.add\("hidden"\);/.test(wire),
+      "clicking the overlay backdrop clears openAttemptId before hiding the pane");
+    check(/^\s*openAttemptId = null;/m.test(stripComments(extractFn(dashSrc, "renderConfirmPanel"))), "renderConfirmPanel clears openAttemptId (the text guard behind the executed check)");
   });
 
   console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);
