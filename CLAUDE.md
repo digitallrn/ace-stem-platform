@@ -78,7 +78,8 @@ never closes a later one. `Attempts.assignments()` answers `"deleted"` for a
 retired code (every entry fails closed; nothing on the device is removed —
 not even a deleted attempt's local copy, which the marker's key keeps off
 every surface). An untagged deleted sitting keeps closed only an assignment
-that existed when it was deleted (`assignedAt` before `deletedAt`).
+that existed when it was deleted (the marker's `assignmentsAtDeletion`,
+recorded by the server at one instant — never a clock comparison).
 Dashboard: present-but-marked everywhere, excluded from analysis and the seen
 set, retired codes never re-issued or re-assigned; the confirmation names the
 student/attempt and requires the code typed back; one target per action, no

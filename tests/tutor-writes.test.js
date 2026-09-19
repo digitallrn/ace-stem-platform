@@ -90,8 +90,13 @@ function makeStore(opts){
        what licenses the mirror write that must follow it. */
     async adminRpc(fn, args){
       calls.push(["adminRpc", fn, JSON.stringify(args)]);
+      /* assignmentsAtDeletion: as the SQL computes it — for an untagged
+         record, every assignment row the owner holds for that testId */
+      const atDeletion = r => (r.value && r.value.assignmentId) ? [] :
+        [...server.entries()].filter(([k, a]) => k.indexOf("assign:" + r.owner + ":") === 0 && !/:__none$/.test(k) && a.value && a.value.testId === (r.value && r.value.testId))
+          .map(([k]) => k.split(":")[2]).sort();
       const tombOf = (k, r, reason) => ({ kind: "tombstone", targetKind: "attempt", target: k, code: r.owner,
-        deletedAt: "2026-09-18T00:00:00Z", deletedBy: "tutor@test", reason: reason,
+        deletedAt: "2026-09-18T00:00:00Z", deletedBy: "tutor@test", reason: reason, assignmentsAtDeletion: atDeletion(r),
         testId: r.value.testId == null ? null : r.value.testId, assignmentId: r.value.assignmentId == null ? null : r.value.assignmentId,
         status: r.value.status == null ? null : r.value.status, attemptKind: r.value.kind === "set" ? "set" : "form",
         setId: r.value.setId == null ? null : r.value.setId, conditions: r.value.conditions == null ? null : r.value.conditions,
@@ -176,7 +181,8 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   "fmtDate", "freshAssignmentRow", "newSetId", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
   // tombstones (2026-09-18): the third helper and the two deletion actions
   "isFinishedAttempt", "isTombstoned", "isDeletedStudent", "tombFor", "orphanStubs", "localTombstone",
-  "isTombValue", "tutorTombstone", "deleteStudent", "deleteGateOk", "adoptArchive"];
+  "isTombValue", "tutorTombstone", "deleteStudent", "deleteGateOk", "adoptArchive",
+  "tombstoneRejectedText", "assignmentsAtDeletion", "sameTest"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
@@ -206,6 +212,7 @@ function build(store){
   const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", `
     let recs = [], assigns = [], bugs = [], lastStartCode = null, profiles = {}, source = "storage", lastExport = null;
     let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {};
+    const testsById = {};
     const loads = { assigns: 0, sets: 0, storage: 0, render: 0 };
     async function loadAssignsAndBugs(){ loads.assigns++; }
     async function loadSets(){ loads.sets++; }
@@ -875,8 +882,21 @@ const noSync = t => !/sync/i.test(t);
     const t = status(d);
     const sent = s.calls.filter(c => c[0] === "adminUpsert").map(c => c[1]);
     check(sent.join() === "attempt:202606asiav1:2:bb" && !sent.some(k => k.indexOf(C2) !== -1 || k.indexOf("tomb:") === 0)
-      && /^Upload finished — 1 sent, 0 already on the server, 3 belonging to deleted student\(s\) not sent\.$/.test(t),
+      && /^Upload finished — 1 sent, 0 already on the server, 3 belonging to deleted student\(s\) or marked deleted not sent\.$/.test(t),
       "upload: nothing of a deleted student's and no tomb: row is sent; the count says so", t + " | " + sent.join(","));
+    /* the retired set comes from the SERVER it just read, not only from this
+       browser's last load: a student retired elsewhere is skipped too, and a
+       marked attempt never goes up */
+    const s2 = makeStore({}); const d2 = build(s2);
+    s2.server.set("tomb:student:" + C1, { owner: C1, value: stTomb });                        // retired from another browser; d2's tombs is empty
+    s2.server.set("tomb:attempt:202606asiav1:9:zz", { owner: C2, value: { kind: "tombstone", targetKind: "attempt", target: "attempt:202606asiav1:9:zz" } });
+    s2.mirror.set("attempt:202606asiav1:3:cc", { attemptId: "attempt:202606asiav1:3:cc", student: { key: C1, code: C1 } });
+    s2.mirror.set("attempt:202606asiav1:9:zz", { attemptId: "attempt:202606asiav1:9:zz", student: { key: C2, code: C2 } });
+    s2.mirror.set("attempt:202606asiav1:4:dd", { attemptId: "attempt:202606asiav1:4:dd", student: { key: C2, code: C2 } });
+    await d2.fns.migrateLocalToServer();
+    const sent2 = s2.calls.filter(c => c[0] === "adminUpsert").map(c => c[1]);
+    check(sent2.join() === "attempt:202606asiav1:4:dd" && /1 sent, 0 already on the server, 2 belonging to deleted student\(s\) or marked deleted not sent/.test(status(d2)),
+      "upload: a student retired on the server since this browser's last load, and an attempt marked on the server, are both skipped", sent2.join(",") + " | " + status(d2));
   });
   await run(async () => {
     /* exportAll carries the markers; adoptArchive reads them back */

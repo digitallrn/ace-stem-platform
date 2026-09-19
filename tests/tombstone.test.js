@@ -105,9 +105,10 @@ function loadAttempts(opts){
   sandbox.addEventListener = () => {};
   if(opts.config) sandbox.ACESTEM_CONFIG = opts.config;
   if(opts.sharedStorage){
+    const throwOn = (opts.sharedStorage && opts.sharedStorage.throwOn) || null;   // RegExp: keys whose get() throws
     sandbox.storage = {
       async set(k, v){ store[k] = v; return true; },
-      async get(k){ return k in store ? { value: store[k] } : null; },
+      async get(k){ if(throwOn && throwOn.test(k)) throw new Error("storage blip"); return k in store ? { value: store[k] } : null; },
       async list(p){ return { keys: Object.keys(store).filter(k => k.startsWith(p)) }; },
       async delete(k){ delete store[k]; return true; }
     };
@@ -151,15 +152,19 @@ const DASH_FNS = ["tombFor", "isDeletedStudent", "isTombstoned", "orphanStubs", 
   "studentCell", "codeOptionLabel", "isFinishedAttempt", "isDeletableAttempt", "fmtDate", "num", "cnt", "countPair",
   "scoreStr", "scorePct", "timingLabel", "timingBadgeHtml", "releaseCell", "viewAttempts", "sortVal",
   "sameTest", "assignCountFor", "attemptCategoryMatches", "attemptsForAssignment", "assignRowStatus",
-  "deletedAtOf", "deletedMayClose", "completedAttemptsOf", "deletedAttemptsOf", "seenCaveat"];
-function dashWorld(seed){
+  "assignmentsAtDeletionOf", "deletedMayClose", "assignmentsAtDeletion", "localTombstone",
+  "completedAttemptsOf", "deletedAttemptsOf", "seenCaveat", "knownCodeSet", "generateUnusedCode"];
+function dashWorld(seed, genSeq){
   const body = "const testsById = {};\n" + DASH_FNS.map(n => extractFn(dashSrc, n)).join("\n\n") +
     "\nreturn { " + DASH_FNS.join(", ") + ", set(o){ Object.assign(S, o); tombs = S.tombs; recs = S.recs; assigns = S.assigns; profiles = S.profiles; source = S.source; } };";
   const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const escAttr = s => esc(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const seq = (genSeq || []).slice();
   const StudentCode = {
     valid: c => /^AS-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/.test(String(c || "").trim().toUpperCase()),
-    normalize: c => String(c || "").trim().toUpperCase().replace(/\s+/g, "")
+    normalize: c => String(c || "").trim().toUpperCase().replace(/\s+/g, ""),
+    /* scripted, so a case can force Generate to draw a retired code first */
+    generate: () => { if(!seq.length) throw new Error("StudentCode.generate called more times than scripted"); return seq.shift(); }
   };
   const els = {};
   const $ = id => els[id] || (els[id] = { value: "", textContent: "" });
@@ -170,6 +175,32 @@ function dashWorld(seed){
 }
 
 /* ---------- the SQL contract, as a checker that returns its failures ---------- */
+/* The contract reads CODE, not prose: comments are stripped first, so a gate,
+   grant, role check or trigger that only exists inside a comment cannot
+   satisfy a clause. A small scanner rather than regexes: Postgres block
+   comments NEST, and a `--` inside a string literal is not a comment. */
+function stripSql(s){
+  let out = "", i = 0;
+  while(i < s.length){
+    const c = s[i], n = s[i + 1];
+    if(c === "'"){                                    // string literal ('' escapes a quote)
+      let j = i + 1;
+      while(j < s.length){ if(s[j] === "'"){ if(s[j + 1] === "'"){ j += 2; continue; } break; } j++; }
+      out += s.slice(i, j + 1); i = j + 1; continue;
+    }
+    if(c === "$" && n === "$"){                       // dollar-quoted body: keep, but strip comments INSIDE it too
+      out += "$$"; i += 2; continue;
+    }
+    if(c === "-" && n === "-"){ while(i < s.length && s[i] !== "\n") i++; continue; }
+    if(c === "/" && n === "*"){
+      let depth = 1; i += 2;
+      while(i < s.length && depth){ if(s[i] === "/" && s[i + 1] === "*"){ depth++; i += 2; } else if(s[i] === "*" && s[i + 1] === "/"){ depth--; i += 2; } else i++; }
+      continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
 function fnBody(sql, name){
   const re = new RegExp("create or replace function public\\." + name + "\\s*\\(");
   const m = re.exec(sql);
@@ -178,6 +209,7 @@ function fnBody(sql, name){
   return end === -1 ? sql.slice(m.index) : sql.slice(m.index, end + 4);
 }
 function sqlContract(sql){
+  sql = stripSql(sql);
   const out = [];
   const tutorFns = ["fn_tombstone_attempt", "fn_tombstone_student"];
   const sigs = { fn_tombstone_attempt: "fn_tombstone_attempt(text)", fn_tombstone_student: "fn_tombstone_student(text)",
@@ -232,7 +264,7 @@ function sqlContract(sql){
     const built = (body.match(/jsonb_build_object\(([\s\S]*?)\);/g) || []).join("\n");
     if(/'(answers|score|modules|displayName|annotations|checkpoint|resume|client)'/.test(built)) out.push(fn + ": the marker copies an answer/score/name field");
     const refs = built.match(/v_rec\.value(?:\s*->>?\s*'[^']*'|\s*#>>\s*'[^']*')?/g) || [];
-    const okRef = /^v_rec\.value\s*(->\s*'(testId|assignmentId|status|setId|conditions|startedAt|submittedAt)'|->>\s*'(kind|status)'|#>>\s*'\{student,key\}')$/;
+    const okRef = /^v_rec\.value\s*(->\s*'(testId|assignmentId|status|setId|conditions|startedAt|submittedAt)'|->>\s*'(kind|status|testId|assignmentId)'|#>>\s*'\{student,key\}')$/;
     const bad = refs.filter(x => !okRef.test(x.trim()));
     if(bad.length) out.push(fn + ": the marker reads more of the record than its identity: " + bad.join(", "));
     if(/'value',\s*v_rec\.value\b|v_rec\.value\s*\|\|/.test(body)) out.push(fn + ": the marker embeds the whole record value");
@@ -289,13 +321,23 @@ function sqlContract(sql){
         sqlSrc.replace("drop trigger if exists records_protect_tombstones on public.records;\ncreate trigger records_protect_tombstones", "create trigger records_protect_tombstones")
           .replace("for each row execute function public.fn_protect_tombstones();", "for each row execute function public.fn_protect_tombstones();\ndrop trigger if exists records_protect_tombstones on public.records;"),
         /no BEFORE UPDATE OR DELETE trigger/],
-      ["the marker copies the answers",
-        sqlSrc.replace("    'submittedAt',  v_rec.value -> 'submittedAt');", "    'submittedAt',  v_rec.value -> 'submittedAt',\n    'answers',      v_rec.value -> 'answers');"),
-        /copies an answer\/score\/name field/],
       ["the marker embeds the whole record",
-        sqlSrc.replace("    'submittedAt',  v_rec.value -> 'submittedAt');", "    'submittedAt',  v_rec.value -> 'submittedAt',\n    'value',        v_rec.value);"),
+        sqlSrc.replace("    'assignmentsAtDeletion', v_at);", "    'assignmentsAtDeletion', v_at,\n    'value',        v_rec.value);"),
         /reads more of the record than its identity|embeds the whole record value/],
+      ["fn_get_assignments' gate wrapped in a block comment",
+        sqlSrc.replace(/(create or replace function public\.fn_get_assignments[\s\S]*?)(  if public\.fn_student_deleted\(p_code\) then\n    raise exception 'student deleted';\n  end if;\n)/, "$1/* $2 */\n"),
+        /fn_get_assignments: no 'student deleted' gate/],
+      ["the trigger creation turned into a -- comment",
+        sqlSrc.replace("create trigger records_protect_tombstones\n  before update or delete on public.records\n  for each row execute function public.fn_protect_tombstones();",
+          "-- create trigger records_protect_tombstones before update or delete on public.records for each row execute function public.fn_protect_tombstones();"),
+        /no BEFORE UPDATE OR DELETE trigger/],
+      ["the role check of fn_tombstone_student commented out on one line",
+        sqlSrc.replace(/(create or replace function public\.fn_tombstone_student[\s\S]*?)  if coalesce\(v_claims ->> 'role', ''\) <> 'authenticated' then\n    raise exception 'tutor sign-in required';\n  end if;\n/, "$1  -- if coalesce(v_claims ->> 'role', '') <> 'authenticated' then raise exception 'tutor sign-in required'; end if;\n"),
+        /fn_tombstone_student: no in-function authenticated-role check/],
     ];
+    /* the marker copies the answers — the earlier control, restated against the new tail */
+    check(/copies an answer\/score\/name field/.test(sqlContract(sqlSrc.replace("    'assignmentsAtDeletion', v_at);", "    'assignmentsAtDeletion', v_at,\n    'answers', v_rec.value -> 'answers');")).join("|")),
+      "control — the marker copies the answers — is caught");
     for(const [what, text, expect] of doctored){
       if(text === sqlSrc){ check(false, "control could not be applied: " + what); continue; }
       const f = sqlContract(text);
@@ -413,6 +455,44 @@ function sqlContract(sql){
     const d4 = dashWorld({ recs: [rec(A), rec("attempt:t1:200:bbbb")], tombs: { ["tomb:" + A]: tomb(A) } });
     check(d4.completedAttemptsOf(CODE).length === 1 && d4.deletedAttemptsOf(CODE).length === 1 && /1 deleted attempt not counted/.test(d4.seenCaveat({ deleted: 1, unindexed: 0 })),
       "set builder: a deleted attempt leaves the seen set and is counted in the caveat");
+    /* 'retired codes are never re-issued': the seen-code set and Generate */
+    const RET = "AS-RETIRED2";
+    const dk = dashWorld({ recs: [], assigns: [], profiles: {}, tombs: { ["tomb:student:" + RET]: studentTomb(RET) } }, [RET, OTHER]);
+    check(dk.knownCodeSet()[RET] === true, "a retired code is in knownCodeSet even with no records, assignments or profile");
+    check(dk.generateUnusedCode() === OTHER, "Generate skips the retired code and hands out the next unused one");
+    const dk2 = dashWorld({ recs: [], assigns: [], profiles: {}, tombs: {} }, [RET, OTHER]);
+    check(dk2.generateUnusedCode() === RET, "control: without the marker the same draw would have re-issued that code");
+  });
+  await run("(c) analysis surfaces: a deleted record contributes nothing to Item analysis or Insights", async () => {
+    /* viewItems/viewInsights need the question index; a null index takes the
+       "question text unavailable" branch, which is enough to see whether a
+       deleted record's answers reach the tallies */
+    const NAMES = ["tombFor", "isDeletedStudent", "isTombstoned", "median", "mmss", "num", "cnt", "givenLabel", "viewItems", "viewInsights"];
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const els = { dashFilterTest: { value: "" } };
+    const $ = id => els[id] || (els[id] = { value: "", textContent: "" });
+    const body = "const testsById = {};\nconst qIndex = () => null;\nconst setProvLookup = () => null;\nconst fmt = s => esc(s);\nconst hasKey = () => false;\nconst escAttr = esc;\n" +
+      NAMES.map(n => extractFn(dashSrc, n)).join("\n\n") + "\nreturn { viewItems, viewInsights };";
+    const mk = (tombs) => new Function("tombs", "recs", "esc", "$", "window", "let sortKey='startedAt', sortDir=-1;\n" + body)(tombs, [], esc, $, {});
+    const A = "attempt:t1:100:aaaa";
+    const live = rec(A, { answers: { q1: { given: 0, correct: false, timeSpentSeconds: 30, firstGiven: 1, changeCount: 1, markedForReview: true } } });
+    const marked = mk({ ["tomb:" + A]: tomb(A) });
+    const clear = mk({});
+    const insM = marked.viewInsights([live]), insC = clear.viewInsights([live]);
+    check(/No attempts match/.test(insM) && !/No attempts match/.test(insC), "Insights: a deleted record is excluded; control: the same record undeleted is analysed");
+    const itM = marked.viewItems([live]), itC = clear.viewItems([live]);
+    check(/No attempts match/.test(itM) && !/No attempts match/.test(itC), "Item analysis: a deleted record is excluded; control: the same record undeleted is analysed");
+  });
+  await run("(c) artifact mode: a marker read that FAILS is \"unavailable\", never \"not deleted\"", async () => {
+    const A = "attempt:t1:100:aaaa";
+    const seed = w => { w.store[A] = JSON.stringify(rec(A)); w.store["assign:" + CODE + ":a1"] = JSON.stringify({ assignmentId: "a1", testId: "t1", category: "practice" }); };
+    const w1 = loadAttempts({ sharedStorage: { throwOn: /^tomb:student:/ } }); seed(w1);
+    check((await w1.AT.assignments(CODE)) === "unavailable", "assignments(): the student-marker read throws → unavailable (not a list)");
+    check((await w1.AT.loadStudentRecords(CODE)) === "unavailable", "loadStudentRecords(): the student-marker read throws → unavailable");
+    const w2 = loadAttempts({ sharedStorage: { throwOn: /^tomb:attempt:/ } }); seed(w2); w2.store["tomb:" + A] = JSON.stringify(tomb(A));
+    check((await w2.AT.loadStudentRecords(CODE)) === "unavailable", "loadStudentRecords(): an attempt-marker read throws → unavailable (the record is not shown as live)");
+    const w3 = loadAttempts({ sharedStorage: true }); seed(w3);
+    check(Array.isArray((await w3.AT.assignments(CODE))) && Array.isArray((await w3.AT.loadStudentRecords(CODE)).live), "control: with readable storage both resolve normally");
   });
 
   /* =================== (d) assignment completion =================== */
@@ -443,19 +523,25 @@ function sqlContract(sql){
     check(world2.assignmentState(a2) !== "in-progress" && world2.assignmentState(a2) !== "completed" && !state2.assignAttempts.a2.resumable && Object.keys(state2.resumeRecords).length === 0,
       "a deleted in-progress sitting is neither resumable nor 'in progress'", world2.assignmentState(a2));
     /* an UNTAGGED deleted sitting keeps closed only an assignment that
-       existed when it was deleted, never one created after the deletion */
-    const untagged = w.AT.tombstoneStub("tomb:attempt:t1:400:dddd", tomb("attempt:t1:400:dddd", { assignmentId: null, deletedAt: "2026-09-18T10:00:00.000Z" }));
+       existed when it was deleted — the marker's assignmentsAtDeletion, as
+       the server recorded it — never one created after the deletion */
+    const untagged = w.AT.tombstoneStub("tomb:attempt:t1:400:dddd", tomb("attempt:t1:400:dddd", { assignmentId: null, assignmentsAtDeletion: ["a3"] }));
     const older = { assignmentId: "a3", testId: "t1", category: "practice", assignedAt: "2026-09-10T00:00:00.000Z" };
     const newer = { assignmentId: "a4", testId: "t1", category: "practice", assignedAt: "2026-09-19T00:00:00.000Z" };
-    const undated = { assignmentId: "a5", testId: "t1", category: "practice" };
-    for(const [a, want, label] of [[older, true, "an assignment that existed BEFORE the deletion stays Completed"],
-                                    [newer, false, "an assignment created AFTER the deletion is startable (the re-sit the tutor asked for)"],
-                                    [undated, false, "an assignment with no assignedAt cannot be ordered and is not closed"]]){
+    const skewed = { assignmentId: "a5", testId: "t1", category: "practice", assignedAt: "2026-09-01T00:00:00.000Z" };   // browser clock behind: "older" than the deletion, yet created after it
+    for(const [a, want, label] of [[older, true, "an assignment that existed at the deletion stays Completed"],
+                                    [newer, false, "an assignment created after the deletion is startable (the re-sit the tutor asked for)"],
+                                    [skewed, false, "an assignment created after the deletion on a browser clock that runs behind is STILL startable (no clock comparison)"]]){
       const st = { tests: state.tests, assignments: [a], assignAttempts: {} };
       const wld = appWorld(st);
       wld.buildAssignmentIndex([untagged]);
       check(wld.assignmentComplete(a) === want, "untagged deleted sitting: " + label, String(wld.assignmentComplete(a)));
     }
+    const noList = w.AT.tombstoneStub("tomb:attempt:t1:400:dddd", tomb("attempt:t1:400:dddd", { assignmentId: null }));
+    const stNL = { tests: state.tests, assignments: [older], assignAttempts: {} };
+    const wNL = appWorld(stNL);
+    wNL.buildAssignmentIndex([noList]);
+    check(wNL.assignmentComplete(older) === false && JSON.stringify(noList.assignmentsAtDeletion) === "[]", "a marker without the list (or with non-strings) closes nothing");
     const stLive = { tests: state.tests, assignments: [newer], assignAttempts: {} };
     const wldLive = appWorld(stLive);
     wldLive.buildAssignmentIndex([rec("attempt:t1:400:dddd", { assignmentId: null })]);
@@ -517,19 +603,23 @@ function sqlContract(sql){
     const d3 = dashWorld({ recs: [rec(L, { status: "in-progress", assignmentId: "a2" })], tombs: { ["tomb:" + L]: tomb(L, { status: "in-progress", assignmentId: "a2" }) }, assigns: [{ code: CODE, list: [a2] }] });
     check(d3.assignRowStatus(CODE, a2) === "pending", "dashboard: a tombstoned in-progress sitting is not 'in-progress'", d3.assignRowStatus(CODE, a2));
     const U = "attempt:t1:400:dddd";
-    const uT = tomb(U, { assignmentId: null, deletedAt: "2026-09-18T10:00:00.000Z" });
-    const older = { assignmentId: "a3", testId: "t1", category: "practice", assignedAt: "2026-09-10T00:00:00.000Z" };
-    const newer = { assignmentId: "a4", testId: "t1", category: "practice", assignedAt: "2026-09-19T00:00:00.000Z" };
+    const uT = tomb(U, { assignmentId: null, assignmentsAtDeletion: ["a3"] });
+    const older = { assignmentId: "a3", testId: "t1", category: "practice" };
+    const newer = { assignmentId: "a4", testId: "t1", category: "practice" };
     const d4 = dashWorld({ recs: [rec(U, { assignmentId: null })], tombs: { ["tomb:" + U]: uT }, assigns: [{ code: CODE, list: [older] }] });
-    check(d4.assignRowStatus(CODE, older) === "completed", "dashboard: an untagged deleted sitting keeps an assignment that predates the deletion Completed (parity with the home)");
+    check(d4.assignRowStatus(CODE, older) === "completed", "dashboard: an untagged deleted sitting keeps an assignment named in its marker Completed (parity with the home)");
     const d4b = dashWorld({ recs: [rec(U, { assignmentId: null })], tombs: { ["tomb:" + U]: uT }, assigns: [{ code: CODE, list: [newer] }] });
-    check(d4b.assignRowStatus(CODE, newer) === "pending", "dashboard: … and never closes one created after the deletion", d4b.assignRowStatus(CODE, newer));
-    /* the same rule for a deleted STUDENT's untagged record (no own marker) and for an orphan marker */
-    const d4c = dashWorld({ recs: [rec(U, { assignmentId: null })], tombs: { ["tomb:student:" + CODE]: Object.assign(studentTomb(CODE), { deletedAt: "2026-09-18T10:00:00.000Z" }) }, assigns: [{ code: CODE, list: [older, newer] }] });
-    check(d4c.assignRowStatus(CODE, older) === "pending" && d4c.assignRowStatus(CODE, newer) === "pending",
-      "dashboard: with TWO assignments of the test the fallback is off anyway (unchanged rule)");
+    check(d4b.assignRowStatus(CODE, newer) === "pending", "dashboard: … and never closes one the marker does not name (created after the deletion)", d4b.assignRowStatus(CODE, newer));
+    /* a deleted STUDENT's untagged record with no own marker closes nothing; an orphan marker keeps its list */
+    const d4c = dashWorld({ recs: [rec(U, { assignmentId: null })], tombs: { ["tomb:student:" + CODE]: studentTomb(CODE) }, assigns: [{ code: CODE, list: [older] }] });
+    check(d4c.assignRowStatus(CODE, older) === "pending", "dashboard: a deleted student's record without its own marker closes nothing (the code is retired)");
     const d4d = dashWorld({ recs: [], tombs: { ["tomb:" + U]: uT }, assigns: [{ code: CODE, list: [older] }] });
-    check(d4d.assignRowStatus(CODE, older) === "completed", "dashboard: an orphan untagged marker (record archived away) still closes the older assignment");
+    check(d4d.assignRowStatus(CODE, older) === "completed", "dashboard: an orphan untagged marker (record archived away) still closes the assignment it names");
+    /* the local-mode marker computes the list the same way the server does: every assignment of that code and test */
+    const mkLocal = dashWorld({ recs: [rec(U, { assignmentId: null })], tombs: {}, assigns: [{ code: CODE, list: [older, newer, { assignmentId: "a9", testId: "t2" }] }, { code: OTHER, list: [{ assignmentId: "a8", testId: "t1" }] }] });
+    const lt = mkLocal.localTombstone(rec(U, { assignmentId: null }), "attempt", "2026-09-18T10:00:00.000Z", "acestem-admin (local)");
+    check(JSON.stringify(lt.assignmentsAtDeletion.slice().sort()) === JSON.stringify(["a3", "a4"]) && mkLocal.localTombstone(rec(U), "attempt", "x", "y").assignmentsAtDeletion.length === 0,
+      "local-mode marker: assignmentsAtDeletion = this code's assignments of that test (none for a tagged record)", JSON.stringify(lt.assignmentsAtDeletion));
     const d5 = dashWorld({ recs: [rec(U, { assignmentId: null })], tombs: {}, assigns: [{ code: CODE, list: [newer] }] });
     check(d5.assignRowStatus(CODE, newer) === "completed", "control: the same untagged sitting, undeleted, closes it");
   });
@@ -637,13 +727,17 @@ function sqlContract(sql){
     const w4 = loadAttempts({ config: REAL_CFG, fetch: async () => ({ status: 400, body: { message: "invalid code" } }) });
     check((await w4.AT.assignments(CODE)) === "unavailable", "control: a different 4xx is \"unavailable\", never \"deleted\"");
     /* app.js wires the sentinel on every entry */
-    check(/if\(assigns === "deleted"\)\{\s*endDeletedSession\(\);\s*return false;/.test(extractFn(appSrc, "signInWithCode")),
+    check(/if\(assigns === "deleted"\)\{\s*await endDeletedSession\(\);\s*return false;/.test(extractFn(appSrc, "signInWithCode")),
       "signInWithCode (typed code, magic link, saved session all go through it) ends the session on \"deleted\"");
-    check(/if\(res === "deleted"\)\{\s*endDeletedSession\(\);\s*return "deleted";/.test(extractFn(appSrc, "refreshStudentState")),
+    check(/if\(res === "deleted"\)\{\s*await endDeletedSession\(\);\s*return "deleted";/.test(extractFn(appSrc, "refreshStudentState")),
       "refreshStudentState (every later refresh of a signed-in device) ends the session on \"deleted\"");
     const eds = extractFn(appSrc, "endDeletedSession");
     check(/forgetSession\(\);/.test(eds) && /showOnly\("screen-signin"\);/.test(eds) && !/AttemptStore\.remove|localStorage\.removeItem|purge/.test(eds),
       "endDeletedSession forgets the device session and lands on sign-in, and deletes nothing");
+    check(/clearInterval\(state\.timerInterval\)/.test(eds) && /clearInterval\(state\.breakInterval\)/.test(eds) && /clearTimeout\(state\.readyTimer\)/.test(eds)
+      && /await Attempts\.detach\(\)/.test(eds) && /state\.currentTest = null;/.test(eds) && eds.indexOf("Attempts.detach()") < eds.indexOf("state.currentTest = null;"),
+      "endDeletedSession tears the sitting down: clocks and the ready timer cleared, the recorder detached BEFORE currentTest is dropped");
+    check(/state\.readyTimer = setTimeout\(/.test(extractFn(appSrc, "startTestFlowLoaded")), "the loading→ready timer is stored so an ended session can cancel it");
   });
 
   /* =================== the paged tutor pull =================== */
@@ -661,20 +755,87 @@ function sqlContract(sql){
     const w = loadAttempts({ config: REAL_CFG, fetch: serve(table) });
     const all = await w.AS.adminSelectAll();
     const tombs = all.filter(r => r.key.indexOf("tomb:") === 0).length;
-    check(all.length === 1001 && tombs === 101 && new Set(all.map(r => r.key)).size === 1001 && w.fetches.length === 3,
-      "1001 rows come back complete (every tomb row included, no duplicates) in three pages", all.length + " rows, " + tombs + " tombs, " + w.fetches.length + " fetches");
+    check(all.length === 1001 && tombs === 101 && new Set(all.map(r => r.key)).size === 1001 && w.fetches.length === 4,
+      "1001 rows come back complete (every tomb row included, no duplicates); the pull ends on the EMPTY page", all.length + " rows, " + tombs + " tombs, " + w.fetches.length + " fetches");
     const exact = table.slice(0, 1000);
     const w2 = loadAttempts({ config: REAL_CFG, fetch: serve(exact) });
     const all2 = await w2.AS.adminSelectAll();
-    check(all2.length === 1000 && w2.fetches.length === 3, "an exact multiple of the page size needs one extra (empty) page and still completes", all2.length + "/" + w2.fetches.length);
+    check(all2.length === 1000 && w2.fetches.length === 3, "an exact multiple of the page size: two full pages, then the empty one", all2.length + "/" + w2.fetches.length);
+    /* a server whose max-rows is BELOW the page size clamps every page and
+       says nothing — the pull must keep going by what came back */
+    const capped = rows => async (url, o) => { const r = await serve(rows)(url, o); return { status: r.status, body: r.body.slice(0, 100) }; };
+    const w2b = loadAttempts({ config: REAL_CFG, fetch: capped(table) });
+    const all2b = await w2b.AS.adminSelectAll();
+    check(all2b.length === 1001 && new Set(all2b.map(r => r.key)).size === 1001 && w2b.fetches.length === 12,
+      "a server capped at 100 rows per response still yields all 1001 rows (11 pages + the empty one)", all2b.length + "/" + w2b.fetches.length);
     const w3 = loadAttempts({ config: REAL_CFG, fetch: async (url, o) => { const r = /^(\d+)-/.exec(o.headers["Range"]); return parseInt(r[1], 10) >= 500 ? { status: 500, body: { message: "boom" } } : (await serve(table)(url, o)); } });
     let threw = false;
     try{ await w3.AS.adminSelectAll(); }catch(e){ threw = true; }
     check(threw, "a failing later page REJECTS the whole pull — never a silently partial mirror");
+    /* a server that ignores the offset must not spin the tutor's load */
+    const w3b = loadAttempts({ config: REAL_CFG, fetch: async () => ({ status: 206, body: table.slice(0, 500) }) });
+    let threw2 = false;
+    try{ await w3b.AS.adminSelectAll(); }catch(e){ threw2 = /no progress/.test(e.message); }
+    check(threw2 && w3b.fetches.length === 2, "a server that ignores Range (same rows again) is detected on the second page and rejected", w3b.fetches.length + " fetches");
     /* the mirror it feeds: every row, tomb rows included */
     const w4 = loadAttempts({ config: REAL_CFG, fetch: serve(table) });
     const n = await w4.AS.pullAllForTutor();
     check(n === 1001 && !!w4.ls.getItem("devstore:" + table[table.length - 1].key), "pullAllForTutor mirrors all 1001 rows");
+  });
+  await run("dashboard: the marker loader keeps only well-formed rows whose key matches their target", async () => {
+    const store = new Map();
+    const AS = { async list(p){ return [...store.keys()].filter(k => k.indexOf(p) === 0).sort(); }, async get(k){ return store.has(k) ? JSON.parse(JSON.stringify(store.get(k))) : null; } };
+    const body = "let assigns = [], bugs = [], profiles = {}, tombs = {}, sets = [];\nasync function loadSets(){}\nasync " + extractFn(dashSrc, "loadAssignsAndBugs") +
+      "\nreturn async () => { await loadAssignsAndBugs(); return { tombs, profiles, assigns, bugs }; };";
+    const load = new Function("AttemptStore", body)(AS);
+    const A = "attempt:t1:100:aaaa";
+    store.set("tomb:" + A, tomb(A));                                       // well-formed
+    store.set("tomb:attempt:t1:200:bbbb", tomb(A));                        // target disagrees with the key
+    store.set("tomb:student:" + CODE, studentTomb(OTHER));                 // student target disagrees
+    store.set("tomb:student:" + OTHER, studentTomb(OTHER));                // well-formed
+    store.set("tomb:attempt:t1:300:cccc", { kind: "tombstone", target: "attempt:t1:300:cccc" });   // no targetKind
+    store.set("tomb:attempt:t1:400:dddd", "not an object");
+    const r = await load();
+    check(Object.keys(r.tombs).sort().join() === ["tomb:" + A, "tomb:student:" + OTHER].join(), "only the two well-formed, key-matching markers are kept", Object.keys(r.tombs).join(","));
+  });
+  await run("dashboard: the release toggle refuses a deleted record; the tombstone helper refuses a malformed server answer", async () => {
+    /* built like tests/tutor-writes.test.js's closure, minimal */
+    const calls = [];
+    const AS = { isRemote: () => true, async adminUpsert(k){ calls.push(["adminUpsert", k]); return null; }, async setLocal(k, v){ calls.push(["setLocal", k]); return true; },
+      async adminRpc(fn, a){ calls.push(["adminRpc", fn]); return AS.answer; }, async get(){ return null; }, tutorIdentity: () => "t" };
+    const els = {}; const $ = id => els[id] || (els[id] = { textContent: "" });
+    const NAMES = ["tombFor", "isDeletedStudent", "isTombstoned", "describeRow", "rejectedText", "tombstoneRejectedText", "isTombValue", "localTombstone", "assignmentsAtDeletion", "sameTest", "tutorTombstone", "toggleRelease", "releaseCell"];
+    const src = NAMES.map(n => (n === "tutorTombstone" || n === "toggleRelease" ? "async " : "") + extractFn(dashSrc, n)).join("\n\n");
+    const d = new Function("AttemptStore", "$", "escAttr", "esc", "let tombs = {}, recs = [], assigns = [], profiles = {}, source = 'storage';\nconst testsById = {};\nfunction render(){}\nasync function tutorPut(k, o, v){ return { ok: (await AttemptStore.adminUpsert(k, o, v), true) }; }\n" + src +
+      "\nreturn { seed(o){ Object.assign({}, o); if(o.tombs) tombs = o.tombs; if(o.recs) recs = o.recs; }, toggleRelease, tutorTombstone };")(AS, $, s => String(s), s => String(s));
+    const A = "attempt:t1:100:aaaa";
+    const r = rec(A, { released: false });
+    d.seed({ recs: [r], tombs: { ["tomb:" + A]: tomb(A) } });
+    await d.toggleRelease(A);
+    check(r.released === false && !calls.some(c => c[0] === "adminUpsert") && /deleted record is never released/.test($("dashStatus").textContent),
+      "toggleRelease on a deleted record: no write, the flag untouched, a message that says why");
+    d.seed({ recs: [r], tombs: {} });
+    await d.toggleRelease(A);
+    check(r.released === true && calls.some(c => c[0] === "adminUpsert" && c[1] === A), "control: the same record undeleted releases through the tutor write");
+    /* the helper trusts nothing but a marker */
+    for(const [answer, label] of [[null, "null"], [{ kind: "tombstone" }, "no target"], [{ target: A }, "no kind"], ["str", "a string"]]){
+      calls.length = 0; AS.answer = answer;
+      const res = await d.tutorTombstone("attempt", A);
+      check(res.ok === false && /without a deletion marker/.test(res.message) && !calls.some(c => c[0] === "setLocal"), "server answered " + label + ": refused, nothing mirrored", res.message);
+    }
+    calls.length = 0; AS.answer = { student: { kind: "tombstone", targetKind: "student", target: CODE }, attempts: [{ key: "attempt:x", value: tomb("attempt:x") }] };
+    const res = await d.tutorTombstone("student", CODE);
+    check(res.ok === false && !calls.some(c => c[0] === "setLocal"), "a student answer with a non-tomb: row key is refused whole, nothing mirrored");
+    /* the RPC's own refusals get their own wording; a 401 keeps the sign-in advice */
+    AS.adminRpc = async () => { const e = new Error("attempt is in progress"); e.status = 400; throw e; };
+    const r1 = await d.tutorTombstone("attempt", A);
+    check(/^Not deleted — the deletion marker for attempt attempt:t1:100:aaaa: the server says the sitting is still in progress/.test(r1.message) && !/Sign in again/.test(r1.message), "a 400 'attempt is in progress' is explained, without 'sign in again'", r1.message);
+    AS.adminRpc = async () => { const e = new Error("JWT expired"); e.status = 401; throw e; };
+    const r2 = await d.tutorTombstone("attempt", A);
+    check(/the tutor sign-in has expired/.test(r2.message) && /Sign in again and retry/.test(r2.message), "a 401 keeps the generic expired-session wording", r2.message);
+    AS.adminRpc = async () => { const e = new Error("<img src=x onerror=1> weird"); e.status = 400; throw e; };
+    const r3 = await d.tutorTombstone("attempt", A);
+    check(/the server refused it \(HTTP 400\)/.test(r3.message) && r3.message.indexOf("<img") === -1, "an unknown 4xx message is never echoed", r3.message);
   });
 
   /* =================== the Students tab and the confirmation panel, executed =================== */
@@ -782,7 +943,8 @@ function sqlContract(sql){
     check(!/adminDelete|adminUpsert|\.remove\(|tutorDelete|tutorPut/.test(tt), "tutorTombstone never deletes, never upserts a record — it mirrors marker rows only");
     check(!/tomb:/.test(extractFn(dashSrc, "migrateLocalToServer").match(/for\(const prefix of \[[^\]]*\]\)/)[0]),
       "the upload button does not carry tomb: rows (a marker is written only through the confirmed flow)");
-    check(/isDeletedStudent\(owner\)/.test(extractFn(dashSrc, "migrateLocalToServer")), "the upload button skips rows of deleted students");
+    check(/retiredOnServer\[ownerUp\] \|\| isDeletedStudent\(ownerUp\)/.test(extractFn(dashSrc, "migrateLocalToServer")) && /markedOnServer\[k\] \|\| tombFor\(k\)/.test(extractFn(dashSrc, "migrateLocalToServer")),
+      "the upload button skips rows of deleted students and marked attempts, by the server's markers and this browser's");
     check(!/tutorDelete\(|adminDelete\(/.test(extractFn(dashSrc, "deleteAttempt")) && !/tutorDelete\(|adminDelete\(/.test(extractFn(dashSrc, "deleteStudent")),
       "neither deletion action calls a hard-delete helper");
   });

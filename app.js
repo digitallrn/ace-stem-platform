@@ -15,6 +15,7 @@
     view: "question",            // "question" | "review"
     moduleState: {},             // moduleId -> {answers, flags:Set, eliminated:{qid:Set}, passageHtml:{qid:html}}
     timerInterval: null,
+    readyTimer: null,            // the loading→ready delay; cleared if the session ends underneath it
     timeRemainingSec: 0,
     timerHidden: false,
     /* Countdown/elapsed are anchored to absolute performance.now() timestamps
@@ -437,7 +438,22 @@
      session so a reload cannot retry it silently, drop every piece of
      student state, land on sign-in and say why. Nothing recorded on this
      device is removed. */
-  function endDeletedSession(){
+  async function endDeletedSession(){
+    /* tear the sitting down FIRST, synchronously, so nothing can interleave:
+       the module clock, the break clock, the pending ready-screen timer */
+    clearInterval(state.timerInterval); state.timerInterval = null;
+    clearInterval(state.breakInterval); state.breakInterval = null;
+    state.timerRunning = false;
+    if(state.readyTimer){ clearTimeout(state.readyTimer); state.readyTimer = null; }
+    hide("fiveMinPopup");
+    /* then the recorder: drain its last local save and drop its handle, so
+       no tab-hide/close flush can rebuild a retired code's record (same
+       contract as entering review) — while currentTest is still set */
+    try{ await Attempts.detach(); }catch(e){}
+    state.currentTest = null;
+    state.moduleState = {};
+    state.pendingStart = null;
+    state.reviewMode = null;
     forgetSession();
     state.userName = "Student";
     state.displayName = null;
@@ -491,7 +507,7 @@
        cannot retry it silently. Distinct from "unavailable" below, which is a
        read that FAILED and gets a retry, never a verdict. */
     if(assigns === "deleted"){
-      endDeletedSession();
+      await endDeletedSession();
       return false;
     }
     if(assigns === "unavailable"){
@@ -684,7 +700,7 @@
     if(!tag) return;
     if(!AttemptStore.isRemote()){ tag.classList.add("hidden"); return; }
     tag.classList.remove("hidden");
-    const s = AttemptStore.syncState();
+    const s = AttemptStore.syncState(state.userName);   // this student's refusals, not the device's
     /* a write the server REFUSED as deleted (tutor tombstone) was dropped
        from the queue — it must not read as "Synced" */
     const refused = s.refused > 0;
@@ -1723,12 +1739,13 @@
        keep closed only an assignment that already EXISTED when it was
        deleted: that is "not reopening a finished assignment". It never
        closes an assignment created after the deletion — that is the tutor
-       asking for a re-sit. A stub with no deletedAt, or an assignment with no
-       assignedAt, cannot be ordered and does not count. The dashboard's
-       attemptsForAssignment applies the same rule, so the two views agree. */
+       asking for a re-sit. Which assignments existed is recorded IN THE
+       MARKER at deletion time (assignmentsAtDeletion: by the server, which
+       sees both rows at one instant — never by comparing a browser clock
+       with a server clock). A stub without the list closes nothing. The
+       dashboard's attemptsForAssignment applies the same rule. */
     const stubMayClose = (a, r) => !r.tombstoned ||
-      (typeof r.deletedAt === "string" && typeof a.assignedAt === "string" &&
-       Date.parse(a.assignedAt) < Date.parse(r.deletedAt));
+      (Array.isArray(r.assignmentsAtDeletion) && r.assignmentsAtDeletion.indexOf(a.assignmentId) !== -1);
 
     // real (non-legacy) assignments per canonical test — the sole-assignment
     // fallback only fires when exactly one owns the untagged attempt.
@@ -1806,7 +1823,7 @@
   async function refreshStudentState(code){
     const res = await Attempts.loadStudentRecords(code);
     if(res === "deleted"){
-      endDeletedSession();
+      await endDeletedSession();
       return "deleted";
     }
     if(!res || !Array.isArray(res.live)) return false;   // "unavailable" — keep prior state
@@ -2157,7 +2174,7 @@
     Attempts.begin(test, state.userName, conditions, state,    // spec §3: record on test start
       assignment ? assignment.assignmentId : null, state.timing);
     showOnly("screen-loading");
-    setTimeout(()=>{ showReady(true); }, 2200);
+    state.readyTimer = setTimeout(()=>{ state.readyTimer = null; showReady(true); }, 2200);
   }
 
   /* ================= START CODE (Phase F §4, screenshot 24) ================= */

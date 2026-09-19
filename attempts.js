@@ -122,7 +122,8 @@ window.AttemptStore = (function(){
   const QKEY = "devstore:__syncqueue";
   const BACKOFF_MS = [0, 2000, 8000, 30000, 120000, 600000];
   let draining = false, lastSyncError = null, syncTimer = null;
-  let refusedWrites = 0;           // queued writes the server refused as deleted (this session)
+  let refusedByCode = {};          // code -> queued writes the server refused as 'student deleted' (this session)
+  const codeKey = c => String(c || "").trim().toUpperCase();
 
   function qRead(){
     try{ return JSON.parse(localStorage.getItem(QKEY) || "[]"); }catch(e){ return []; }
@@ -178,7 +179,7 @@ window.AttemptStore = (function(){
                'attempt deleted' refusal means the server already holds that
                record AND its marker — nothing is missing, so it stays a
                console warning, not a red pill for the rest of the session. */
-            if(gone === "student") refusedWrites++;
+            if(gone === "student"){ const c = codeKey(item.code); refusedByCode[c] = (refusedByCode[c] || 0) + 1; }
             continue;
           }
           lastSyncError = e.message || String(e);
@@ -211,14 +212,23 @@ window.AttemptStore = (function(){
   const PAGE = 500;
   async function selectAllRows(){
     const out = [];
-    for(let from = 0; ; from += PAGE){
+    let prevFirst = null;
+    for(let from = 0; ; ){
       const page = await httpJson("/rest/v1/records?select=key,owner_code,value&order=key.asc", {
         timeoutMs: 20000,
         headers: { "Range-Unit": "items", "Range": from + "-" + (from + PAGE - 1) }
       });
-      if(!Array.isArray(page)) break;
+      /* the ONLY end signal is an empty page. A short page can also mean
+         the server's max-rows is below PAGE (it clamps the range and says
+         nothing), so it must not end the pull; advance by what came back. */
+      if(!Array.isArray(page) || !page.length) break;
+      /* a server that ignored the offset would hand the same rows back for
+         ever — no forward progress is a failure, never a spin */
+      const first = page[0] && page[0].key;
+      if(prevFirst !== null && first === prevFirst) throw new Error("paged read made no progress");
+      prevFirst = first;
       out.push.apply(out, page);
-      if(page.length < PAGE) break;
+      from += page.length;
     }
     return out;
   }
@@ -236,20 +246,24 @@ window.AttemptStore = (function(){
     rpc: rpc,
     httpJson: httpJson,
     remoteConfigured(){ return remoteConfigured; },
-    syncState(){
+    /* `code` scopes `refused` to one student: the pill asks for the signed-in
+       code's own count, so a refusal for someone else's stale write on a
+       shared device never reddens this student's pill. No code = the total. */
+    syncState(code){
       const q = qRead();
       return {
         pending: q.length,
         online: typeof navigator === "undefined" || navigator.onLine !== false,
         lastError: lastSyncError,
         syncing: draining,
-        refused: refusedWrites
+        refused: code === undefined ? Object.keys(refusedByCode).reduce((n, k) => n + refusedByCode[k], 0)
+                                    : (refusedByCode[codeKey(code)] || 0)
       };
     },
     drainNow(){ scheduleDrain(0); },
     /* the refusal count belongs to a session: sign-in, sign-out and a
        deleted-session ending all start the next one clean */
-    clearRefused(){ refusedWrites = 0; },
+    clearRefused(){ refusedByCode = {}; },
     setAuthToken(t){ authToken = t || null; },
     hasAuthToken(){ return !!authToken; },
     deletedError: deletedError,
@@ -807,7 +821,12 @@ window.Attempts = (function(){
       conditions: typeof t.conditions === "string" ? t.conditions : "unknown",
       startedAt: typeof t.startedAt === "string" ? t.startedAt : "",
       submittedAt: typeof t.submittedAt === "string" ? t.submittedAt : null,
-      deletedAt: typeof t.deletedAt === "string" ? t.deletedAt : null
+      deletedAt: typeof t.deletedAt === "string" ? t.deletedAt : null,
+      /* for an UNTAGGED record: the assignment ids that existed when it was
+         deleted, recorded by whoever wrote the marker (the server, or the
+         local dashboard) — the only assignments the stub may keep closed */
+      assignmentsAtDeletion: Array.isArray(t.assignmentsAtDeletion)
+        ? t.assignmentsAtDeletion.filter(x => typeof x === "string") : []
     };
   }
 
@@ -1153,6 +1172,17 @@ window.Attempts = (function(){
             await purgeStudentLocal(key);
             return "deleted";
           }
+          /* the server could not answer. A tomb:student row this device
+             already holds (mirrored by the dashboard on a shared laptop) is
+             still the tutor's verdict — markers are permanent, so it can
+             never be stale — and it beats the cache fallback. A read that
+             FAILED is not "no marker": unavailable, never a cached home. */
+          const held = await AttemptStore.getResult(TOMB_STUDENT_PREFIX + key);
+          if(held.status === "error") return "unavailable";
+          if(held.status === "ok" && held.value && held.value.kind === "tombstone"){
+            await purgeStudentLocal(key);
+            return "deleted";
+          }
           if(!localStorage.getItem(ASSIGN_SYNC_PREFIX + key)) return "unavailable";
           // fall through to the cached copy below
         }
@@ -1299,7 +1329,15 @@ window.Attempts = (function(){
               await purgeStudentLocal(key);
               return "deleted";
             }
-            /* offline: fall through to the local copy */
+            /* offline: a marker this device already holds is still the
+               verdict (see assignments()); a failed read is unavailable */
+            const held = await AttemptStore.getResult(TOMB_STUDENT_PREFIX + key);
+            if(held.status === "error") return "unavailable";
+            if(held.status === "ok" && held.value && held.value.kind === "tombstone"){
+              await purgeStudentLocal(key);
+              return "deleted";
+            }
+            /* fall through to the local copy */
           }
         } else {
           const tomb = await AttemptStore.getResult(TOMB_STUDENT_PREFIX + key);

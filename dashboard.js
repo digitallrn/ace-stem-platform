@@ -688,6 +688,7 @@ window.Dashboard = (function(){
       if(code && String(t.code || "").toUpperCase() !== code) return;
       out.push({ attemptId: t.target, tombstoned: true, orphan: true,
         deletedAt: typeof t.deletedAt === "string" ? t.deletedAt : null,
+        assignmentsAtDeletion: Array.isArray(t.assignmentsAtDeletion) ? t.assignmentsAtDeletion.filter(x => typeof x === "string") : [],
         student: { key: t.code, code: t.code },
         testId: typeof t.testId === "string" ? t.testId : null,
         assignmentId: typeof t.assignmentId === "string" ? t.assignmentId : null,
@@ -1433,21 +1434,19 @@ window.Dashboard = (function(){
     }
     return [];
   }
-  /* When was this record deleted? Its own marker's deletedAt, else the
-     student marker's (a deleted student's record without its own marker),
-     else null. Untrusted like every record value: a non-string is null. */
-  function deletedAtOf(r){
-    if(!isTombstoned(r)) return null;
-    const own = tombFor(r.attemptId);
-    const src = own || (typeof r.deletedAt === "string" ? r : null) ||
-      tombs["tomb:student:" + String((r.student && r.student.key) || "").toUpperCase()];
-    return (src && typeof src.deletedAt === "string") ? src.deletedAt : null;
+  /* Which assignments existed when this record was deleted: the list its
+     own marker carries (an orphan stub copies it). A deleted student's
+     record without its own marker has no list and closes nothing — the code
+     is retired, so there is nothing to keep closed for. Untrusted like every
+     record value: only strings count. */
+  function assignmentsAtDeletionOf(r){
+    const src = tombFor(r.attemptId) || (r && r.orphan ? r : null);
+    const list = src && src.assignmentsAtDeletion;
+    return Array.isArray(list) ? list.filter(x => typeof x === "string") : [];
   }
   function deletedMayClose(a, r){
     if(!isTombstoned(r)) return true;
-    const when = deletedAtOf(r);
-    return typeof when === "string" && typeof a.assignedAt === "string" &&
-      Date.parse(a.assignedAt) < Date.parse(when);
+    return assignmentsAtDeletionOf(r).indexOf(a.assignmentId) !== -1;
   }
   function assignRowStatus(code, a){
     const mine = attemptsForAssignment(code, a);
@@ -1730,10 +1729,26 @@ window.Dashboard = (function(){
      `kind` is "attempt" (id = attemptId, finished only) or "student"
      (id = code: every attempt the code owns, in-progress included, then the
      student marker LAST — it is the commit point that refuses sign-in). */
+  /* For an UNTAGGED record: the assignments that exist for this code and
+     test right now — the only ones the marker may keep closed (the student
+     home reads this list; the server computes the same for remote markers) */
+  function assignmentsAtDeletion(r){
+    if(!r || r.assignmentId) return [];
+    const code = r.student && r.student.key;
+    const out = [];
+    assigns.forEach(entry => {
+      if(entry.code !== code || !Array.isArray(entry.list)) return;
+      entry.list.forEach(a => {
+        if(a && typeof a.assignmentId === "string" && sameTest(a.testId, r.testId)) out.push(a.assignmentId);
+      });
+    });
+    return out;
+  }
   function localTombstone(r, reason, now, by){
     return { kind: "tombstone", targetKind: "attempt", target: r.attemptId,
       code: (r.student && r.student.key) || null,
       deletedAt: now, deletedBy: by, reason: reason,
+      assignmentsAtDeletion: assignmentsAtDeletion(r),
       testId: r.testId == null ? null : r.testId,
       assignmentId: r.assignmentId == null ? null : r.assignmentId,
       status: r.status == null ? null : r.status,
@@ -1744,6 +1759,26 @@ window.Dashboard = (function(){
       submittedAt: r.submittedAt == null ? null : r.submittedAt };
   }
   function isTombValue(v){ return !!(v && typeof v === "object" && v.kind === "tombstone" && typeof v.target === "string"); }
+  /* The tombstone RPCs' own refusals arrive as a 4xx whose message is the
+     raised text (the same contract deletedError() relies on). Only the
+     texts the migration defines are mapped — never an echo of arbitrary
+     server text — and none of them is cured by signing in again, so the
+     advice differs from rejectedText's. Everything else (401, 5xx, timeout,
+     network) keeps rejectedText's wording. */
+  function tombstoneRejectedText(key, e){
+    const st = (e && typeof e.status === "number") ? e.status : 0;
+    const msg = (e && typeof e.message === "string") ? e.message : "";
+    if(st >= 400 && st < 500 && st !== 401){
+      const why = msg === "no such attempt"        ? "the server has no record with that key (press Refresh — it may never have uploaded, or was archived away)"
+                : msg === "attempt is in progress" ? "the server says the sitting is still in progress — only a finished attempt can be deleted"
+                : msg === "tutor sign-in required" ? "the server did not see a tutor session"
+                : msg === "invalid attempt key" || msg === "invalid code" ? "the server did not accept the key (" + msg + ")"
+                : (st === 404 || /could not find the function/i.test(msg)) ? "the server has no delete function yet — the 2026-09-18 migration has not been applied"
+                : "the server refused it (HTTP " + st + ")";
+      return "Not deleted — " + describeRow(key) + ": " + why + ". This browser's copy is unchanged.";
+    }
+    return rejectedText("deleted", key, e);
+  }
   async function tutorTombstone(kind, id){
     const key = kind === "student" ? "tomb:student:" + id : "tomb:" + id;
     if(AttemptStore.isRemote()){
@@ -1752,7 +1787,7 @@ window.Dashboard = (function(){
         out = kind === "student"
           ? await AttemptStore.adminRpc("fn_tombstone_student", { p_code: id })
           : await AttemptStore.adminRpc("fn_tombstone_attempt", { p_key: id });
-      }catch(e){ return { ok: false, message: rejectedText("deleted", key, e) }; }
+      }catch(e){ return { ok: false, message: tombstoneRejectedText(key, e) }; }
       const rows = kind === "student"
         ? [{ key: key, value: out && out.student }].concat((out && Array.isArray(out.attempts)) ? out.attempts : [])
         : [{ key: key, value: out }];
@@ -1954,11 +1989,20 @@ window.Dashboard = (function(){
       return;
     }
     $("dashStatus").textContent = "Checking what the server already has…";
+    /* the retired set as the server holds it NOW — `tombs` is this browser's
+       last load, and a student retired from another browser since then must
+       not have their rows uploaded unmarked — OR'd with the in-memory map */
     let remoteKeys;
+    const retiredOnServer = {}, markedOnServer = {};
     try{
       const rows = await AttemptStore.adminSelectAll();
       remoteKeys = {};
-      (rows || []).forEach(r => { remoteKeys[r.key] = true; });
+      (rows || []).forEach(r => {
+        if(!r || typeof r.key !== "string") return;
+        remoteKeys[r.key] = true;
+        if(r.key.indexOf("tomb:student:") === 0) retiredOnServer[r.key.slice("tomb:student:".length).toUpperCase()] = true;
+        else if(r.key.indexOf("tomb:attempt:") === 0) markedOnServer[r.key.slice("tomb:".length)] = true;
+      });
     }catch(e){
       $("dashStatus").textContent = "Couldn't read the server: " + (e.message || e);
       return;
@@ -1983,7 +2027,9 @@ window.Dashboard = (function(){
         else if(k.indexOf("assign:") === 0) owner = k.split(":")[1] || null;
         else if(k.indexOf("student:") === 0) owner = k.split(":")[1] || null;
         else if(k.indexOf("bug:") === 0) owner = v.studentCode || null;
-        if(owner && isDeletedStudent(owner)){ retired++; continue; }
+        const ownerUp = owner ? String(owner).toUpperCase() : "";
+        if(ownerUp && (retiredOnServer[ownerUp] || isDeletedStudent(ownerUp))){ retired++; continue; }
+        if(k.indexOf("attempt:") === 0 && (markedOnServer[k] || tombFor(k))){ retired++; continue; }   // a marked attempt never goes up
         try{ await AttemptStore.adminUpsert(k, owner, v); sent++; }
         catch(e){ failed++; }
       }
@@ -1991,7 +2037,7 @@ window.Dashboard = (function(){
     $("dashStatus").textContent =
       "Upload finished — " + sent + " sent, " + skipped + " already on the server" +
       (failed ? ", " + failed + " failed" : "") +
-      (retired ? ", " + retired + " belonging to deleted student(s) not sent" : "") + ".";
+      (retired ? ", " + retired + " belonging to deleted student(s) or marked deleted not sent" : "") + ".";
     await loadFromStorage();
   }
 
@@ -2728,6 +2774,10 @@ window.Dashboard = (function(){
      be marked, says what does NOT happen, and stays disabled until the
      student code is typed back (deleteGateOk, re-checked at the click). */
   function renderConfirmPanel(p){
+    /* this pane is a confirmation, not a detail view: a lazy test/bank load
+       settling re-renders the open DETAIL (openDetail(openAttemptId)) and
+       must never replace the panel — so no attempt is "open" while it shows */
+    openAttemptId = null;
     $("dashDetailBody").innerHTML = `
       <h2>${esc(p.title)}</h2>
       <div class="dtc-facts">${p.factsHtml}</div>
@@ -2745,9 +2795,14 @@ window.Dashboard = (function(){
     go.addEventListener("click", async () => {
       if(!deleteGateOk(input.value, p.code)) return;      // the gate, not the button state, decides
       go.disabled = true; input.disabled = true;
-      $("dtcMsg").textContent = "Marking…";
+      const msg = $("dtcMsg");
+      if(msg) msg.textContent = "Marking…";
       const res = await p.onGo();
-      if(res && !res.ok){ $("dtcMsg").textContent = res.message || "Not deleted."; go.disabled = false; input.disabled = false; }
+      if(res && !res.ok){
+        const m2 = $("dtcMsg");                 // the pane may have been re-rendered meanwhile
+        if(m2) m2.textContent = res.message || "Not deleted.";
+        go.disabled = false; input.disabled = false;
+      }
     });
     $("dtcCancel").addEventListener("click", () => { openAttemptId = null; $("dashDetail").classList.add("hidden"); });
     $("dashDetail").classList.remove("hidden");
@@ -2877,7 +2932,9 @@ window.Dashboard = (function(){
       openAttemptId = null;
       $("dashDetail").classList.add("hidden");
     });
-    $("dashDetail").addEventListener("click", e => { if(e.target.id === "dashDetail") $("dashDetail").classList.add("hidden"); });
+    $("dashDetail").addEventListener("click", e => {
+      if(e.target.id === "dashDetail"){ openAttemptId = null; $("dashDetail").classList.add("hidden"); }   // a hidden pane never carries a stale id
+    });
     /* the filters live outside #dashBody, so re-rendering keeps their own
        values; the forms INSIDE the body are DOM-only and the Sets hint sends
        the tutor to the Student filter mid-form — keep what they typed */

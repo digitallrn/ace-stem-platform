@@ -2,8 +2,8 @@
 --
 -- ⚠ NOT YET APPLIED. Apply THIS file in the Supabase SQL editor — never re-run
 -- schema.sql against live data (its drop-policy preamble is destructive).
--- This file is additive and re-runnable. Apply it BEFORE (or after — both
--- orders are safe, see "deploy order" below) pushing the matching app code.
+-- This file is additive and re-runnable. Apply it AFTER the matching app
+-- code is live — see DEPLOY ORDER below; migration-first is NOT safe.
 --
 -- WHY A TOMBSTONE AND NOT A DELETE
 -- Completed attempt records are immutable: that invariant is what lets the
@@ -173,6 +173,7 @@ declare
   v_rec      public.records%rowtype;
   v_owner    text;
   v_tomb     jsonb;
+  v_at       jsonb := '[]'::jsonb;
 begin
   -- the JWT PostgREST verified for this request; anon carries role 'anon'
   v_claims := coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb);
@@ -204,6 +205,23 @@ begin
   end if;
 
   v_owner := coalesce(v_rec.owner_code, v_rec.value #>> '{student,key}');
+
+  -- An UNTAGGED record (no assignmentId — recorded before the assignment
+  -- model) may keep closed only the assignments that EXIST at this instant;
+  -- the client uses this list, so a re-sit assigned later stays startable.
+  -- Computed here, on one clock, from both rows at once. (Matches by the
+  -- record's own testId: an assignment under a renamed testId is not seen,
+  -- which errs toward startable.)
+  if v_rec.value ->> 'assignmentId' is null then
+    select coalesce(jsonb_agg(split_part(a.key, ':', 3) order by a.key), '[]'::jsonb)
+      into v_at
+      from public.records a
+     where a.owner_code = v_owner
+       and a.key like 'assign:' || v_owner || ':%'
+       and a.key not like '%:__none'
+       and a.value ->> 'testId' = v_rec.value ->> 'testId';
+  end if;
+
   v_tomb := jsonb_build_object(
     'kind',         'tombstone',
     'targetKind',   'attempt',
@@ -220,7 +238,8 @@ begin
     'setId',        v_rec.value -> 'setId',
     'conditions',   v_rec.value -> 'conditions',
     'startedAt',    v_rec.value -> 'startedAt',
-    'submittedAt',  v_rec.value -> 'submittedAt');
+    'submittedAt',  v_rec.value -> 'submittedAt',
+    'assignmentsAtDeletion', v_at);
 
   insert into public.records (key, owner_code, value, updated_at)
   values ('tomb:' || p_key, v_owner, v_tomb, now())
