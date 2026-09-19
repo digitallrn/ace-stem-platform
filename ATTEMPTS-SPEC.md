@@ -258,6 +258,50 @@ external domain (CSP restrictions may block it). If it can't, path (c)
 implies moving off artifact hosting entirely, which is a larger change than
 it sounds. Check this before committing to it.
 
+**(d) Deletion is a tombstone — added 2026-09-18.** The tutor can delete one
+attempt or one student. Neither edits or removes a record: each writes a
+separate marker row —
+
+```jsonc
+// key: "tomb:attempt:202606asiav2:1725000000:ab12", owner_code: "AS-7K4M9PXR"
+{ "kind": "tombstone", "targetKind": "attempt", "target": "attempt:202606asiav2:1725000000:ab12",
+  "code": "AS-7K4M9PXR", "deletedAt": "…", "deletedBy": "<tutor email, stamped by the server>",
+  "reason": "attempt" | "student",
+  // identity summary copied by the server from the record — no answers, no score, no name
+  "testId": "…", "assignmentId": "…", "status": "completed", "attemptKind": "form", "setId": null,
+  "conditions": "…", "startedAt": "…", "submittedAt": "…" }
+// key: "tomb:student:AS-7K4M9PXR", owner_code: "AS-7K4M9PXR"
+{ "kind": "tombstone", "targetKind": "student", "target": "AS-7K4M9PXR", "code": "AS-7K4M9PXR",
+  "deletedAt": "…", "deletedBy": "…", "attemptsTombstoned": 3, "hadProfile": true }
+```
+
+— and the record and profile rows stay byte-identical, so §2's immutability
+holds and an audit can always tell *removed* (row + marker) from *never
+existed*. In remote mode markers are permanent (a database trigger refuses
+UPDATE/DELETE on `tomb:` keys for every role) and idempotent (`on conflict do
+nothing`: the original who/when stands); there is no un-delete; only the
+authenticated tutor can write one (`fn_tombstone_attempt`,
+`fn_tombstone_student`: SECURITY DEFINER, EXECUTE for `authenticated` only,
+role re-checked inside), and no anon RPC can mint a `tomb:` key. In artifact
+and local mode there is no server: a marker is a row like any other row there
+(the same "obscurity, not security" posture as the unauthenticated local
+dashboard), written by the dashboard with the local identity. A retired code is refused by every student RPC
+(`student deleted`) — typed, magic link, saved session — and a marked key by
+`fn_upsert_attempt` (`attempt deleted`); the client treats exactly those two
+messages as terminal for the sync queue. A deleted attempt is on no student
+surface; its marker's summary still keeps its assignment Completed (via its
+explicit assignmentId; an untagged deleted sitting keeps closed only an
+assignment that existed when it was deleted, never one created after). Nothing
+on the device is removed. The dashboard shows deleted records and students
+present-but-marked, excludes them from analysis and the seen set, never re-issues or
+re-assigns a retired code, and requires the student code typed back to
+confirm; one target per action, no bulk path. Exports carry `tombstones`
+alongside `records`, and the SPR audit skips marked records and prints how
+many. The archive-then-delete rotation in (b) is unchanged and never touches
+markers. Deploy the app before applying the migration. Migration:
+`supabase/migrations/2026-09-18_tombstones.sql`; proofs:
+`tests/tombstone.test.js`, `tests/tombstone-live-proof.js`.
+
 Regardless of path: keep anything evaluative out of the records. Answers,
 timings and codes only — no notes, no comments about a student.
 

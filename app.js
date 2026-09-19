@@ -47,6 +47,7 @@
     elapsedSec: 0,               // count-up seconds for untimed modules
     fiveMinAlerted: false,       // Phase F §6: five-minute popup shown for this module
     pastAttempts: [],            // completed/timed-out records for this code (Phase D)
+    tombstoned: {},              // attemptId -> true for records the tutor deleted (on NO surface)
     practiceTab: "active",       // home Practice toggle: "active" | "past"
     testsTab: "active",          // home Your Tests toggle: "active" | "past"
     lastWasProctored: false,     // which section the just-finished attempt lands in
@@ -430,6 +431,29 @@
     await signInWithCode(code);
   }
 
+  /* A code the tutor deleted (2026-09-18 tombstones) — reached from sign-in
+     (typed code, magic link, saved session) and from any later refresh of a
+     device that was already signed in. Fail CLOSED: forget the device
+     session so a reload cannot retry it silently, drop every piece of
+     student state, land on sign-in and say why. Nothing recorded on this
+     device is removed. */
+  function endDeletedSession(){
+    forgetSession();
+    state.userName = "Student";
+    state.displayName = null;
+    state.assignments = null;
+    state.assignAttempts = {};
+    state.pastAttempts = [];
+    state.tombstoned = {};
+    state.resumeRecords = {};
+    state.activeAssignment = null;
+    AttemptStore.clearRefused();           // the pill belongs to the next session, not this one
+    el("nameInput").value = "";
+    el("signinError").textContent = "This code has been removed by your tutor. Ask them for a new one.";
+    el("signinError").classList.remove("hidden");
+    showOnly("screen-signin");
+  }
+
   /* Shared by all three entry points: typing a code, a magic-link fragment,
      and restoring a saved device session. Returns false when sign-in could
      not complete, leaving the student on the sign-in screen with a reason. */
@@ -460,6 +484,16 @@
     }
     // Phase F §2: assignment objects; absent resolves to [] (nothing granted)
     const assigns = await Attempts.assignments(code);
+    /* The tutor deleted this student (2026-09-18 tombstones): the server —
+       or, without one, the tomb:student row in this store — refused the code.
+       Fail CLOSED on every entry (typed code, magic link, saved session):
+       stay on sign-in, say why, and forget the device session so a reload
+       cannot retry it silently. Distinct from "unavailable" below, which is a
+       read that FAILED and gets a retry, never a verdict. */
+    if(assigns === "deleted"){
+      endDeletedSession();
+      return false;
+    }
     if(assigns === "unavailable"){
       // a read error must not silently downgrade access (an ungated proctored
       // test) — keep the student at sign-in with a retry rather than guessing
@@ -477,7 +511,9 @@
        unavailable assignment read) — proceeding with an empty index would show
        a completed assignment as startable, the retake hole this whole change
        closes. */
-    if(!(await refreshStudentState(code))){
+    const refreshed = await refreshStudentState(code);
+    if(refreshed === "deleted") return false;    // session already ended, message already shown
+    if(!refreshed){
       el("signinError").textContent = "Couldn't reach your test history. Check your connection and try again.";
       el("signinError").classList.remove("hidden");
       showOnly("screen-signin");
@@ -486,6 +522,7 @@
     state.practiceTab = "active";
     state.testsTab = "active";
     rememberSession(code);            // stay signed in on this device
+    AttemptStore.clearRefused();      // a fresh session starts with a clean sync pill
 
     /* Crash / refresh resume. A checkpoint with no `resume` blob means the
        student was mid-test and did NOT deliberately leave, so put them back
@@ -555,10 +592,12 @@
      untouched — in local mode it is the only copy. */
   el("homeSignoutBtn").addEventListener("click", ()=>{
     forgetSession();
+    AttemptStore.clearRefused();
     state.userName = "Student";
     state.displayName = null;
     state.assignments = null;
     state.pastAttempts = [];
+    state.tombstoned = {};
     state.resumeRecords = {};
     el("nameInput").value = "";
     el("signinError").classList.add("hidden");
@@ -646,9 +685,13 @@
     if(!AttemptStore.isRemote()){ tag.classList.add("hidden"); return; }
     tag.classList.remove("hidden");
     const s = AttemptStore.syncState();
-    tag.classList.toggle("offline", !s.online);
-    tag.classList.toggle("syncing", s.online && s.pending > 0);
+    /* a write the server REFUSED as deleted (tutor tombstone) was dropped
+       from the queue — it must not read as "Synced" */
+    const refused = s.refused > 0;
+    tag.classList.toggle("offline", !s.online || refused);
+    tag.classList.toggle("syncing", s.online && !refused && s.pending > 0);
     el("syncTagText").textContent =
+      refused ? "Not saved online — ask your tutor" :
       !s.online ? "Offline — will sync" :
       s.pending > 0 ? "Syncing…" : "Synced";
   }
@@ -1469,7 +1512,7 @@
     if(setDoneCtx && setDoneCtx.record) openSetReview(setDoneCtx.record, "setdone");
   });
   el("setDoneHomeBtn").addEventListener("click", async ()=>{
-    await refreshStudentState(state.userName);
+    if((await refreshStudentState(state.userName)) === "deleted") return;   // session ended: stay on sign-in
     state.practiceTab = "past";
     state.testsTab = "active";
     state.currentTest = null;
@@ -1480,6 +1523,7 @@
   /* ---- set flow: review (the one review surface for sets) ---- */
   async function openSetReview(record, origin){
     if(!record || record.kind !== "set") return;
+    if(isTombstonedRecord(record)) return;       // deleted by the tutor: no review surface
     showOnly("screen-loading");
     let built;
     try{
@@ -1665,8 +1709,26 @@
     (all || []).forEach(rec => {
       const canon = canonTestId(rec.testId);
       if(rec.assignmentId) (byAssignId[rec.assignmentId] = byAssignId[rec.assignmentId] || []).push(rec);
+      /* A tombstone stub (a deleted attempt, 2026-09-18) counts ONLY through
+         the assignmentId it was stamped with. An UNTAGGED stub never enters
+         the sole-assignment fallback below: that fallback would attribute it
+         to whichever single assignment of the test exists at the time —
+         including one created LATER — and a deleted sitting closing a future
+         assignment is not "keeping a finished assignment closed", it is a
+         retake the tutor asked for being refused. The dashboard's
+         attemptsForAssignment applies the same rule, so the two views agree. */
       else (nullByTest[canon] = nullByTest[canon] || []).push(rec);
     });
+    /* An UNTAGGED deleted sitting (a tombstone stub with no assignmentId) may
+       keep closed only an assignment that already EXISTED when it was
+       deleted: that is "not reopening a finished assignment". It never
+       closes an assignment created after the deletion — that is the tutor
+       asking for a re-sit. A stub with no deletedAt, or an assignment with no
+       assignedAt, cannot be ordered and does not count. The dashboard's
+       attemptsForAssignment applies the same rule, so the two views agree. */
+    const stubMayClose = (a, r) => !r.tombstoned ||
+      (typeof r.deletedAt === "string" && typeof a.assignedAt === "string" &&
+       Date.parse(a.assignedAt) < Date.parse(r.deletedAt));
 
     // real (non-legacy) assignments per canonical test — the sole-assignment
     // fallback only fires when exactly one owns the untagged attempt.
@@ -1695,7 +1757,7 @@
          since the model exists carries one. Same care as legacyIds: absent
          references resolve, they don't vanish. */
       if(!completed && !resumable && assignCountByTest[canon] === 1 && !isLegacyAssign(a) && !isSetAssign(a)){
-        const pool = (nullByTest[canon] || []).filter(r => categoryMatchesConditions(a.category, r.conditions));
+        const pool = (nullByTest[canon] || []).filter(r => categoryMatchesConditions(a.category, r.conditions) && stubMayClose(a, r));
         completed = pool.find(attemptCompleted) || null;
         resumable = pool.filter(attemptResumable).sort(byStartDesc)[0] || null;
       }
@@ -1736,14 +1798,42 @@
      the crash-resume map, from a single read. Returns false when the read
      FAILED (distinct from empty), so callers can hold the prior state or halt
      rather than wiping a completed assignment back to startable. */
+  /* Returns true (refreshed), false ("unavailable" — the caller keeps prior
+     state and carries on), or the string "deleted": the tutor retired this
+     code while the device was signed in, the session has already been ended
+     (endDeletedSession: sign-in screen + message), and the caller must NOT
+     paint another screen over it. Every caller checks for "deleted" first. */
   async function refreshStudentState(code){
-    const all = await Attempts.loadForStudent(code);
-    if(!Array.isArray(all)) return false;          // "unavailable" — keep prior state
+    const res = await Attempts.loadStudentRecords(code);
+    if(res === "deleted"){
+      endDeletedSession();
+      return "deleted";
+    }
+    if(!res || !Array.isArray(res.live)) return false;   // "unavailable" — keep prior state
+    const all = res.live;
+    /* Tombstoned attempts (deleted by the tutor, 2026-09-18) are NOT in
+       `live` and reach no card, no Score Details, no review. Their identity
+       stubs are fed to the index ONLY so a deleted completed attempt keeps
+       its assignment closed (the 25ef8f7 reopen bug); a stub carries no
+       resume/checkpoint blob, so it can never be resumed either. */
+    const stubs = Array.isArray(res.tombstones) ? res.tombstones : [];
+    state.tombstoned = {};
+    stubs.forEach(s => { if(s && s.attemptId) state.tombstoned[s.attemptId] = true; });
     state.pastAttempts = all
       .filter(r => r.status === "completed" || r.status === "timed-out")
       .sort(byStartDesc);
-    buildAssignmentIndex(all);
+    buildAssignmentIndex(all.concat(stubs));
     return true;
+  }
+  /* Belt and braces for the review surfaces: a record whose key the tutor
+     has tombstoned must not open, whoever hands it in. The student side never
+     builds a card for one (they are not in `live`); the dashboard origin asks
+     the dashboard's own tomb map. */
+  function isTombstonedRecord(record){
+    if(!record || typeof record.attemptId !== "string") return false;
+    if(state.tombstoned && state.tombstoned[record.attemptId]) return true;
+    const dash = window.Dashboard;
+    return !!(dash && typeof dash.isTombstoned === "function" && dash.isTombstoned(record.attemptId));
   }
 
   /* Phase F §2 semantics, derived per assignment. Completion comes from the
@@ -3182,7 +3272,7 @@
   el("subHomeBtn").addEventListener("click", async ()=>{
     // reload everything so the just-finished assignment leaves Active and its
     // attempt appears in Past — the completion is now read from the record
-    await refreshStudentState(state.userName);
+    if((await refreshStudentState(state.userName)) === "deleted") return;   // session ended: stay on sign-in
     /* land them where the new attempt now shows — a proctored sitting lands
        under Your Tests, everything else under Practice */
     if(state.lastWasProctored){ state.testsTab = "past"; state.practiceTab = "active"; }
@@ -3318,7 +3408,7 @@
     }
     // re-read from storage so the home cards reflect what actually persisted:
     // the suspended assignment should now show Resume against ITS own attempt
-    await refreshStudentState(state.userName);
+    if((await refreshStudentState(state.userName)) === "deleted") return;   // session ended: stay on sign-in
     state.currentTest = null;
     renderHome();
     showOnly("screen-home");
@@ -4319,6 +4409,7 @@
        forgery. Its entry points (the Past card, the calculator) already
        key-gate; this refuses the surface itself. */
     if(record && isSetKeyed(record)) return;
+    if(isTombstonedRecord(record)) return;       // deleted by the tutor: no review surface
     /* A pre-loaded test may be handed in, but only the build the attempt was
        SAT on is acceptable here — anything else goes through the pinned
        loader, which serves the record's version from the archive if the
@@ -4656,7 +4747,7 @@
       renderHome();
       showOnly("screen-home");
       refreshStudentState(state.userName).then(ok => {
-        if(ok && !el("screen-home").classList.contains("hidden")) renderHome();
+        if(ok === true && !el("screen-home").classList.contains("hidden")) renderHome();
       });
       return;
     }

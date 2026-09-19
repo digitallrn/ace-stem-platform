@@ -70,6 +70,7 @@ window.AttemptStore = (function(){
 
   const REST_TIMEOUT_MS = 8000;
   let authToken = null;            // tutor session JWT, memory only
+  let tutorEmail = null;           // the signed-in tutor, memory only (tombstone display)
 
   async function httpJson(path, opts){
     if(!remoteConfigured) throw new Error("remote not configured");
@@ -99,10 +100,29 @@ window.AttemptStore = (function(){
   const rpc = (fn, args, opts) =>
     httpJson("/rest/v1/rpc/" + fn, Object.assign({ method:"POST", body: args }, opts || {}));
 
+  /* Tombstones (2026-09-18). The server refuses a deleted student and a
+     deleted attempt with EXACTLY these two messages (RAISE EXCEPTION in the
+     student RPCs, which PostgREST surfaces as a 4xx whose body.message is the
+     text). They are the only server errors that are TERMINAL for the sync
+     queue: retrying can never succeed, so the queued item is dropped rather
+     than backed off for ever. Everything else keeps the retry/backoff. The
+     match is deliberately exact — a network error, a 401, a "not your
+     record" must never be mistaken for a deletion. Returns "student",
+     "attempt", or null. */
+  function deletedError(e){
+    if(!e || typeof e.message !== "string") return null;
+    const st = typeof e.status === "number" ? e.status : 0;
+    if(st && (st < 400 || st >= 500)) return null;
+    if(e.message === "student deleted") return "student";
+    if(e.message === "attempt deleted") return "attempt";
+    return null;
+  }
+
   /* ---- sync queue: localStorage-backed so it survives reload ---- */
   const QKEY = "devstore:__syncqueue";
   const BACKOFF_MS = [0, 2000, 8000, 30000, 120000, 600000];
   let draining = false, lastSyncError = null, syncTimer = null;
+  let refusedWrites = 0;           // queued writes the server refused as deleted (this session)
 
   function qRead(){
     try{ return JSON.parse(localStorage.getItem(QKEY) || "[]"); }catch(e){ return []; }
@@ -143,6 +163,24 @@ window.AttemptStore = (function(){
           qWrite(q);
           lastSyncError = null;
         }catch(e){
+          /* TERMINAL: the server says this student or this attempt has been
+             deleted by the tutor. The write can never land, so keep the
+             queue honest and drop it — but NEVER silently: the key and the
+             reason go to the console every time. lastSyncError is left
+             alone; the pill must not read a deliberate deletion as an outage. */
+          const gone = deletedError(e);
+          if(gone){
+            try{ console.warn("[AttemptStore.sync] DROPPED a queued write for " + item.key +
+              " — the server refused it: " + gone + " deleted (tutor tombstone). Not retried."); }catch(e2){}
+            qWrite(qRead().filter(x => x.key !== item.key));
+            /* the pill reports a refusal only when the STUDENT was deleted:
+               that write is genuinely not online and never will be. An
+               'attempt deleted' refusal means the server already holds that
+               record AND its marker — nothing is missing, so it stays a
+               console warning, not a red pill for the rest of the session. */
+            if(gone === "student") refusedWrites++;
+            continue;
+          }
           lastSyncError = e.message || String(e);
           const fresh = qRead();
           const j = fresh.findIndex(x => x.key === item.key);
@@ -165,6 +203,26 @@ window.AttemptStore = (function(){
     window.addEventListener("online", ()=> scheduleDrain(0));
   }
 
+  /* Every row the tutor can see, PAGED. PostgREST caps a single response
+     (Supabase's default max-rows is 1000) and truncates SILENTLY; a mirror
+     built from a truncated pull would show the tutor a record without the
+     tombstone that sits past the cut — a deleted record listed as live. So
+     page by key order until a short page comes back. */
+  const PAGE = 500;
+  async function selectAllRows(){
+    const out = [];
+    for(let from = 0; ; from += PAGE){
+      const page = await httpJson("/rest/v1/records?select=key,owner_code,value&order=key.asc", {
+        timeoutMs: 20000,
+        headers: { "Range-Unit": "items", "Range": from + "-" + (from + PAGE - 1) }
+      });
+      if(!Array.isArray(page)) break;
+      out.push.apply(out, page);
+      if(page.length < PAGE) break;
+    }
+    return out;
+  }
+
   return {
     /* Storage is now always available in some form; available() stays for
        callers that only care that reads/writes can be attempted. */
@@ -184,12 +242,17 @@ window.AttemptStore = (function(){
         pending: q.length,
         online: typeof navigator === "undefined" || navigator.onLine !== false,
         lastError: lastSyncError,
-        syncing: draining
+        syncing: draining,
+        refused: refusedWrites
       };
     },
     drainNow(){ scheduleDrain(0); },
+    /* the refusal count belongs to a session: sign-in, sign-out and a
+       deleted-session ending all start the next one clean */
+    clearRefused(){ refusedWrites = 0; },
     setAuthToken(t){ authToken = t || null; },
     hasAuthToken(){ return !!authToken; },
+    deletedError: deletedError,
 
     /* ---- tutor auth (spec §4). Real Supabase Auth; the token lives in
        memory only, so closing the tab signs the tutor out. ---- */
@@ -199,9 +262,24 @@ window.AttemptStore = (function(){
       });
       if(!data || !data.access_token) throw new Error("no session returned");
       authToken = data.access_token;
-      return { email: (data.user && data.user.email) || email };
+      tutorEmail = (data.user && data.user.email) || email;
+      return { email: tutorEmail };
     },
-    signOutTutor(){ authToken = null; },
+    signOutTutor(){ authToken = null; tutorEmail = null; },
+    /* Who the signed-in tutor is, for the LOCAL copy of a tombstone. In
+       remote mode the server stamps deletedBy from the JWT itself and the
+       client mirrors what it returns; this is the display fallback and the
+       local/artifact-mode value. */
+    tutorIdentity(){
+      if(isRemote() && tutorEmail) return tutorEmail;
+      return "acestem-admin (" + mode() + ")";
+    },
+    /* Tutor-only RPC (the tombstone functions). Same transport as rpc(); the
+       bearer is the tutor's session token, which is what the server's
+       EXECUTE grant and in-function role check key on. Named separately so
+       the dashboard's read-only sweep (tests/tutor-writes.test.js) can keep
+       every mutating member out of the general code. */
+    adminRpc(fn, args){ return rpc(fn, args, { timeoutMs: 20000 }); },
 
     /* ---- tutor-only table access. RLS grants the authenticated role full
        read/write; anon has no table privileges at all, so these only work
@@ -224,7 +302,12 @@ window.AttemptStore = (function(){
             return rows[0].value;
           }
           return null;                       // server says: no profile
-        }catch(e){ /* offline — fall through to whatever we cached */ }
+        }catch(e){
+          /* a DELETED student has no name any more, cached or not — the
+             cache below is for an unreachable server, not a refused code */
+          if(deletedError(e)) return null;
+          /* offline — fall through to whatever we cached */
+        }
       }
       const b = backend();
       if(!b) return null;
@@ -272,7 +355,7 @@ window.AttemptStore = (function(){
        happened to write. Cached with a direct backend write so nothing is
        re-queued for upload. */
     async pullAllForTutor(){
-      const rows = await httpJson("/rest/v1/records?select=key,owner_code,value", { timeoutMs: 20000 });
+      const rows = await selectAllRows();
       const b = backend();
       if(!b || !Array.isArray(rows)) return 0;
       let n = 0;
@@ -284,7 +367,7 @@ window.AttemptStore = (function(){
     },
 
     async adminSelectAll(){
-      return await httpJson("/rest/v1/records?select=key,owner_code,value", { timeoutMs: 20000 });
+      return await selectAllRows();
     },
     /* One row by exact key, straight from the server — for a tutor write that
        must be based on what the server holds NOW rather than on this
@@ -689,6 +772,59 @@ window.Attempts = (function(){
     return out.length ? out : null;
   }
 
+  /* ---- tombstones (2026-09-18) ----
+     A deleted attempt or student is marked by a SEPARATE row the tutor
+     writes (tomb:<attemptKey>, tomb:student:<CODE>); the record itself is
+     never edited or removed. Students never write these keys — no student
+     path here or in the server RPCs can — they only READ them:
+       - tomb:student:<CODE> present  => the code no longer signs in;
+       - tomb:<attemptKey> present    => the attempt is on no student surface,
+         but its summary still keeps the assignment it belonged to CLOSED
+         (otherwise deleting a completed record would reopen the assignment
+         for a retake — 25ef8f7). */
+  const TOMB_PREFIX = "tomb:";
+  const TOMB_STUDENT_PREFIX = "tomb:student:";
+
+  /* A tomb row shaped like the minimal attempt record buildAssignmentIndex
+     needs: identity + status, never answers, score or a name. No resume /
+     checkpoint blob is ever present, so attemptResumable() is false for a
+     stub by construction — a tombstoned sitting can never be resumed or
+     crash-resumed. Returns null for anything that is not a well-formed
+     attempt tombstone (the key is authoritative: value.target must match). */
+  function tombstoneStub(key, t){
+    if(!t || typeof t !== "object" || t.kind !== "tombstone" || t.targetKind !== "attempt") return null;
+    if(typeof key !== "string" || key.indexOf(TOMB_PREFIX + "attempt:") !== 0) return null;
+    const target = key.slice(TOMB_PREFIX.length);
+    if(t.target !== target) return null;                  // forged/corrupt: key wins
+    return {
+      attemptId: target,
+      tombstoned: true,
+      testId: typeof t.testId === "string" ? t.testId : null,
+      assignmentId: typeof t.assignmentId === "string" ? t.assignmentId : null,
+      status: typeof t.status === "string" ? t.status : "unknown",
+      kind: t.attemptKind === "set" ? "set" : undefined,
+      setId: typeof t.setId === "string" ? t.setId : null,
+      conditions: typeof t.conditions === "string" ? t.conditions : "unknown",
+      startedAt: typeof t.startedAt === "string" ? t.startedAt : "",
+      submittedAt: typeof t.submittedAt === "string" ? t.submittedAt : null,
+      deletedAt: typeof t.deletedAt === "string" ? t.deletedAt : null
+    };
+  }
+
+  /* The server said this code has been deleted. What changes on this device
+     is ONLY the assignment sync marker: without it, assignments() can no
+     longer fall back to the cached rows when the server is unreachable, so
+     an offline sign-in after the verdict is "unavailable" (retry), never a
+     cached home screen. Nothing else is removed. The device may hold the
+     ONLY copy of a sitting that never uploaded (the server refuses the
+     student's writes now), and deleting it here would be a hard delete of
+     data no one else has — the one thing this feature must never do. Queued
+     writes are left to the queue, which drops each one the server refuses
+     with a console warning (never silently). Best effort, never throws. */
+  async function purgeStudentLocal(codeKey){
+    try{ localStorage.removeItem(ASSIGN_SYNC_PREFIX + codeKey); }catch(e){}
+  }
+
   async function cacheRemoteAssignments(codeKey, rows){
     // replace this student's cached rows with what the server just returned
     const existing = (await AttemptStore.list(assignPrefix(codeKey))) || [];
@@ -1008,9 +1144,26 @@ window.Attempts = (function(){
           // absent (null) and the vestigial "none" sentinel are the same thing
           return (pulled === null || pulled === "none") ? [] : pulled;
         }catch(e){
+          /* "deleted" is the server's word, never a guess: only the exact
+             refusal counts, and it beats the cache fallback below — a device
+             that synced this student BEFORE the deletion must not sign them
+             in from its cached rows (that would be fail-OPEN). The device is
+             then cleared of everything theirs. */
+          if(AttemptStore.deletedError(e) === "student"){
+            await purgeStudentLocal(key);
+            return "deleted";
+          }
           if(!localStorage.getItem(ASSIGN_SYNC_PREFIX + key)) return "unavailable";
           // fall through to the cached copy below
         }
+      } else {
+        /* local / artifact mode: the tomb row is in the same store the
+           dashboard wrote it to. Present => this code is retired. A read
+           that FAILED is not "not deleted" — it is unavailable, like any
+           other failed read here (never fail open on a storage blip). */
+        const tomb = await AttemptStore.getResult(TOMB_STUDENT_PREFIX + key);
+        if(tomb.status === "error") return "unavailable";
+        if(tomb.status === "ok" && tomb.value && tomb.value.kind === "tombstone") return "deleted";
       }
 
       // a genuine read failure must NOT collapse to "nothing assigned" (same
@@ -1107,22 +1260,77 @@ window.Attempts = (function(){
        falls through to whatever is cached locally, exactly as assignments()
        does. */
     async loadForStudent(code){
+      const res = await this.loadStudentRecords(code);
+      return (res && Array.isArray(res.live)) ? res.live : "unavailable";
+    },
+
+    /* The full picture: { live: [records], tombstones: [stubs] }, or the
+       string "unavailable" (a read FAILED — keep prior state), or the string
+       "deleted" (the tutor retired this code — end the session).
+       `live` is what every student surface renders;
+       `tombstones` are the deleted attempts' identity stubs (tombstoneStub),
+       which exist ONLY so buildAssignmentIndex can keep a deleted attempt's
+       assignment closed. The two come from ONE server read in remote mode
+       (fn_get_own_attempts returns both), so a deletion is learned in the
+       same call that would otherwise have handed back the record — never
+       from a second call that can fail on its own. */
+    async loadStudentRecords(code){
       try{
         const key = String(code || "").trim().toUpperCase();
         if(AttemptStore.isRemote()){
           try{
             const rows = await AttemptStore.rpc("fn_get_own_attempts", { p_code: key });
             if(Array.isArray(rows)){
+              /* markers from the server are mirrored like any other row.
+                 Nothing on the device is removed — not even the local copy
+                 of a deleted attempt: the marker's KEY keeps it off every
+                 surface (the filter below), so erasing it would buy nothing
+                 and would be the one thing this feature must never do. */
               for(const r of rows){
-                if(r && r.key && r.value) await AttemptStore.setLocal(r.key, r.value);
+                if(!r || !r.key || !r.value) continue;
+                await AttemptStore.setLocal(r.key, r.value);
               }
             }
-          }catch(e){ /* offline: fall through to the local copy */ }
+          }catch(e){
+            /* the server's verdict on a deleted student, even on a device
+               that is already signed in: say so, so the app can end the
+               session rather than keep serving the cached copy */
+            if(AttemptStore.deletedError(e) === "student"){
+              await purgeStudentLocal(key);
+              return "deleted";
+            }
+            /* offline: fall through to the local copy */
+          }
+        } else {
+          const tomb = await AttemptStore.getResult(TOMB_STUDENT_PREFIX + key);
+          if(tomb.status === "error") return "unavailable";
+          if(tomb.status === "ok" && tomb.value && tomb.value.kind === "tombstone") return "deleted";
+        }
+        /* the tomb list first, so a stale local copy of a deleted attempt
+           (local/artifact mode never purges; remote mode may have missed
+           one) is filtered by key below — the key is authoritative */
+        const tombKeys = await AttemptStore.list(TOMB_PREFIX + "attempt:");
+        if(tombKeys === null) return "unavailable";
+        const tombstones = [];
+        const tombstoned = {};
+        for(const tk of tombKeys){
+          /* a marker that cannot be READ is not "no marker": that would let a
+             storage blip show a deleted record — fail closed, like every
+             other read here */
+          const tr = await AttemptStore.getResult(tk);
+          if(tr.status === "error") return "unavailable";
+          const t = tr.value;
+          const stub = tombstoneStub(tk, t);
+          if(!stub) continue;
+          if(String(t.code || "").toUpperCase() !== key) continue;   // another student's
+          tombstoned[stub.attemptId] = true;
+          tombstones.push(stub);
         }
         const keys = await AttemptStore.list("attempt:");
         if(keys === null) return "unavailable";   // storage down — NOT "empty"
         const out = [];
         for(const k of keys){
+          if(tombstoned[k]) continue;               // deleted by the tutor: on no surface
           const r = await AttemptStore.get(k);
           if(!r || !r.student || String(r.student.key || "") !== key) continue;
           /* The storage KEY is authoritative for an attempt's identity; every
@@ -1145,9 +1353,13 @@ window.Attempts = (function(){
           out.push(r);
         }
         out.sort((a,b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
-        return out;
+        return { live: out, tombstones: tombstones };
       }catch(e){ return "unavailable"; }
     },
+
+    /* exposed for app.js and the tests: the one shape a tombstone takes on
+       the student side */
+    tombstoneStub: tombstoneStub,
 
     /* completed/timed-out attempts for this code, newest first. */
     async pastAttempts(code){
@@ -1164,6 +1376,8 @@ window.Attempts = (function(){
         if(!keys) return null;
         let best = null;
         for(const k of keys){
+          // a tombstoned sitting is never resumable — same rule as the index
+          if(await AttemptStore.get(TOMB_PREFIX + k)) continue;
           const r = await AttemptStore.get(k);
           /* Either blob makes an attempt resumable: `resume` from a deliberate
              Save-and-Exit, `checkpoint` from an interruption. Requiring

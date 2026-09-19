@@ -23,6 +23,11 @@ window.Dashboard = (function(){
   let bugs = [];                 // Phase F §9: bug reports, newest first
   let lastStartCode = null;      // the code David reads aloud, shown big
   let profiles = {};             // CODE -> displayName, from student:<CODE> rows
+  /* Tombstones (2026-09-18): key -> value for every tomb:<attemptKey> and
+     tomb:student:<CODE> row. A tombstoned record stays LISTED here, marked
+     "deleted" — present-but-marked is the whole point (an audit can tell
+     "removed" from "never existed"); it is on no student surface. */
+  let tombs = {};
   let source = "storage";        // "storage" | "file"
   let tab = "attempts";
   let sortKey = "startedAt", sortDir = -1;
@@ -294,9 +299,17 @@ window.Dashboard = (function(){
 
   /* ---- the seen set: canonical ids (and family ids) across every COMPLETED
      attempt of one student, forms and sets alike, with provenance ---- */
+  /* Deleted (tombstoned) attempts are NOT part of the seen set — same rule
+     as a sitting removed by archive-then-delete — and a deleted student has
+     no seen set at all. Never silent: seenSetFor counts what it left out and
+     seenCaveat prints it. */
   function completedAttemptsOf(code){
+    if(isDeletedStudent(code)) return [];
     return recs.filter(r => r && r.student && r.student.key === code &&
-      (r.status === "completed" || r.status === "timed-out"));
+      (r.status === "completed" || r.status === "timed-out") && !isTombstoned(r));
+  }
+  function deletedAttemptsOf(code){
+    return recs.filter(r => r && r.student && r.student.key === code && isTombstoned(r));
   }
   function recordAnswerKeys(r){
     const a = r.answers;
@@ -330,7 +343,8 @@ window.Dashboard = (function(){
   }
   function seenSetFor(code){
     if(!dedup || !code) return null;
-    const seen = { canon: Object.create(null), fam: Object.create(null), attempts: 0, unindexed: 0, unindexedAttempts: 0 };
+    const seen = { canon: Object.create(null), fam: Object.create(null), attempts: 0, unindexed: 0, unindexedAttempts: 0,
+                   deleted: deletedAttemptsOf(code).length, deletedStudent: isDeletedStudent(code) };
     completedAttemptsOf(code).forEach(r => {
       seen.attempts++;
       const att = attemptLabel(r);
@@ -353,11 +367,20 @@ window.Dashboard = (function(){
      hints instead: the seen set is derived from the attempts IN STORAGE —
      a sitting removed by archive-then-delete (§7b) no longer counts. */
   function seenCaveat(seen){
-    if(!seen || !seen.unindexed) return "";
-    const which = seen.attempts === 1 ? "their completed attempt"
-      : seen.unindexedAttempts + " of their " + seen.attempts + " completed attempts";
-    return seen.unindexed + " question" + (seen.unindexed === 1 ? "" : "s") + " from " + which + " " +
-      (seen.unindexed === 1 ? "is" : "are") + " not in the index and could not be compared.";
+    if(!seen) return "";
+    const parts = [];
+    if(seen.deletedStudent){
+      parts.push("This student was deleted — nothing of theirs counts as seen.");
+    } else if(seen.deleted){
+      parts.push(seen.deleted + " deleted attempt" + (seen.deleted === 1 ? "" : "s") + " not counted.");
+    }
+    if(seen.unindexed){
+      const which = seen.attempts === 1 ? "their completed attempt"
+        : seen.unindexedAttempts + " of their " + seen.attempts + " completed attempts";
+      parts.push(seen.unindexed + " question" + (seen.unindexed === 1 ? "" : "s") + " from " + which + " " +
+        (seen.unindexed === 1 ? "is" : "are") + " not in the index and could not be compared.");
+    }
+    return parts.join(" ");
   }
   /* seen: this canonical item was in a completed attempt (the same question,
      or an exact duplicate on another form or in a set). reskin: none of its
@@ -592,9 +615,14 @@ window.Dashboard = (function(){
     }
     return qIndexes[entry.testId];
   }
+  /* Dates come off records and markers, which are untrusted (ATTEMPTS-SPEC
+     §7): a value that is not a date prints an em-dash, never "Invalid Date"
+     — inert either way, but a dash reads as "unknown" while the other reads
+     like a broken screen. */
   function fmtDate(isoStr){
     if(!isoStr) return "—";
     const d = new Date(isoStr);
+    if(isNaN(d.getTime())) return "—";
     return d.toLocaleDateString(undefined, {year:"2-digit", month:"short", day:"numeric"}) +
       " " + d.toLocaleTimeString(undefined, {hour:"numeric", minute:"2-digit"});
   }
@@ -628,7 +656,67 @@ window.Dashboard = (function(){
   }
   function statusBadge(r){
     const cls = { "completed":"ok", "in-progress":"warn", "timed-out":"to" }[r.status] || "";
-    return `<span class="dstatus ${cls}">${esc(r.status || "?")}</span>`;
+    return `<span class="dstatus ${cls}">${esc(r.status || "?")}</span>` +
+      (isTombstoned(r) ? ' <span class="dstatus del" title="Marked deleted by the tutor — kept for audit, shown to no student">deleted</span>' : "");
+  }
+  /* ---- tombstones (2026-09-18) ---- */
+  function tombFor(attemptId){ return (typeof attemptId === "string" && tombs["tomb:" + attemptId]) || null; }
+  function isDeletedStudent(code){
+    const c = String(code || "").toUpperCase();
+    return !!(c && tombs["tomb:student:" + c]);
+  }
+  /* A record is deleted if it has its own marker OR belongs to a deleted
+     student: the second case covers a row that reached the server AFTER the
+     student was retired (a never-synced sitting uploaded by the tutor, a row
+     pulled from another mirror) — the server refuses the student's own
+     writes, but the tutor's REST path does not go through the RPCs. Such a
+     row must never read as live here. */
+  function isTombstoned(r){
+    return !!(r && (tombFor(r.attemptId) || isDeletedStudent(r.student && r.student.key)));
+  }
+  /* Markers whose record is no longer listed (rotated away by
+     archive-then-delete, or never on this mirror): still "removed", never
+     "never existed". Shaped like Attempts.tombstoneStub so assignment status
+     can read them exactly as the student home does. */
+  function orphanStubs(code){
+    const listed = {};
+    recs.forEach(r => { if(r && r.attemptId) listed[r.attemptId] = true; });
+    const out = [];
+    Object.keys(tombs).forEach(k => {
+      const t = tombs[k];
+      if(!t || t.targetKind !== "attempt" || listed[t.target]) return;
+      if(code && String(t.code || "").toUpperCase() !== code) return;
+      out.push({ attemptId: t.target, tombstoned: true, orphan: true,
+        deletedAt: typeof t.deletedAt === "string" ? t.deletedAt : null,
+        student: { key: t.code, code: t.code },
+        testId: typeof t.testId === "string" ? t.testId : null,
+        assignmentId: typeof t.assignmentId === "string" ? t.assignmentId : null,
+        status: typeof t.status === "string" ? t.status : "unknown",
+        kind: t.attemptKind === "set" ? "set" : undefined,
+        conditions: typeof t.conditions === "string" ? t.conditions : "unknown",
+        startedAt: typeof t.startedAt === "string" ? t.startedAt : "" });
+    });
+    return out;
+  }
+  /* The confirmation gate: the tutor must type the student's code back,
+     exactly (case and spaces forgiven, nothing else). One rule for both
+     panels, re-checked at the click, so the button state can never be the
+     only thing standing between a slip and a deletion. */
+  function deleteGateOk(typed, code){
+    const want = StudentCode.normalize(code);
+    return StudentCode.valid(want) && StudentCode.normalize(typed) === want;
+  }
+  function tombstoneNoteHtml(r){
+    const t = tombFor(r && r.attemptId);
+    const code = r && r.student && r.student.key;
+    if(!t && !isDeletedStudent(code)) return "";
+    const st = t ? null : tombs["tomb:student:" + String(code || "").toUpperCase()];
+    const src = t || st || {};
+    const when = fmtDate(src.deletedAt);
+    return `<p class="dash-warn">🗑 <b>Deleted</b> by ${esc(src.deletedBy || "?")} on ${esc(when)}` +
+      (t ? (t.reason === "student" ? " (the student was deleted)" : "")
+         : " (the student was deleted; this record arrived without its own marker)") +
+      `. The record is kept as it was for audit and is shown to no student; it cannot be un-deleted here.</p>`;
   }
   // Phase G §1: extended-time / untimed badge (blank for standard timing)
   function timingLabel(t){
@@ -648,7 +736,8 @@ window.Dashboard = (function(){
   function studentCell(code){
     const c = String(code || "?");
     const n = nameFor(c);
-    return n ? `<b>${esc(n)}</b> <span class="dcode">${esc(c)}</span>` : esc(c);
+    const del = isDeletedStudent(c) ? ' <span class="dstatus del" title="This student was deleted — the code is retired">deleted</span>' : "";
+    return (n ? `<b>${esc(n)}</b> <span class="dcode">${esc(c)}</span>` : esc(c)) + del;
   }
   /* Plain-text name+code for a <select><option> — option text can't carry
      studentCell()'s <b>/<span> markup, so this is the same join flattened to
@@ -656,17 +745,25 @@ window.Dashboard = (function(){
   function codeOptionLabel(code){
     const c = String(code || "?");
     const n = nameFor(c);
-    return n ? n + " (" + c + ")" : c;
+    return (n ? n + " (" + c + ")" : c) + (isDeletedStudent(c) ? " — deleted" : "");
   }
-  /* Delete is finished-attempts only — never in-progress. That is what
-     guarantees it's never offered mid-sitting (a live sitting is always
-     "in-progress" until the student submits), and it's also what keeps a
-     resumable record from ever being deleted out from under a student who
-     could still resume into it. One rule, shared by the button's own gate
-     (openDetail) and deleteAttempt's belt-and-braces recheck, so the two
-     can never drift apart. */
-  function isDeletableAttempt(r){
+  /* Finished (completed / timed-out) and loaded from storage. This is the
+     ARCHIVE-THEN-DELETE gate (exportAll / deleteArchived, ATTEMPTS-SPEC §7b)
+     — unchanged semantics: a live sitting is never armed or removed. */
+  function isFinishedAttempt(r){
     return source === "storage" && !!r && (r.status === "completed" || r.status === "timed-out");
+  }
+  /* The TOMBSTONE gate (the per-attempt "Delete this attempt…" button):
+     finished, not already tombstoned, and not a deleted student's (all of a
+     deleted student's attempts are already marked). Finished-only is what
+     keeps a resumable record from being marked out from under a student who
+     could still resume into it; the server enforces the same rule
+     (fn_tombstone_attempt refuses an in-progress record). One rule, shared
+     by the button's own gate (openDetail) and deleteAttempt's belt-and-braces
+     recheck, so the two can never drift apart. */
+  function isDeletableAttempt(r){
+    return isFinishedAttempt(r) && !isTombstoned(r) && !isDeletedStudent(r.student && r.student.key) &&
+      StudentCode.valid(r.student && r.student.key);   // the gate needs a real code to type back
   }
 
   function givenLabel(entry, q){
@@ -752,8 +849,22 @@ window.Dashboard = (function(){
   }
 
   async function loadAssignsAndBugs(){
-    assigns = []; bugs = []; profiles = {};
+    assigns = []; bugs = []; profiles = {}; tombs = {};
     await loadSets();
+    /* tombstones: the KEY is authoritative — a marker whose target disagrees
+       with the key it sits under is forged/corrupt and is ignored (same rule
+       as attemptId-vs-key for records). Loaded before anything renders, so a
+       deleted record is never shown unmarked even for a moment. */
+    const tKeys = await AttemptStore.list("tomb:");
+    if(tKeys){
+      for(const k of tKeys){
+        const v = await AttemptStore.get(k);
+        if(!v || v.kind !== "tombstone" || typeof v.target !== "string") continue;
+        const okKey = (v.targetKind === "attempt" && k === "tomb:" + v.target) ||
+                      (v.targetKind === "student" && k === "tomb:student:" + v.target);
+        if(okKey) tombs[k] = v;
+      }
+    }
     /* display-name profiles live in their own rows, never inside attempts */
     const pKeys = await AttemptStore.list("student:");
     if(pKeys){
@@ -799,14 +910,25 @@ window.Dashboard = (function(){
     bugs.sort((x, y) => (y.at || y.__key || "").localeCompare(x.at || x.__key || ""));
   }
 
+  /* An archive file's contents into the dashboard's state: records, and the
+     tombstones the archive carries (exportAll), so a deleted record reads
+     "deleted" in the file view too, never as a live one. Named so the tests
+     can drive it without a FileReader. */
+  function adoptArchive(data){
+    const arr = Array.isArray(data) ? data : ((data && data.records) || []);
+    recs = arr.filter(r => r && r.attemptId);
+    tombs = {};
+    ((data && Array.isArray(data.tombstones)) ? data.tombstones : []).forEach(t => {
+      if(t && typeof t.key === "string" && t.value && t.value.kind === "tombstone" && typeof t.value.target === "string") tombs[t.key] = t.value;
+    });
+    source = "file";
+  }
   function loadFromFile(file){
     const reader = new FileReader();
     reader.onload = () => {
       try{
         const data = JSON.parse(reader.result);
-        const arr = Array.isArray(data) ? data : (data.records || []);
-        recs = arr.filter(r => r && r.attemptId);
-        source = "file";
+        adoptArchive(data);
         lastExport = null;
         $("dashDeleteBtn").disabled = true;
         $("dashStatus").textContent = recs.length + " attempt(s) loaded from " + file.name +
@@ -822,10 +944,16 @@ window.Dashboard = (function(){
   /* ---------- export + archive-then-delete (§6, §7b) ---------- */
   function exportAll(){
     if(!recs.length){ $("dashStatus").textContent = "Nothing to export."; return; }
+    /* `records` holds every record exactly as stored — tombstoned ones
+       included and UNCHANGED (the record is immutable; deletion is a
+       separate row). `tombstones` carries those rows, so the archive can say
+       which records were deleted, by whom and when, and the SPR audit
+       (tests/spr-grading.test.js §5) can skip them and say how many. */
     const payload = {
       schema: "acestem-attempt-archive-v1",
       exportedAt: new Date().toISOString(),
-      records: recs
+      records: recs,
+      tombstones: Object.keys(tombs).sort().map(k => ({ key: k, value: tombs[k] }))
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
     const a = document.createElement("a");
@@ -842,7 +970,7 @@ window.Dashboard = (function(){
          that finishes between this download and the click would be lost
          outright, since finalize's upload has already drained). Those rows
          stay; the status says how many. */
-      const deletable = recs.filter(isDeletableAttempt).map(r => r.attemptId);
+      const deletable = recs.filter(isFinishedAttempt).map(r => r.attemptId);
       const live = recs.length - deletable.length;
       lastExport = deletable.length ? { ids: deletable, when: new Date() } : null;
       $("dashDeleteBtn").disabled = !lastExport;
@@ -889,7 +1017,7 @@ window.Dashboard = (function(){
          in-progress when the archive was downloaded, or that has changed
          since, stays; the archive is not a backup of a live sitting */
       const cur = recs.find(x => x.attemptId === id);
-      if(!isDeletableAttempt(cur)){ skipped++; skippedIds.push(id); continue; }
+      if(!isFinishedAttempt(cur)){ skipped++; skippedIds.push(id); continue; }
       const res = await tutorDelete(id);
       if(res.ok){ ok++; if(res.warning) warnings.push(res.warning); }
       else { stillThere.push(id); rejections.push(res.message); }
@@ -944,6 +1072,7 @@ window.Dashboard = (function(){
      scores in their Past view only after this flips released:true. */
   function releaseCell(r){
     if(r.status === "in-progress") return "—";
+    if(isTombstoned(r)) return "—";              // a deleted record has no student to release to
     return `<button class="dash-rel ${r.released ? "rel-on" : ""}" data-rel="${escAttr(r.attemptId)}"
       title="${r.released ? "Hide scores from the student again" : "Let the student see this attempt in their Past view"}">${
       r.released ? "Released ✓" : "Release"}</button>`;
@@ -953,6 +1082,10 @@ window.Dashboard = (function(){
     if(!r) return;
     if(source !== "storage"){
       $("dashStatus").textContent = "Release only works on storage-loaded attempts — archive files are read-only.";
+      return;
+    }
+    if(isTombstoned(r)){
+      $("dashStatus").textContent = "This attempt was deleted — a deleted record is never released, and it is not edited.";
       return;
     }
     r.released = !r.released;
@@ -989,7 +1122,7 @@ window.Dashboard = (function(){
       cols.map(([k, lbl]) => `<th data-sort="${k}" class="${sortKey===k?'sorted':''}">${lbl}${sortKey===k ? (sortDir>0?" ▲":" ▼") : ""}</th>`).join("") +
       `</tr></thead><tbody>` +
       sorted.map((r, i) => `
-        <tr data-att="${escAttr(r.attemptId)}">
+        <tr data-att="${escAttr(r.attemptId)}"${isTombstoned(r) ? ' class="tomb"' : ""}>
           <td>${studentCell(r.student && r.student.code)}</td>
           <td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</td>
           <td>${fmtDate(r.startedAt)}</td>
@@ -1031,24 +1164,39 @@ window.Dashboard = (function(){
       assigns.forEach(a => addCode(a.code));
       Object.keys(profiles).forEach(addCode);
     }
+    /* deleted students stay listed too — present-but-marked, like their
+       records — so the roster never silently loses a code */
+    if(source === "storage"){
+      Object.keys(tombs).forEach(k => { if(k.indexOf("tomb:student:") === 0) addCode(k.slice("tomb:student:".length)); });
+    }
     const keys = Object.keys(byStudent).sort();
     if(!keys.length) return '<p class="dash-empty">No students yet — add codes in the Assign tab.</p>';
     return keys.map(k => {
       const list = byStudent[k].slice().sort((a,b) => (a.startedAt||"").localeCompare(b.startedAt||""));
+      const deleted = isDeletedStudent(k);
+      const delCount = list.filter(isTombstoned).length;
+      const orphans = source === "storage" ? orphanStubs(k).length : 0;   // markers whose record was archived away
       /* No sign-in link for keys that aren't real codes ("?" grouping, or a
          hand-written storage key) — parseFragmentCode would reject the link
          anyway. valid() normalizes before testing, so the link carries the
-         canonical form rather than whatever casing the key happened to use. */
-      const linkBtn = StudentCode.valid(k)
+         canonical form rather than whatever casing the key happened to use.
+         A deleted student gets no link (the code is retired and would be
+         refused) and no delete button (already done). */
+      const linkBtn = (StudentCode.valid(k) && !deleted)
         ? `<button class="dash-rel copy-link" data-code="${escAttr(StudentCode.normalize(k))}"
             title="Copy a link that signs this student in">Copy sign-in link</button>` : "";
+      /* ONE student per button, per panel, per confirmation — there is no
+         multi-select and no "delete all" anywhere in this dashboard */
+      const delBtn = (source === "storage" && StudentCode.valid(k) && !deleted)
+        ? `<button class="dash-rel dash-danger student-del" data-code="${escAttr(StudentCode.normalize(k))}"
+            title="Retire this code and mark every attempt deleted (asks you to type the code back)">Delete student…</button>` : "";
       let body;
       if(list.length){
         body = `<table class="dtable slim"><thead><tr><th>Date</th><th>Test</th><th>Score</th><th>RW</th><th>Math</th><th>Status</th><th>Conditions</th></tr></thead><tbody>` +
         list.map(r => {
           const bs = (r.score && r.score.bySection) || {};
           const rw = bs["Reading and Writing"], ma = bs["Math"];
-          return `<tr data-att="${escAttr(r.attemptId)}">
+          return `<tr data-att="${escAttr(r.attemptId)}"${isTombstoned(r) ? ' class="tomb"' : ""}>
             <td>${fmtDate(r.startedAt)}</td><td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</td>
             <td><b>${scoreStr(r)}</b></td>
             <td>${countPair(rw)}</td>
@@ -1060,17 +1208,21 @@ window.Dashboard = (function(){
         const ae = source === "storage" ? assigns.find(a => a.code === k) : null;
         const assigned = ae ? ae.list.length : 0;
         body = `<p class="dash-hint">${
-          hasAny ? "No attempts match the current filter."
+          deleted ? "Deleted student — no attempts on record."
+          : hasAny ? "No attempts match the current filter."
           : assigned ? "No attempts yet — " + assigned + " test(s) assigned."
           : "No attempts yet — nothing assigned, so their home screen is empty."}</p>`;
       }
-      return `<div class="dcard">
-        <h3>${studentCell(k)} <span class="dcard-sub">${list.length} attempt(s)</span>
-          ${linkBtn}</h3>` + body + `</div>`;
+      const sub = list.length + " attempt(s)" + (delCount ? ", " + delCount + " deleted" : "") +
+        (orphans ? ", " + orphans + " deleted marker(s) whose record was archived away" : "");
+      return `<div class="dcard${deleted ? " deleted" : ""}">
+        <h3>${studentCell(k)} <span class="dcard-sub">${sub}</span>
+          ${linkBtn}${delBtn}</h3>` + body + `</div>`;
     }).join("");
   }
 
   function viewItems(rows){
+    rows = rows.filter(r => !isTombstoned(r));    // deleted records are data no analysis should read
     const ft = $("dashFilterTest").value;
     const testIds = [...new Set(rows.map(r => r.testId))];
     if(testIds.length > 1 && !ft) return '<p class="dash-empty">Item analysis is per test — pick one in the Test filter.</p>';
@@ -1130,7 +1282,7 @@ window.Dashboard = (function(){
   }
 
   function viewInsights(rows){
-    const use = rows.filter(r => r.answers && Object.keys(r.answers).length);
+    const use = rows.filter(r => r.answers && Object.keys(r.answers).length && !isTombstoned(r));
     if(!use.length) return '<p class="dash-empty">No attempts match.</p>';
 
     const quad = { fw:[], nw:[], fr:0, nr:0 };            // flagged/not × wrong/right
@@ -1264,29 +1416,59 @@ window.Dashboard = (function(){
     return category === "test" ? conditions === "proctored" : conditions !== "proctored";
   }
   function attemptsForAssignment(code, a){
-    const explicit = recs.filter(r => r.student && r.student.key === code &&
+    /* listed records plus orphan deletion markers (record rotated away):
+       a deleted attempt still closes the assignment it was stamped with */
+    const pool = recs.concat(orphanStubs(code));
+    const explicit = pool.filter(r => r.student && r.student.key === code &&
       r.assignmentId && r.assignmentId === a.assignmentId);
     if(explicit.length) return explicit;
     if(assignCountFor(code, a.testId) === 1){
-      return recs.filter(r => r.student && r.student.key === code &&
+      /* an UNTAGGED deleted record keeps closed only an assignment that
+         already existed when it was deleted — never one created after the
+         deletion (that is a re-sit the tutor asked for). Same rule as the
+         student home's buildAssignmentIndex, so the two views agree. */
+      return pool.filter(r => r.student && r.student.key === code &&
         !r.assignmentId && sameTest(r.testId, a.testId) &&
-        attemptCategoryMatches(a.category, r.conditions));
+        attemptCategoryMatches(a.category, r.conditions) && deletedMayClose(a, r));
     }
     return [];
+  }
+  /* When was this record deleted? Its own marker's deletedAt, else the
+     student marker's (a deleted student's record without its own marker),
+     else null. Untrusted like every record value: a non-string is null. */
+  function deletedAtOf(r){
+    if(!isTombstoned(r)) return null;
+    const own = tombFor(r.attemptId);
+    const src = own || (typeof r.deletedAt === "string" ? r : null) ||
+      tombs["tomb:student:" + String((r.student && r.student.key) || "").toUpperCase()];
+    return (src && typeof src.deletedAt === "string") ? src.deletedAt : null;
+  }
+  function deletedMayClose(a, r){
+    if(!isTombstoned(r)) return true;
+    const when = deletedAtOf(r);
+    return typeof when === "string" && typeof a.assignedAt === "string" &&
+      Date.parse(a.assignedAt) < Date.parse(when);
   }
   function assignRowStatus(code, a){
     const mine = attemptsForAssignment(code, a);
     // completion is DERIVED from the attempt records (the flag is a hint that
-    // was silently never written before 2026-08-02); either signal counts
+    // was silently never written before 2026-08-02); either signal counts.
+    // A DELETED completed attempt still completes its assignment — exactly
+    // what the student home derives from the tombstone stub — so the two
+    // views agree and a deletion never reopens an assignment (25ef8f7).
     if(a.completedAttemptId ||
        mine.some(r => r.status === "completed" || r.status === "timed-out")) return "completed";
-    if(mine.some(r => r.status === "in-progress")) return "in-progress";
+    // a deleted in-progress sitting (a deleted student's) is not resumable
+    // anywhere, so it is not "in progress" here either
+    if(mine.some(r => r.status === "in-progress" && !isTombstoned(r))) return "in-progress";
     if(a.expiresAt && Date.now() > Date.parse(a.expiresAt)) return "expired";
     return "pending";
   }
   function fmtDay(isoStr){
     if(!isoStr) return "—";
-    return new Date(isoStr).toLocaleDateString(undefined, {month:"short", day:"numeric", year:"2-digit"});
+    const d = new Date(isoStr);
+    if(isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString(undefined, {month:"short", day:"numeric", year:"2-digit"});
   }
 
   function viewAssign(){
@@ -1299,10 +1481,12 @@ window.Dashboard = (function(){
       // they'd be stale, and deleting could orphan a live in-progress attempt
       return '<p class="dash-empty">You\'re viewing a loaded archive file. Assignment statuses are computed from live attempts, so managing assignments is disabled — reload from storage first.</p>';
     }
+    // a deleted student is never offered as an assignment target (the code
+    // is retired: it cannot sign in, so nothing assigned to it can be sat)
     const knownCodes = Array.from(new Set(
       recs.map(r => r.student && r.student.key).filter(Boolean)
         .concat(assigns.map(a => a.code))
-    )).sort();
+    )).filter(c => !isDeletedStudent(c)).sort();
     // codes that currently HAVE an assign key (non-empty list) — reset targets
     // reset targets: any code that has rows OR an explicit "assigned nothing"
     const assignedCodes = assigns
@@ -1405,6 +1589,13 @@ window.Dashboard = (function(){
     recs.forEach(r => { const k = r.student && r.student.key; if(k) s[String(k).toUpperCase()] = true; });
     assigns.forEach(a => { if(a.code) s[String(a.code).toUpperCase()] = true; });
     Object.keys(profiles).forEach(c => { s[c.toUpperCase()] = true; });
+    /* a deleted student's code is RETIRED: it stays taken for ever, so
+       Generate can never hand it to a new student (who would then be refused
+       at sign-in by the tombstone, and would inherit the old code's history
+       in any export) */
+    Object.keys(tombs).forEach(k => {
+      if(k.indexOf("tomb:student:") === 0) s[k.slice("tomb:student:".length).toUpperCase()] = true;
+    });
     return s;
   }
 
@@ -1455,8 +1646,12 @@ window.Dashboard = (function(){
   function formCodes(){
     const sel = Array.from($("afCodes").selectedOptions).map(o => o.value);
     const free = $("afFree").value.split(/[\s,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
-    return { codes: Array.from(new Set(sel.concat(free))),
-             bad: free.filter(c => !StudentCode.valid(c)) };
+    const all = Array.from(new Set(sel.concat(free)));
+    /* a deleted (retired) code is reported, never silently skipped or used:
+       the caller refuses the whole form so nothing is half-done */
+    return { codes: all.filter(c => !isDeletedStudent(c)),
+             bad: free.filter(c => !StudentCode.valid(c)),
+             deleted: all.filter(isDeletedStudent) };
   }
 
   /* ================= TUTOR MUTATIONS (remote-confirmed) =================
@@ -1481,6 +1676,8 @@ window.Dashboard = (function(){
                                : "assignment " + p.slice(2).join(":") + " for " + p[1];
     }
     if(p[0] === "assign")  return "the legacy assignment list for " + (p[1] || "?");
+    if(p[0] === "tomb" && p[1] === "student") return "the deletion marker for student " + (p[2] || "?");
+    if(p[0] === "tomb")    return "the deletion marker for " + describeRow(k.slice("tomb:".length));
     if(p[0] === "student") return "the display name for " + (p[1] || "?");
     if(p[0] === "pset")    return "set " + (p[1] || "?");
     if(p[0] === "attempt") return "attempt " + k;
@@ -1518,6 +1715,92 @@ window.Dashboard = (function(){
     return { ok: false, message: "Not deleted — " + describeRow(key) + ": storage isn't writable in this browser." };
   }
 
+  /* ================= TOMBSTONES (2026-09-18) =================
+     The third helper, same contract as the two above: SERVER FIRST, mirror
+     on success, "Not deleted — …" naming the row when the server refuses,
+     never a word about sync. What it writes is a deletion MARKER row —
+     tomb:<attemptKey> or tomb:student:<CODE> — and nothing else: no record
+     is edited, no row is removed, there is no un-delete. In remote mode the
+     server does the writing (fn_tombstone_attempt / fn_tombstone_student:
+     SECURITY DEFINER, EXECUTE for `authenticated` only, who/when stamped
+     from the JWT) and this browser mirrors exactly the rows it returns. In
+     local/artifact mode this store IS the record, so the same rows are
+     written here with the local identity. Idempotent: an existing marker is
+     never overwritten, so the original who/when always stands.
+     `kind` is "attempt" (id = attemptId, finished only) or "student"
+     (id = code: every attempt the code owns, in-progress included, then the
+     student marker LAST — it is the commit point that refuses sign-in). */
+  function localTombstone(r, reason, now, by){
+    return { kind: "tombstone", targetKind: "attempt", target: r.attemptId,
+      code: (r.student && r.student.key) || null,
+      deletedAt: now, deletedBy: by, reason: reason,
+      testId: r.testId == null ? null : r.testId,
+      assignmentId: r.assignmentId == null ? null : r.assignmentId,
+      status: r.status == null ? null : r.status,
+      attemptKind: r.kind === "set" ? "set" : "form",
+      setId: r.setId == null ? null : r.setId,
+      conditions: r.conditions == null ? null : r.conditions,
+      startedAt: r.startedAt == null ? null : r.startedAt,
+      submittedAt: r.submittedAt == null ? null : r.submittedAt };
+  }
+  function isTombValue(v){ return !!(v && typeof v === "object" && v.kind === "tombstone" && typeof v.target === "string"); }
+  async function tutorTombstone(kind, id){
+    const key = kind === "student" ? "tomb:student:" + id : "tomb:" + id;
+    if(AttemptStore.isRemote()){
+      let out;
+      try{
+        out = kind === "student"
+          ? await AttemptStore.adminRpc("fn_tombstone_student", { p_code: id })
+          : await AttemptStore.adminRpc("fn_tombstone_attempt", { p_key: id });
+      }catch(e){ return { ok: false, message: rejectedText("deleted", key, e) }; }
+      const rows = kind === "student"
+        ? [{ key: key, value: out && out.student }].concat((out && Array.isArray(out.attempts)) ? out.attempts : [])
+        : [{ key: key, value: out }];
+      /* the server must hand back a marker for every row; anything else is
+         treated as not done — the mirror is left exactly as it was */
+      if(!rows.length || rows.some(r => !r || typeof r.key !== "string" || r.key.indexOf("tomb:") !== 0 || !isTombValue(r.value))){
+        return { ok: false, message: "Not deleted — " + describeRow(key) +
+          ": the server answered without a deletion marker. This browser's copy is unchanged." };
+      }
+      let mirrorFail = 0;
+      for(const r of rows){ if(!(await AttemptStore.setLocal(r.key, r.value))) mirrorFail++; }
+      return { ok: true, rows: rows, warning: mirrorFail
+        ? "Deleted on the server, but " + mirrorFail + " marker(s) couldn't be written to this browser's copy — press Refresh."
+        : undefined };
+    }
+    /* local / artifact: build the same rows here. Attempt markers first,
+       the student marker last; a write that fails stops the loop and says
+       how far it got — never claims the student is gone when they are not. */
+    const now = new Date().toISOString();
+    const by = AttemptStore.tutorIdentity();
+    const rows = [];
+    if(kind === "student"){
+      const mine = recs.filter(r => r && r.student && r.student.key === id);
+      for(const r of mine){
+        const tk = "tomb:" + r.attemptId;
+        const existing = await AttemptStore.get(tk);
+        rows.push({ key: tk, value: isTombValue(existing) ? existing : localTombstone(r, "student", now, by) });
+      }
+      const existing = await AttemptStore.get(key);
+      rows.push({ key: key, value: isTombValue(existing) ? existing : { kind: "tombstone", targetKind: "student",
+        target: id, code: id, deletedAt: now, deletedBy: by, attemptsTombstoned: mine.length, hadProfile: !!profiles[id] } });
+    } else {
+      const r = recs.find(x => x.attemptId === id);
+      if(!r) return { ok: false, message: "Not deleted — " + describeRow(key) + ": the attempt is not listed right now. Press Refresh." };
+      const existing = await AttemptStore.get(key);
+      rows.push({ key: key, value: isTombValue(existing) ? existing : localTombstone(r, "attempt", now, by) });
+    }
+    let written = 0;
+    for(const r of rows){
+      if(!(await AttemptStore.setLocal(r.key, r.value))){
+        return { ok: false, message: "Not deleted — " + describeRow(r.key) + ": storage isn't writable in this browser." +
+          (written ? " " + written + " attempt marker(s) were written before it failed — press Refresh and retry." : "") };
+      }
+      written++;
+    }
+    return { ok: true, rows: rows };
+  }
+
   /* Write the display-name profile row. Its own key, its own row — never
      merged into an attempt (ATTEMPTS-SPEC §7a). Writing goes through the
      tutor's authenticated table access; there is deliberately no anon RPC for
@@ -1540,8 +1823,9 @@ window.Dashboard = (function(){
   }
 
   async function saveNameOnly(){
-    const { codes, bad } = formCodes();
+    const { codes, bad, deleted } = formCodes();
     if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
+    if(deleted.length){ $("afMsg").textContent = "Deleted — a retired code can't be renamed: " + deleted.join(", "); return; }
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
     const name = $("afName").value.trim();
     const r = await saveProfiles(codes, name);
@@ -1556,8 +1840,9 @@ window.Dashboard = (function(){
   }
 
   async function createAssignment(){
-    const { codes, bad } = formCodes();
+    const { codes, bad, deleted } = formCodes();
     if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
+    if(deleted.length){ $("afMsg").textContent = "Deleted — a retired code can't be assigned to: " + deleted.join(", "); return; }
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
     // a name typed here is saved as a profile row, separate from the assignment
     const nameIn = $("afName").value.trim();
@@ -1679,6 +1964,13 @@ window.Dashboard = (function(){
       return;
     }
     let sent = 0, skipped = 0, failed = 0;
+    /* tomb: rows are deliberately NOT carried: a deletion marker is written
+       only through the confirmed dashboard flow and the server's tutor RPC,
+       never by bulk upload from whatever a device holds. And nothing owned
+       by a DELETED student goes up either — the server refuses that
+       student's own writes, so the tutor's REST path must not become the
+       way a retired code's rows reach the server unmarked. Counted, named. */
+    let retired = 0;
     for(const prefix of ["attempt:", "assign:", "bug:", "pset:", "student:"]){
       const keys = (await AttemptStore.list(prefix)) || [];
       for(const k of keys){
@@ -1691,13 +1983,15 @@ window.Dashboard = (function(){
         else if(k.indexOf("assign:") === 0) owner = k.split(":")[1] || null;
         else if(k.indexOf("student:") === 0) owner = k.split(":")[1] || null;
         else if(k.indexOf("bug:") === 0) owner = v.studentCode || null;
+        if(owner && isDeletedStudent(owner)){ retired++; continue; }
         try{ await AttemptStore.adminUpsert(k, owner, v); sent++; }
         catch(e){ failed++; }
       }
     }
     $("dashStatus").textContent =
       "Upload finished — " + sent + " sent, " + skipped + " already on the server" +
-      (failed ? ", " + failed + " failed" : "") + ".";
+      (failed ? ", " + failed + " failed" : "") +
+      (retired ? ", " + retired + " belonging to deleted student(s) not sent" : "") + ".";
     await loadFromStorage();
   }
 
@@ -1844,7 +2138,7 @@ window.Dashboard = (function(){
 
     const marksHint = dedupState !== "ready" ? "" : student
       ? `<p class="dash-hint">Seen / reskin seen / unseen marks are for ${studentCell(student)} (the Student filter above), from ${seen ? seen.attempts : 0} completed attempt${seen && seen.attempts === 1 ? "" : "s"} in storage — sittings archived and deleted no longer count.${
-          seen && seen.unindexed ? " " + esc(seenCaveat(seen)) : ""}</p>`
+          seen && seenCaveat(seen) ? " " + esc(seenCaveat(seen)) : ""}</p>`
       : '<p class="dash-hint">Pick a student in the Student filter above to mark every question seen / reskin seen / unseen for them.</p>';
 
     return `
@@ -1992,7 +2286,7 @@ window.Dashboard = (function(){
     const knownCodes = Array.from(new Set(
       recs.map(r => r.student && r.student.key).filter(Boolean)
         .concat(assigns.map(a => a.code))
-    )).sort();
+    )).filter(c => !isDeletedStudent(c)).sort();    // retired codes are never offered
     const existing = [];
     assigns.forEach(entry => (entry.list || []).forEach(a => {
       if(a && a.kind === "set") existing.push({ code: entry.code, a: a });
@@ -2150,6 +2444,8 @@ window.Dashboard = (function(){
     const bad = free.filter(c => !StudentCode.valid(c));
     if(bad.length){ $("saMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
     const codes = Array.from(new Set(sel.concat(free)));
+    const retired = codes.filter(isDeletedStudent);
+    if(retired.length){ $("saMsg").textContent = "Deleted — a retired code can't be assigned to: " + retired.join(", "); return; }
     if(!codes.length){ $("saMsg").textContent = "Pick or enter at least one student code."; return; }
     const limitRaw = parseInt($("saLimit").value, 10);
     const limit = (isFinite(limitRaw) && limitRaw > 0) ? Math.min(limitRaw, 180) : null;
@@ -2273,7 +2569,7 @@ window.Dashboard = (function(){
     if(!bugs.length) return '<p class="dash-empty">No bug reports.</p>';
     return bugs.map(b => `
       <div class="dcard bug-card">
-        <div class="bug-head"><b>${esc(b.studentCode || "?")}</b> · ${fmtDate(b.at)}
+        <div class="bug-head"><b>${studentCell(b.studentCode || "?")}</b> · ${fmtDate(b.at)}
           <button class="dash-rel bug-dismiss" data-bug="${escAttr(b.__key)}">Dismiss</button></div>
         <div class="dash-hint">${esc(b.testId || "not in a test")}${b.testVersion ? " @ " + esc(b.testVersion) : ""}${b.moduleId ? " · " + esc(b.moduleId) : ""}${b.questionId ? " · " + esc(b.questionId) : ""}${b.timerRemainingSeconds != null ? " · " + mmss(b.timerRemainingSeconds) + " left" : ""}</div>
         <p class="bug-text">${esc(b.text || "")}</p>
@@ -2323,20 +2619,24 @@ window.Dashboard = (function(){
     // regardless of release). Offered when this build can SERVE the attempt's
     // version — current or archived; the student view loads the pinned build,
     // so the tutor sees exactly what the student sat on. (reuses `test`.)
-    const canOpen = isSet
+    /* a deleted record opens for the TUTOR here (present-but-marked) but
+       never as a student view: that surface exists for students, and the
+       student side never receives this record any more */
+    const canOpen = !isTombstoned(r) && (isSet
       ? (source === "storage" && !!window.AppSetReview)
       : (source === "storage" && test && window.AppTestLoader &&
-         AppTestLoader.canServe(test, r.testVersion));
+         AppTestLoader.canServe(test, r.testVersion)));
     const canDelete = isDeletableAttempt(r);
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
       <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
         ${num(r.score && r.score.noKey) ? " · " + num(r.score.noKey) + " keyless" : ""} · version ${esc(r.testVersion||"?")}</p>
+      ${tombstoneNoteHtml(r)}
       ${canOpen ? '<p><button class="dash-rel" id="dashStudentView">Open student view →</button></p>' : ""}
       ${versionNote}
       ${(r.modules||[]).map(m => `<span class="dmod">${esc(m.section)} ${esc(m.moduleLabel)}: ${mmss(m.timeSpentSeconds)} (${esc(m.endedBy||"?")})</span>`).join(" ")}
       <div class="dash-qlist">${qRows || '<p class="dash-empty">No answers recorded.</p>'}</div>
-      ${canDelete ? '<p><button class="dash-rel dash-danger" id="dashDeleteAttemptBtn">Delete this attempt</button></p>' : ""}`;
+      ${canDelete ? '<p><button class="dash-rel dash-danger" id="dashDeleteAttemptBtn" title="Marks this attempt deleted (asks you to type the student code back)">Delete this attempt…</button></p>' : ""}`;
     if(canOpen){
       const btn = $("dashStudentView");
       if(btn) btn.addEventListener("click", ()=>{
@@ -2348,55 +2648,158 @@ window.Dashboard = (function(){
     }
     if(canDelete){
       const db = $("dashDeleteAttemptBtn");
-      if(db) db.addEventListener("click", ()=> deleteAttempt(r));
+      if(db) db.addEventListener("click", ()=> confirmDeleteAttempt(r));
     }
     $("dashDetail").classList.remove("hidden");
   }
 
-  /* Tutor-only, finished attempts only (isDeletableAttempt — never offered
-     while a status is "in-progress", so this never touches a live sitting).
-     The assignment this attempt belonged to stays "Completed": assignRowStatus
-     and the student-side assignmentComplete() both OR the derived-from-records
-     signal with the persisted completedAttemptId hint written on the
-     assignment row itself at finalize, and deleting an attempt record never
-     touches that row. Losing the record therefore drops it from history
-     without reopening its assignment for a retake.
-     Takes the record itself, not an id — the only caller (openDetail's click
-     handler) already has it, and re-deriving it via recs.find() a second time
-     was pure waste. */
+  /* ---------- deletion = a tombstone (2026-09-18) ----------
+     Two ACTIONS (deleteAttempt, deleteStudent — driven directly by
+     tests/tutor-writes.test.js and tests/tombstone.test.js) behind two
+     CONFIRMATION PANELS (confirmDeleteAttempt, confirmDeleteStudent) that
+     name what will be marked and require the student code typed back.
+     Neither action removes or edits a record: each writes marker rows
+     through tutorTombstone (server first), and the record stays listed here
+     marked "deleted". One attempt or one student per call — there is no
+     bulk path, and none of this touches the archive-then-delete button. */
+
+  /* Finished attempts only (isDeletableAttempt; the server refuses an
+     in-progress record too). The assignment this attempt belonged to stays
+     "Completed" on BOTH sides: here assignRowStatus still sees the record;
+     on the student's device the tombstone's identity summary feeds
+     buildAssignmentIndex, so completion still derives without the record
+     (the persisted completedAttemptId hint is usually absent in remote mode
+     — students can't write assignment rows — which is exactly why the stub
+     exists). Takes the record itself, not an id. */
   async function deleteAttempt(r){
-    if(!isDeletableAttempt(r)) return;   // belt and braces
+    if(!isDeletableAttempt(r)) return { ok: false, message: "Not deleted — this attempt can't be marked (not finished, already deleted, or the student was deleted)." };
     const who = nameFor(r.student && r.student.key) || (r.student && r.student.code) || "?";
-    const msg = "Delete this attempt?\n\n" +
-      "Student: " + who + "\nTest: " + (r.testName || r.testId) + "\nDate: " + fmtDate(r.startedAt) +
-      "\n\nThis permanently removes the attempt record. Its assignment (if any) stays marked " +
-      "Completed — deleting the record does not reopen it for a retake.";
-    if(!window.confirm(msg)) return;
-    /* Server first (tutorDelete): a failed delete has no sync-queue retry
-       behind it, so the mirror must not drop the row until the server has —
-       otherwise the record would be gone here but still on the server, and
-       the next pullAllForTutor() would silently resurrect it. */
-    const res = await tutorDelete(r.attemptId);
+    const res = await tutorTombstone("attempt", r.attemptId);
     if(!res.ok){
       $("dashStatus").textContent = res.message;
-      return;
+      return res;
     }
     openAttemptId = null;
     $("dashDetail").classList.add("hidden");
-    /* the archive button, if armed, no longer covers this row */
-    if(lastExport){
-      const rest = lastExport.ids.filter(id => id !== r.attemptId);
-      lastExport = rest.length ? { ids: rest, when: lastExport.when } : null;
-      $("dashDeleteBtn").disabled = !lastExport;
-    }
-    // update in place rather than a full loadFromStorage(): the row is
-    // already confirmed gone from storage above, nothing else changed, and a
-    // full reload (pullAllForTutor + a get() per attempt key in remote mode)
-    // would both be pure waste and clobber this very status line with its
-    // own "Loading…" text before the tutor ever sees it
-    recs = recs.filter(x => x.attemptId !== r.attemptId);
+    /* in place: the marker is confirmed written, the record itself is
+       unchanged and stays listed — a full reload would only clobber this
+       status line with its own "Loading…" */
+    res.rows.forEach(row => { tombs[row.key] = row.value; });
     renderAll();
-    $("dashStatus").textContent = "Deleted the attempt for " + who + "." + (res.warning ? " " + res.warning : "");
+    $("dashStatus").textContent = "Marked the attempt for " + who + " deleted — it is on no student surface now; the record is kept for audit." +
+      (res.warning ? " " + res.warning : "");
+    return res;
+  }
+
+  /* Retires ONE code: every attempt it owns is marked (in-progress included
+     — the student can no longer sign in to resume it), then the student
+     marker, which is what makes every student RPC refuse the code. The
+     profile row, assignments and bug reports are left as they are (the code
+     is shown "deleted" beside them). Attempts this browser holds that the
+     server never had (a never-synced local-mode sitting) can't be marked by
+     the server; they are counted and named, never silently left live. */
+  async function deleteStudent(code){
+    const c = StudentCode.normalize(code);
+    if(!StudentCode.valid(c)) return { ok: false, message: "Not deleted — " + String(code) + " isn't a student code." };
+    if(isDeletedStudent(c)) return { ok: false, message: "Not deleted — " + c + " was already deleted." };
+    if(source !== "storage") return { ok: false, message: "Not deleted — deleting works against live storage, not a loaded archive file." };
+    const who = nameFor(c) || c;
+    const res = await tutorTombstone("student", c);
+    if(!res.ok){
+      $("dashStatus").textContent = res.message;
+      return res;
+    }
+    const marked = {};
+    res.rows.forEach(row => { tombs[row.key] = row.value; marked[row.key] = true; });
+    const unmarked = recs.filter(r => r && r.student && r.student.key === c && !marked["tomb:" + r.attemptId]);
+    openAttemptId = null;
+    $("dashDetail").classList.add("hidden");
+    const nAtt = res.rows.filter(row => row.key.indexOf("tomb:attempt:") === 0).length;
+    const summary = "Deleted student " + who + (who !== c ? " (" + c + ")" : "") + " — the code is retired and can't sign in; " +
+      nAtt + " attempt(s) marked deleted (records kept for audit)." +
+      (unmarked.length ? " " + unmarked.length + " attempt(s) listed here were NOT marked on the server — it has no copy of them (never uploaded from the device that recorded them, or archived away); here they read deleted only by the student marker, and the server will refuse them if they ever arrive." : "") +
+      (res.warning ? " " + res.warning : "");
+    await loadFromStorage();
+    $("dashStatus").textContent = summary + " " + $("dashStatus").textContent;
+    return Object.assign({ unmarked: unmarked.map(r => r.attemptId) }, res);
+  }
+
+  /* The confirmation panel, in the detail overlay. Names exactly what will
+     be marked, says what does NOT happen, and stays disabled until the
+     student code is typed back (deleteGateOk, re-checked at the click). */
+  function renderConfirmPanel(p){
+    $("dashDetailBody").innerHTML = `
+      <h2>${esc(p.title)}</h2>
+      <div class="dtc-facts">${p.factsHtml}</div>
+      <div class="dash-warn">${p.consequencesHtml}</div>
+      <p class="dash-hint dtc-ask">Type the student code <b>${esc(p.code)}</b> to confirm. One ${esc(p.what)} at a time — there is no bulk delete.</p>
+      <div class="dtc-actions">
+        <input class="dtc-input" id="dtcInput" autocomplete="off" spellcheck="false" placeholder="AS-XXXXXXXX" aria-label="Type the student code to confirm">
+        <button class="dash-rel dash-danger" id="dtcGo" disabled>${esc(p.goLabel)}</button>
+        <button class="dash-rel" id="dtcCancel">Cancel</button>
+      </div>
+      <p class="dash-hint" id="dtcMsg"></p>`;
+    const input = $("dtcInput"), go = $("dtcGo");
+    input.addEventListener("input", () => { go.disabled = !deleteGateOk(input.value, p.code); });
+    input.addEventListener("keydown", e => { if(e.key === "Enter" && !go.disabled) go.click(); });
+    go.addEventListener("click", async () => {
+      if(!deleteGateOk(input.value, p.code)) return;      // the gate, not the button state, decides
+      go.disabled = true; input.disabled = true;
+      $("dtcMsg").textContent = "Marking…";
+      const res = await p.onGo();
+      if(res && !res.ok){ $("dtcMsg").textContent = res.message || "Not deleted."; go.disabled = false; input.disabled = false; }
+    });
+    $("dtcCancel").addEventListener("click", () => { openAttemptId = null; $("dashDetail").classList.add("hidden"); });
+    $("dashDetail").classList.remove("hidden");
+    input.focus();
+  }
+  function confirmDeleteAttempt(r){
+    if(!isDeletableAttempt(r)) return;
+    const code = StudentCode.normalize(r.student && r.student.key);
+    const name = nameFor(code);
+    renderConfirmPanel({
+      title: "Delete this attempt?",
+      what: "attempt",
+      code: code,
+      goLabel: "Delete attempt",
+      factsHtml:
+        `<div><b>Student:</b> ${name ? esc(name) + " " : '<span class="dash-hint">(no display name)</span> '}<span class="dcode">${esc(code)}</span></div>` +
+        `<div><b>Test:</b> ${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</div>` +
+        `<div><b>Date:</b> ${fmtDate(r.startedAt)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b></div>`,
+      consequencesHtml:
+        "<b>What happens:</b> the attempt is <b>marked deleted</b> — a marker row with your identity and the time. " +
+        "The student's device stops showing it (no Past card, no Score Details, no review); " +
+        (r.assignmentId
+          ? "their assignment for it stays <b>Completed</b>. "
+          : "this attempt is not tied to an assignment, so if it was standing in for one, that assignment may become startable again. ") +
+        "<b>What does not happen:</b> the record is not erased or edited (it stays here, marked, for audit), nothing else of theirs changes, and there is no un-delete.",
+      onGo: () => deleteAttempt(r)
+    });
+  }
+  function confirmDeleteStudent(code){
+    const c = StudentCode.normalize(code);
+    if(!StudentCode.valid(c) || isDeletedStudent(c) || source !== "storage") return;
+    const name = nameFor(c);
+    const mine = recs.filter(r => r && r.student && r.student.key === c);
+    const done = mine.filter(r => r.status === "completed" || r.status === "timed-out").length;
+    const live = mine.filter(r => r.status === "in-progress").length;
+    const already = mine.filter(isTombstoned).length;
+    const nAssign = ((assigns.find(a => a.code === c) || {}).list || []).length;
+    renderConfirmPanel({
+      title: "Delete this student?",
+      what: "student",
+      code: c,
+      goLabel: "Delete student",
+      factsHtml:
+        `<div><b>Student:</b> ${name ? esc(name) + " " : '<span class="dash-hint">(no display name)</span> '}<span class="dcode">${esc(c)}</span></div>` +
+        `<div><b>Attempts:</b> ${mine.length} on record — ${done} finished, ${live} in progress` + (already ? ", " + already + " already deleted" : "") + `</div>` +
+        `<div><b>Assignments:</b> ${nAssign}</div>`,
+      consequencesHtml:
+        "<b>What happens:</b> the code <b>" + esc(c) + "</b> is <b>retired</b> — it can no longer sign in (typed, sign-in link, or a saved session) and will never be issued again; " +
+        "every attempt above is <b>marked deleted</b>" + (live ? " (the in-progress one can no longer be resumed)" : "") + ". " +
+        "<b>What does not happen:</b> no record is erased or edited (they stay here, marked, for audit), the display name row and assignments are left in place, and there is no un-delete.",
+      onGo: () => deleteStudent(c)
+    });
   }
 
   /* ---------- events ---------- */
@@ -2435,6 +2838,11 @@ window.Dashboard = (function(){
       btn.addEventListener("click", e => {
         e.stopPropagation();                   // don't open the row's detail view
         copySignInLink(btn.dataset.code);
+      }));
+    document.querySelectorAll("#dashBody .student-del").forEach(btn =>
+      btn.addEventListener("click", e => {
+        e.stopPropagation();
+        confirmDeleteStudent(btn.dataset.code);
       }));
     const nb = $("afNameBtn");
     if(nb) nb.addEventListener("click", saveNameOnly);
@@ -2486,6 +2894,8 @@ window.Dashboard = (function(){
 
   return {
     nameFor: nameFor,
+    /* for app.js's review surfaces: never open a record the tutor deleted */
+    isTombstoned: id => !!tombFor(id),
     open(showOnly){
       showOnlyFn = showOnly;
       wire();

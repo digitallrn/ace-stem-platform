@@ -81,7 +81,52 @@ function makeStore(opts){
       if(rejecting("select", k)){ ops.push(["select", k, "rejected"]); throw expired(); }
       ops.push(["select", k, server.has(k) ? "found" : "missing"]);
       return server.has(k) ? [{ key: k, owner_code: server.get(k).owner, value: clone(server.get(k).value) }] : []; },
-    async adminSelectAll(){ return [...server.entries()].map(([k, r]) => ({ key: k, owner_code: r.owner, value: clone(r.value) })); }
+    async adminSelectAll(){ return [...server.entries()].map(([k, r]) => ({ key: k, owner_code: r.owner, value: clone(r.value) })); },
+    /* the tutor-only tombstone RPCs (2026-09-18), modelled on the migration:
+       a marker row per key, never an edit or a delete of the record, an
+       existing marker returned untouched, finished-only for the per-attempt
+       call, every attempt the code owns for the per-student call. Each
+       marker written counts as an accepted server op on THAT key, which is
+       what licenses the mirror write that must follow it. */
+    async adminRpc(fn, args){
+      calls.push(["adminRpc", fn, JSON.stringify(args)]);
+      const tombOf = (k, r, reason) => ({ kind: "tombstone", targetKind: "attempt", target: k, code: r.owner,
+        deletedAt: "2026-09-18T00:00:00Z", deletedBy: "tutor@test", reason: reason,
+        testId: r.value.testId == null ? null : r.value.testId, assignmentId: r.value.assignmentId == null ? null : r.value.assignmentId,
+        status: r.value.status == null ? null : r.value.status, attemptKind: r.value.kind === "set" ? "set" : "form",
+        setId: r.value.setId == null ? null : r.value.setId, conditions: r.value.conditions == null ? null : r.value.conditions,
+        startedAt: r.value.startedAt == null ? null : r.value.startedAt, submittedAt: r.value.submittedAt == null ? null : r.value.submittedAt });
+      const refuse = (k, msg) => { ops.push(["admin", k, "rejected"]); const e = new Error(msg); e.status = 400; throw e; };
+      if(fn === "fn_tombstone_attempt"){
+        const k = "tomb:" + args.p_key;
+        if(rejecting("rpc", k)){ ops.push(["admin", k, "rejected"]); throw expired(); }
+        const rec = server.get(args.p_key);
+        if(!rec) refuse(k, "no such attempt");
+        const st = rec.value && rec.value.status;
+        if(st !== "completed" && st !== "timed-out") refuse(k, "attempt is in progress");
+        if(!server.has(k)) server.set(k, { owner: rec.owner, value: tombOf(args.p_key, rec, "attempt") });
+        ops.push(["admin", k, "ok"]);
+        return clone(server.get(k).value);
+      }
+      if(fn === "fn_tombstone_student"){
+        const code = args.p_code, sk = "tomb:student:" + code;
+        if(rejecting("rpc", sk)){ ops.push(["admin", sk, "rejected"]); throw expired(); }
+        const attempts = [];
+        for(const [k, r] of [...server.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)){
+          if(k.indexOf("attempt:") !== 0 || r.owner !== code) continue;
+          const tk = "tomb:" + k;
+          if(!server.has(tk)) server.set(tk, { owner: code, value: tombOf(k, r, "student") });
+          ops.push(["admin", tk, "ok"]);
+          attempts.push({ key: tk, value: clone(server.get(tk).value) });
+        }
+        if(!server.has(sk)) server.set(sk, { owner: code, value: { kind: "tombstone", targetKind: "student", target: code, code: code,
+          deletedAt: "2026-09-18T00:00:00Z", deletedBy: "tutor@test", attemptsTombstoned: attempts.length, hadProfile: server.has("student:" + code) } });
+        ops.push(["admin", sk, "ok"]);
+        return { student: clone(server.get(sk).value), attempts: attempts };
+      }
+      throw new Error("unknown rpc " + fn);
+    },
+    tutorIdentity(){ return opts.remote === false ? "acestem-admin (local)" : "tutor@test"; }
   };
   const seedBoth = (k, v, owner) => { mirror.set(k, clone(v)); server.set(k, { owner: owner || null, value: clone(v) }); };
   const snapshot = () => JSON.stringify([...mirror.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1));
@@ -119,17 +164,23 @@ function makeStore(opts){
 }
 
 /* ---------- fake DOM + the dashboard closure, rebuilt per case ---------- */
+/* the same two rules attempts.js's StudentCode applies (normalize strips
+   inner whitespace too — "AS-ABCD EFGH" as read aloud) */
 const StudentCode = {
   valid: c => /^AS-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/.test(String(c || "").trim().toUpperCase()),
-  normalize: c => String(c || "").trim().toUpperCase()
+  normalize: c => String(c || "").trim().toUpperCase().replace(/\s+/g, "")
 };
 const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly",
   "formCodes", "createAssignment", "deleteAssignment", "clearAssignments", "deleteSet", "exportAll", "deleteArchived",
   "dismissBug", "deleteAttempt", "toggleRelease", "assignmentsForSet", "isDeletableAttempt", "nameFor",
-  "fmtDate", "freshAssignmentRow", "newSetId", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer"];
+  "fmtDate", "freshAssignmentRow", "newSetId", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
+  // tombstones (2026-09-18): the third helper and the two deletion actions
+  "isFinishedAttempt", "isTombstoned", "isDeletedStudent", "tombFor", "orphanStubs", "localTombstone",
+  "isTombValue", "tutorTombstone", "deleteStudent", "deleteGateOk", "adoptArchive"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
-  "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer"]);
+  "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
+  "tutorTombstone", "deleteStudent"]);
 function tryExtract(name){
   try{ return (ASYNC.has(name) ? "async " : "") + extractFn(src, name); }
   catch(e){ return "";  /* absent in this source — the path's check will fail */ }
@@ -146,13 +197,15 @@ function build(store){
      that, so a message delivered only to a soon-to-be-replaced node does not
      pass here while the page shows nothing. dashStatus lives outside. */
   const wipeBody = () => { ["saMsg", "sbMsg", "afMsg"].forEach(id => { if(els[id]) els[id].textContent = ""; }); };
-  /* exportAll's download plumbing, stubbed: it only needs an anchor to click */
+  /* exportAll's download plumbing, stubbed: it only needs an anchor to click.
+     The Blob RECORDS its parts so the payload can be asserted on. */
   const documentStub = { createElement: () => ({ href: "", download: "", click(){}, remove(){} }), body: { appendChild(){} } };
   const URLStub = { createObjectURL: () => "blob:stub", revokeObjectURL(){} };
-  function BlobStub(){ }
+  const blobs = [];
+  function BlobStub(parts){ this.text = (parts || []).join(""); blobs.push(this); }
   const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", `
     let recs = [], assigns = [], bugs = [], lastStartCode = null, profiles = {}, source = "storage", lastExport = null;
-    let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null;
+    let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {};
     const loads = { assigns: 0, sets: 0, storage: 0, render: 0 };
     async function loadAssignsAndBugs(){ loads.assigns++; }
     async function loadSets(){ loads.sets++; }
@@ -170,16 +223,18 @@ function build(store){
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
     return {
       fns,
-      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads }),
+      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs }),
       seed: o => {
         if("recs" in o) recs = o.recs; if("assigns" in o) assigns = o.assigns; if("profiles" in o) profiles = o.profiles;
         if("lastExport" in o) lastExport = o.lastExport; if("sets" in o) sets = o.sets; if("builder" in o) builder = o.builder;
         if("source" in o) source = o.source; if("lastStartCode" in o) lastStartCode = o.lastStartCode;
+        if("tombs" in o) tombs = o.tombs;
       }
     };
   `);
   const d = factory(store.AS, $, StudentCode, () => true, { confirm: () => true }, s => String(s), wipeBody, documentStub, URLStub, BlobStub);
   d.els = els; d.$ = $;
+  Object.defineProperty(d, "lastBlob", { get(){ return blobs[blobs.length - 1] || null; } });
   return d;
 }
 const C1 = "AS-ABCDEFGH", C2 = "AS-JKLMNPQR";
@@ -507,28 +562,33 @@ const noSync = t => !/sync/i.test(t);
     check(!s.calls.some(c => c[0] === "adminDelete" && c[1] === b.attemptId) && s.server.has(b.attemptId) && !s.server.has(a.attemptId)
       && !/skipped/.test(t) && !/already removed/.test(t) && /1 not listed right now — left in storage/.test(t),
       "a not-listed id is neither deleted, nor reported as skipped-unfinished, nor claimed gone", t);
-    /* deleteAttempt un-arms the row it removed */
+    /* deleteAttempt (a TOMBSTONE since 2026-09-18) leaves the record in
+       storage, so the armed archive delete still covers it: the exported
+       file holds the record AND its marker, and rotating the row away later
+       is the archive flow's business, unchanged */
     const s2 = makeStore({}); const d2 = build(s2);
     const c = archRec(3), e = archRec(4);
     s2.seedBoth(c.attemptId, c, C1); s2.seedBoth(e.attemptId, e, C1);
     d2.seed({ recs: [c, e], lastExport: { ids: [c.attemptId, e.attemptId], when: new Date(0) } });
     await d2.fns.deleteAttempt(c);
     const le = d2.state().lastExport;
-    check(!!le && le.ids.join() === e.attemptId && d2.$("dashDeleteBtn").disabled === false, "deleting one attempt from the detail pane un-arms just that id", JSON.stringify(le && le.ids));
-    await d2.fns.deleteAttempt(e);
-    check(d2.state().lastExport === null && d2.$("dashDeleteBtn").disabled === true, "deleting the last armed attempt disarms the archive button");
+    check(!!le && le.ids.slice().sort().join() === [c.attemptId, e.attemptId].sort().join() && d2.$("dashDeleteBtn").disabled === false
+      && s2.server.has(c.attemptId) && s2.server.has("tomb:" + c.attemptId),
+      "tombstoning an attempt from the detail pane leaves the archive delete armed for it (the record is still there, marked)", JSON.stringify(le && le.ids));
   });
   await run(async () => {
-    /* the realistic sequences AFTER a re-arm must still work — the re-armed
-       lastExport has to carry `when`, which the confirm text reads */
+    /* the realistic sequence: tombstone, then the export-gated archive
+       delete removes the finished rows — the marker row is NEVER touched */
     const s = makeStore({}); const d = build(s);
     const c = archRec(5), e = archRec(6);
     s.seedBoth(c.attemptId, c, C1); s.seedBoth(e.attemptId, e, C1);
     d.seed({ recs: [c, e], lastExport: { ids: [c.attemptId, e.attemptId], when: new Date(0) } });
     await d.fns.deleteAttempt(c);
-    await d.fns.deleteArchived();                              // re-armed by deleteAttempt, then used
-    check(!s.server.has(e.attemptId) && d.state().lastExport === null && /^Deleted 1 of 1 archived record\(s\)\./.test(status(d)),
-      "deleteAttempt then deleteArchived: the re-armed export still works and deletes the remaining row", status(d));
+    await d.fns.deleteArchived();
+    check(!s.server.has(c.attemptId) && !s.server.has(e.attemptId) && s.server.has("tomb:" + c.attemptId) && s.mirror.has("tomb:" + c.attemptId)
+      && !s.calls.some(x => x[0] === "adminDelete" && x[1].indexOf("tomb:") === 0)
+      && d.state().lastExport === null && /^Deleted 2 of 2 archived record\(s\)\./.test(status(d)),
+      "deleteAttempt then deleteArchived: both finished rows go, the deletion marker stays on both sides and is never sent to adminDelete", status(d));
     let reject = true;
     const s2 = makeStore({ reject: () => reject }); const d2 = build(s2);
     const f = archRec(7);
@@ -607,25 +667,244 @@ const noSync = t => !/sync/i.test(t);
       "BUG DISMISS REACHES THE SERVER (used to be mirror-only)");
   });
 
-  /* =================== 8. deleteAttempt =================== */
-  console.log("--- 8. deleteAttempt ---");
+  /* =================== 8. deleteAttempt / deleteStudent — TOMBSTONES (2026-09-18) =================== */
+  console.log("--- 8. deleteAttempt / deleteStudent: a marker row, never an edit, never a delete ---");
+  const REC = () => ({ attemptId: "attempt:202606asiav1:1:aa", status: "completed", assignmentId: "a-1", testId: "202606asiav1",
+    conditions: "proctored", startedAt: "2026-09-01T00:00:00Z", submittedAt: "2026-09-01T02:00:00Z",
+    student: { key: C1, code: C1 }, answers: { q1: { given: 2 } }, score: { correct: 1, graded: 1 } });
+  const rowJson = (s, k) => JSON.stringify(s.server.has(k) ? s.server.get(k).value : null) + "|" + JSON.stringify(s.mirror.has(k) ? s.mirror.get(k) : null);
   await run(async () => {
     const s = makeStore({ reject: true }); const d = build(s);
-    const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", student: { key: C1, code: C1 }, startedAt: "2026-09-01T00:00:00Z" };
+    const rec = REC();
     s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [rec] });
     const before = s.snapshot();
-    await d.fns.deleteAttempt(rec);
+    const r = await d.fns.deleteAttempt(rec);
     const t = status(d);
-    check(s.snapshot() === before && s.server.has(rec.attemptId) && d.state().recs.length === 1, "rejected attempt delete: record stays in mirror, server and the table");
-    check(/^Not deleted — attempt attempt:202606asiav1:1:aa: the tutor sign-in has expired/.test(t) && noSync(t), "rejected attempt delete: message names the attempt", t);
+    check(r.ok === false && s.snapshot() === before && s.server.has(rec.attemptId) && !s.server.has("tomb:" + rec.attemptId)
+      && !s.mirror.has("tomb:" + rec.attemptId) && d.state().recs.length === 1 && Object.keys(d.state().tombs).length === 0,
+      "rejected tombstone: no marker on server or mirror, the record and the table row untouched");
+    check(/^Not deleted — the deletion marker for attempt attempt:202606asiav1:1:aa: the tutor sign-in has expired/.test(t) && noSync(t),
+      "rejected tombstone: message is 'Not deleted', names the marker row, never says sync", t);
   });
   await run(async () => {
     const s = makeStore({}); const d = build(s);
-    const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", student: { key: C1, code: C1 }, startedAt: "2026-09-01T00:00:00Z" };
+    const rec = REC();
+    s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [rec] });
+    const recBefore = rowJson(s, rec.attemptId);
+    const r = await d.fns.deleteAttempt(rec);
+    const t = status(d);
+    const tk = "tomb:" + rec.attemptId;
+    const tv = s.server.has(tk) ? s.server.get(tk).value : null;
+    check(r.ok === true && !!tv && tv.kind === "tombstone" && tv.target === rec.attemptId && tv.reason === "attempt"
+      && tv.assignmentId === "a-1" && tv.status === "completed" && !("answers" in tv) && !("score" in tv),
+      "accepted: the marker lands on the server with the identity summary and no answers/score", JSON.stringify(tv));
+    check(JSON.stringify(s.mirror.get(tk)) === JSON.stringify(tv) && d.state().tombs[tk] && d.state().tombs[tk].target === rec.attemptId,
+      "accepted: the mirror and the dashboard's tomb map carry exactly the server's marker");
+    check(rowJson(s, rec.attemptId) === recBefore && d.state().recs.length === 1,
+      "IMMUTABLE: the attempt row is byte-identical on server and mirror, and stays listed (present-but-marked)");
+    check(!s.calls.some(c => c[0] === "adminDelete") && !s.calls.some(c => c[0] === "adminUpsert"),
+      "accepted: no adminDelete and no adminUpsert — the only server verb was the tombstone RPC");
+    const o = s.calls.map(c => c[0]);
+    check(o.indexOf("adminRpc") !== -1 && o.indexOf("adminRpc") < o.indexOf("setLocal"), "accepted: server FIRST, then the mirror", o.join(","));
+    check(/^Marked the attempt for AS-ABCDEFGH deleted/.test(t) && !/Deleted the attempt/.test(t) && noSync(t),
+      "accepted: the message says MARKED, never claims the record is gone", t);
+  });
+  await run(async () => {
+    /* idempotent: a second delete of the same attempt is refused on the
+       client (already marked) and never reaches the server; the original
+       marker's who/when stands */
+    const s = makeStore({}); const d = build(s);
+    const rec = REC();
     s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [rec] });
     await d.fns.deleteAttempt(rec);
-    check(!s.server.has(rec.attemptId) && !s.mirror.has(rec.attemptId) && d.state().recs.length === 0 && /^Deleted the attempt for AS-ABCDEFGH\./.test(status(d)),
-      "control: an accepted attempt delete removes server, mirror and the table row");
+    const first = JSON.stringify(s.server.get("tomb:" + rec.attemptId).value);
+    const n = s.calls.filter(c => c[0] === "adminRpc").length;
+    const r2 = await d.fns.deleteAttempt(rec);
+    check(r2.ok === false && s.calls.filter(c => c[0] === "adminRpc").length === n && JSON.stringify(s.server.get("tomb:" + rec.attemptId).value) === first,
+      "already marked: refused on the client, no second server call, the original marker untouched");
+  });
+  await run(async () => {
+    /* finished-only, on both sides: the client gate refuses an in-progress
+       record without a server call; the server (modelled) refuses one too */
+    const s = makeStore({}); const d = build(s);
+    const live = Object.assign(REC(), { status: "in-progress" });
+    s.seedBoth(live.attemptId, live, C1); d.seed({ recs: [live] });
+    const r = await d.fns.deleteAttempt(live);
+    check(r.ok === false && !s.calls.some(c => c[0] === "adminRpc") && !s.server.has("tomb:" + live.attemptId),
+      "an in-progress sitting is never tombstoned individually — refused before any server call");
+    const r2 = await d.fns.tutorTombstone("attempt", live.attemptId);
+    check(r2.ok === false && /^Not deleted — the deletion marker for attempt/.test(r2.message) && !s.server.has("tomb:" + live.attemptId) && !s.mirror.has("tomb:" + live.attemptId),
+      "control: the helper called directly on an in-progress record is refused by the server and mirrors nothing", r2.message);
+  });
+  await run(async () => {
+    /* deleteStudent rejected: nothing anywhere */
+    const s = makeStore({ reject: true }); const d = build(s);
+    const rec = REC();
+    s.seedBoth(rec.attemptId, rec, C1); s.seedBoth("student:" + C1, { displayName: "Erin K" }, C1);
+    d.seed({ recs: [rec], profiles: { [C1]: "Erin K" } });
+    const before = s.snapshot();
+    const r = await d.fns.deleteStudent(C1);
+    const t = status(d);
+    check(r.ok === false && s.snapshot() === before && s.server.size === 2 && Object.keys(d.state().tombs).length === 0 && d.state().loads.storage === 0,
+      "rejected student delete: no marker anywhere, nothing reloaded, the profile and the record untouched");
+    check(/^Not deleted — the deletion marker for student AS-ABCDEFGH: the tutor sign-in has expired/.test(t) && noSync(t),
+      "rejected student delete: message names the student marker", t);
+  });
+  await run(async () => {
+    /* deleteStudent accepted: one marker per attempt (in-progress included)
+       then the student marker, server first; every record and the profile
+       row byte-identical; the dashboard reloads */
+    const s = makeStore({}); const d = build(s);
+    const done = REC(), live = Object.assign(REC(), { attemptId: "attempt:202606asiav1:2:bb", status: "in-progress", assignmentId: "a-2" });
+    s.seedBoth(done.attemptId, done, C1); s.seedBoth(live.attemptId, live, C1); s.seedBoth("student:" + C1, { displayName: "Erin K" }, C1);
+    d.seed({ recs: [done, live], profiles: { [C1]: "Erin K" } });
+    const doneBefore = rowJson(s, done.attemptId), liveBefore = rowJson(s, live.attemptId), profBefore = rowJson(s, "student:" + C1);
+    const r = await d.fns.deleteStudent(C1);
+    const t = status(d);
+    const sk = "tomb:student:" + C1;
+    check(r.ok === true && s.server.has(sk) && s.mirror.has(sk) && s.server.get(sk).value.attemptsTombstoned === 2 && s.server.get(sk).value.hadProfile === true
+      && !("displayName" in s.server.get(sk).value),
+      "accepted student delete: the student marker is on server and mirror, counts both attempts, carries NO display name");
+    check(s.server.has("tomb:" + done.attemptId) && s.server.has("tomb:" + live.attemptId) && s.mirror.has("tomb:" + live.attemptId)
+      && s.server.get("tomb:" + live.attemptId).value.reason === "student" && s.server.get("tomb:" + live.attemptId).value.status === "in-progress",
+      "accepted student delete: every attempt gets a marker, the in-progress one included, reason 'student'");
+    check(rowJson(s, done.attemptId) === doneBefore && rowJson(s, live.attemptId) === liveBefore && rowJson(s, "student:" + C1) === profBefore,
+      "IMMUTABLE: both attempt rows and the profile row are byte-identical on server and mirror");
+    check(!s.calls.some(c => c[0] === "adminDelete") && !s.calls.some(c => c[0] === "adminUpsert"), "accepted student delete: no adminDelete, no adminUpsert");
+    const o = s.calls.map(c => c[0]);
+    check(o.indexOf("adminRpc") < o.indexOf("setLocal") && d.state().loads.storage === 1, "accepted student delete: server first, mirror after, then one reload");
+    check(/^Deleted student Erin K \(AS-ABCDEFGH\) — the code is retired and can't sign in; 2 attempt\(s\) marked deleted/.test(t) && noSync(t),
+      "accepted student delete: message names the student, the retirement, and the count", t);
+  });
+  await run(async () => {
+    /* a mirror-only attempt (never synced) cannot be marked by the server:
+       counted and named, never silently left as live */
+    const s = makeStore({}); const d = build(s);
+    const synced = REC(), local = Object.assign(REC(), { attemptId: "attempt:202606asiav1:3:cc" });
+    s.seedBoth(synced.attemptId, synced, C1); s.mirror.set(local.attemptId, JSON.parse(JSON.stringify(local)));
+    d.seed({ recs: [synced, local] });
+    const r = await d.fns.deleteStudent(C1);
+    const t = status(d);
+    check(r.ok === true && r.unmarked.join() === local.attemptId && !s.server.has("tomb:" + local.attemptId) && !s.mirror.has("tomb:" + local.attemptId)
+      && /1 attempt\(s\) listed here were NOT marked on the server — it has no copy of them \(never uploaded from the device that recorded them, or archived away\); here they read deleted only by the student marker, and the server will refuse them if they ever arrive\./.test(t),
+      "a never-synced attempt is reported as NOT marked (no marker is invented for a row the server never had)", t);
+  });
+  await run(async () => {
+    /* server accepted, mirror can't be written: ok with the warning */
+    const s = makeStore({ localFail: true }); const d = build(s);
+    const rec = REC();
+    s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [rec] });
+    const r = await d.fns.deleteAttempt(rec);
+    check(r.ok === true && s.server.has("tomb:" + rec.attemptId) && !s.mirror.has("tomb:" + rec.attemptId) && /1 marker\(s\) couldn't be written to this browser's copy/.test(status(d)),
+      "server accepted but the mirror failed: ok with a warning naming the miss", status(d));
+  });
+  await run(async () => {
+    /* local / artifact mode: the same rows are written here, with the local
+       identity, no server call, and the record stays untouched */
+    const s = makeStore({ remote: false }); const d = build(s);
+    const rec = REC();
+    s.mirror.set(rec.attemptId, JSON.parse(JSON.stringify(rec))); d.seed({ recs: [rec] });
+    const before = JSON.stringify(s.mirror.get(rec.attemptId));
+    const r = await d.fns.deleteAttempt(rec);
+    const tv = s.mirror.get("tomb:" + rec.attemptId);
+    check(r.ok === true && !!tv && tv.kind === "tombstone" && tv.target === rec.attemptId && tv.deletedBy === "acestem-admin (local)" && tv.assignmentId === "a-1"
+      && !s.calls.some(c => /^admin/.test(c[0])) && JSON.stringify(s.mirror.get(rec.attemptId)) === before && s.mirror.has(rec.attemptId),
+      "local mode: a marker with the local identity, no server call, the record untouched and still present", JSON.stringify(tv));
+    /* the student delete in local mode: attempt markers first (the one
+       written above is REUSED byte-for-byte, never overwritten), then the
+       student marker with the local identity; no server call; the record
+       and its profile untouched */
+    const firstMarker = JSON.stringify(tv);
+    s.mirror.set("student:" + C1, { displayName: "Erin K" }); d.seed({ profiles: { [C1]: "Erin K" } });
+    const profBefore = JSON.stringify(s.mirror.get("student:" + C1));
+    const r2 = await d.fns.deleteStudent(C1);
+    const st = s.mirror.get("tomb:student:" + C1);
+    check(r2.ok === true && !!st && st.kind === "tombstone" && st.targetKind === "student" && st.target === C1
+      && st.deletedBy === "acestem-admin (local)" && st.attemptsTombstoned === 1 && st.hadProfile === true && !("displayName" in st),
+      "local mode: the student marker lands in the mirror with the local identity, the count and hadProfile, no name", JSON.stringify(st));
+    check(JSON.stringify(s.mirror.get("tomb:" + rec.attemptId)) === firstMarker && JSON.stringify(s.mirror.get(rec.attemptId)) === before
+      && JSON.stringify(s.mirror.get("student:" + C1)) === profBefore && !s.calls.some(c => /^admin/.test(c[0])),
+      "local mode: the earlier attempt marker is reused unchanged, the record and profile rows are untouched, no server call");
+    const r3 = await d.fns.deleteStudent(C1);
+    check(r3.ok === false && /^Not deleted — AS-ABCDEFGH was already deleted\./.test(r3.message),
+      "local mode: a second delete of the same student is refused with a reason", r3.message);
+  });
+  await run(async () => {
+    /* local mode, partial failure: the mirror stops taking writes after the
+       first marker — the message counts what landed and never claims the
+       student is gone; the student marker is absent */
+    let writes = 0;
+    const s = makeStore({ remote: false }); const d = build(s);
+    const a = REC(), b = Object.assign(REC(), { attemptId: "attempt:202606asiav1:2:bb" });
+    s.mirror.set(a.attemptId, JSON.parse(JSON.stringify(a))); s.mirror.set(b.attemptId, JSON.parse(JSON.stringify(b)));
+    d.seed({ recs: [a, b] });
+    const realSetLocal = s.AS.setLocal;
+    s.AS.setLocal = async (k, v) => { if(++writes > 1) return false; return realSetLocal(k, v); };
+    const r = await d.fns.deleteStudent(C1);
+    check(r.ok === false && /^Not deleted — the deletion marker for attempt attempt:202606asiav1:2:bb: storage isn't writable in this browser\. 1 attempt marker\(s\) were written before it failed/.test(r.message)
+      && !s.mirror.has("tomb:student:" + C1) && s.mirror.has("tomb:" + a.attemptId),
+      "local mode, mirror fails mid-way: refused, counts the markers that landed, the student marker is NOT written", r.message);
+  });
+  await run(async () => {
+    /* a retired code is refused by every form that would create or rename
+       for it, before any write; and the upload button never sends its rows */
+    const s = makeStore({}); const d = build(s);
+    const stTomb = { kind: "tombstone", targetKind: "student", target: C2, code: C2, deletedAt: "2026-09-18T00:00:00Z", deletedBy: "tutor@test", attemptsTombstoned: 0, hadProfile: false };
+    d.seed({ tombs: { ["tomb:student:" + C2]: stTomb } });
+    d.els.afCodes = { selectedOptions: [{ value: C2 }] }; d.$("afFree").value = ""; d.$("afTest").value = "202606asiav1"; d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    const before = s.snapshot();
+    await d.fns.createAssignment();
+    check(s.snapshot() === before && s.server.size === 0 && /^Deleted — a retired code can't be assigned to: AS-JKLMNPQR$/.test(d.$("afMsg").textContent),
+      "createAssignment refuses a retired code before any write", d.$("afMsg").textContent);
+    d.$("afName").value = "New Name";
+    await d.fns.saveNameOnly();
+    check(s.snapshot() === before && s.server.size === 0 && /^Deleted — a retired code can't be renamed: AS-JKLMNPQR$/.test(d.$("afMsg").textContent),
+      "saveNameOnly refuses a retired code before any write", d.$("afMsg").textContent);
+    d.seed({ sets: [{ setId: "pset-1", name: "Set A", subject: "math", refs: [{ type: "bank", bankId: "bank-david-core", qid: "q0001" }] }], assigns: [] });
+    d.$("saSet").value = "pset-1"; d.els.saCodes = { selectedOptions: [{ value: C2 }] }; d.$("saFree").value = "";
+    await d.fns.assignSetFromForm();
+    check(s.snapshot() === before && s.server.size === 0 && /^Deleted — a retired code can't be assigned to: AS-JKLMNPQR$/.test(d.$("saMsg").textContent),
+      "assignSetFromForm refuses a retired code before any write", d.$("saMsg").textContent);
+    /* the upload button: C2's rows stay on the device, C1's go up, tomb rows never go up */
+    s.mirror.set("attempt:202606asiav1:1:aa", { attemptId: "attempt:202606asiav1:1:aa", student: { key: C2, code: C2 } });
+    s.mirror.set("student:" + C2, { displayName: "Gone" });
+    s.mirror.set("assign:" + C2 + ":a-1", { assignmentId: "a-1" });
+    s.mirror.set("attempt:202606asiav1:2:bb", { attemptId: "attempt:202606asiav1:2:bb", student: { key: C1, code: C1 } });
+    s.mirror.set("tomb:student:" + C2, stTomb);
+    await d.fns.migrateLocalToServer();
+    const t = status(d);
+    const sent = s.calls.filter(c => c[0] === "adminUpsert").map(c => c[1]);
+    check(sent.join() === "attempt:202606asiav1:2:bb" && !sent.some(k => k.indexOf(C2) !== -1 || k.indexOf("tomb:") === 0)
+      && /^Upload finished — 1 sent, 0 already on the server, 3 belonging to deleted student\(s\) not sent\.$/.test(t),
+      "upload: nothing of a deleted student's and no tomb: row is sent; the count says so", t + " | " + sent.join(","));
+  });
+  await run(async () => {
+    /* exportAll carries the markers; adoptArchive reads them back */
+    const s = makeStore({}); const d = build(s);
+    const rec = REC(); const tk = "tomb:" + rec.attemptId;
+    const tv = { kind: "tombstone", targetKind: "attempt", target: rec.attemptId, code: C1, deletedAt: "2026-09-18T00:00:00Z", deletedBy: "tutor@test", reason: "attempt" };
+    d.seed({ recs: [rec], tombs: { [tk]: tv, ["tomb:student:" + C2]: { kind: "tombstone", targetKind: "student", target: C2, code: C2 } } });
+    d.fns.exportAll();
+    const payload = JSON.parse(d.lastBlob.text);
+    check(payload.schema === "acestem-attempt-archive-v1" && JSON.stringify(payload.records) === JSON.stringify([rec])
+      && JSON.stringify(payload.tombstones) === JSON.stringify([{ key: tk, value: tv }, { key: "tomb:student:" + C2, value: { kind: "tombstone", targetKind: "student", target: C2, code: C2 } }]),
+      "exportAll: records byte-identical, tombstones carried as sorted {key, value} rows", JSON.stringify(payload.tombstones));
+    const d2 = build(makeStore({}));
+    d2.fns.adoptArchive(payload);
+    const st = d2.state();
+    check(st.recs.length === 1 && st.tombs[tk] && st.tombs[tk].target === rec.attemptId && st.tombs["tomb:student:" + C2] && d2.fns.isTombstoned(rec) && d2.fns.isDeletedStudent(C2),
+      "adoptArchive: the file's markers are read back and mark the file view", JSON.stringify(Object.keys(st.tombs)));
+    const d3 = build(makeStore({}));
+    d3.fns.adoptArchive({ records: [rec], tombstones: [{ key: "tomb:x", value: { kind: "tombstone" } }, { key: 7, value: tv }, "junk"] });
+    check(Object.keys(d3.state().tombs).length === 0 && !d3.fns.isTombstoned(rec), "adoptArchive: malformed marker entries are ignored");
+  });
+  await run(async () => {
+    /* the confirmation gate: exact code, case and spaces forgiven, nothing else */
+    const d = build(makeStore({}));
+    check(d.fns.deleteGateOk("as-abcdefgh", C1) && d.fns.deleteGateOk(" AS-ABCD EFGH ", C1) && d.fns.deleteGateOk(C1, C1),
+      "gate: the code typed back (any case, stray spaces) opens it");
+    check(!d.fns.deleteGateOk("", C1) && !d.fns.deleteGateOk("AS-ABCDEFG", C1) && !d.fns.deleteGateOk(C2, C1) && !d.fns.deleteGateOk(C1, "not-a-code"),
+      "gate: empty, truncated, another student's code, or a target that is not a code all stay shut");
   });
 
   /* =================== 9. saveSetFromBuilder =================== */
@@ -833,9 +1112,12 @@ const noSync = t => !/sync/i.test(t);
        pullAllForTutor() writes the mirror — neither belongs here; the one
        sanctioned pull (loadFromStorage's) is stripped by line, like the heal. */
     const READS = ["isRemote", "isLocal", "hasAuthToken", "available", "get", "list", "getResult",
-      "adminSelectKey", "adminSelectAll", "signOutTutor"];
+      "adminSelectKey", "adminSelectAll", "signOutTutor", "tutorIdentity"];
     let rest = src;
-    for(const fn of ["tutorPut", "tutorDelete", "migrateLocalToServer"]){
+    /* tutorTombstone (2026-09-18) is the third sanctioned helper: it is the
+       only body allowed to call adminRpc, and its mirror writes are
+       server-first like the other two (section 8 proves it) */
+    for(const fn of ["tutorPut", "tutorDelete", "tutorTombstone", "migrateLocalToServer"]){
       try{ rest = rest.replace(extractFn(src, fn), ""); }catch(e){ /* absent: nothing to strip */ }
     }
     /* the two sanctioned lines are stripped only in their EXACT expected

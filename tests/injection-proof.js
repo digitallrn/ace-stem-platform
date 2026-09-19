@@ -19,7 +19,12 @@
    (rationale via fmt), the student:<CODE> display name, and the Review Mode
    replay of a completed record's annotations (hostile passage HTML through
    the sanitizer, hostile note id/snippet/text through escaping) driven
-   through the real Score Details -> chip -> test-UI path.
+   through the real Score Details -> chip -> test-UI path. Since 2026-09-18
+   also the tutor-side deletion markers (tomb:<attemptKey>, tomb:student:
+   <CODE>): hostile deletedBy/deletedAt/reason/identity fields through the
+   Attempts table, the Students cards, the detail-pane tombstone note, the
+   seen-set caveat and both delete-confirmation panels (gate asserted,
+   never confirmed — the proof writes no marker of its own).
    NOTE: run this with local mode active (no config.js beside the page), since
    it uses the acestem-admin route, which a remote deployment removes.
    4. Reload the page afterwards (the script cleans its own storage keys).   */
@@ -102,6 +107,12 @@
   }
 
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  /* poll a condition instead of guessing a delay (Refresh is an async reload) */
+  async function until(fn, ms){
+    const t0 = Date.now();
+    while(!fn()){ if(Date.now() - t0 > ms) return false; await wait(100); }
+    return true;
+  }
   const $ = id => document.getElementById(id);
 
   async function run(){
@@ -918,6 +929,205 @@
       pass: hostileLinks.length === 0,
       note: hostileLinks.length ? hostileLinks.length + " link(s) on invalid codes"
                                 : "copy-link only appears on valid AS- codes" });
+
+    /* ---- tombstones (2026-09-18): a tutor-side deletion writes a SEPARATE
+       marker row — tomb:<attemptKey> / tomb:student:<CODE> — and every field
+       on it (deletedBy, deletedAt, reason, the server-copied identity summary)
+       is anyone-writable in shared storage on the same terms as a record.
+       The dashboard renders the markers as present-but-marked: a "deleted"
+       badge on the row and the student card, a tombstone note in the detail
+       pane, a count in the seen-set caveat, and no Release / sign-in-link /
+       Delete controls on a deleted target. All escaped -> audit().
+
+       PLANTED HERE, not up front, for two reasons. A marker HIDES its target
+       from every student surface (Past card, Score Details, Review Mode), so
+       it must land after those drives; and a deleted student loses the
+       sign-in-link button that the profile-only check just above asserts on
+       AS-PRFLXSS2. The attempt marker goes on a SECOND poisoned record
+       (rec2, its own attemptId) rather than on `rec`, so `rec` stays live
+       for every existing dashboard assertion below (the form picker's seen
+       marks, the live detail pane, the overlap warning). The dashboard's
+       Refresh reloads tomb: rows from storage, so nothing is re-signed-in. */
+    const { rec: rec2 } = poisonedRecord(test, {
+      attemptId: "attempt:" + test.testId + ":1700000004:xss4",
+      startedAt: "2026-07-29T14:00:00.000Z", lastSavedAt: "2026-07-29T15:00:00.000Z",
+      submittedAt: "2026-07-29T15:00:00.000Z" });
+    localStorage.setItem("as:" + rec2.attemptId, JSON.stringify(rec2));
+    const hostileTomb = (target, code) => JSON.stringify({
+      kind: "tombstone", targetKind: "attempt", target: target, code: code,
+      deletedAt: PAYLOAD, deletedBy: PAYLOAD, reason: PAYLOAD, testId: PAYLOAD,
+      assignmentId: PAYLOAD, status: PAYLOAD, attemptKind: PAYLOAD,
+      conditions: PAYLOAD, startedAt: PAYLOAD });
+    localStorage.setItem("as:tomb:" + rec2.attemptId, hostileTomb(rec2.attemptId, "AS-XSSTEST2"));
+    /* an ORPHAN attempt marker (its record is not in storage — rotated away
+       by archive-then-delete, or never on this mirror) is what the Students
+       card counts in its "deleted marker(s)" sub-line; it belongs to the
+       deleted student so that card shows every tombstone-derived line */
+    localStorage.setItem("as:tomb:attempt:xss-orphan", hostileTomb("attempt:xss-orphan", "AS-PRFLXSS2"));
+    localStorage.setItem("as:tomb:student:AS-PRFLXSS2", JSON.stringify({
+      kind: "tombstone", targetKind: "student", target: "AS-PRFLXSS2", code: "AS-PRFLXSS2",
+      deletedAt: PAYLOAD, deletedBy: PAYLOAD, attemptsTombstoned: PAYLOAD, hadProfile: true }));
+    /* a hostile CODE living in a tomb:student: KEY NAME — the Students-tab
+       union parses codes out of these keys too (like student:/assign: above)
+       and renders each as a deleted card. Upper-cased so the badge lookup
+       (isDeletedStudent upper-cases the card key) matches the planted key. */
+    const TOMB_KEY_PAY = PAYLOAD.toUpperCase();
+    localStorage.setItem("as:tomb:student:" + TOMB_KEY_PAY, JSON.stringify({
+      kind: "tombstone", targetKind: "student", target: TOMB_KEY_PAY, code: TOMB_KEY_PAY,
+      deletedAt: PAYLOAD, deletedBy: PAYLOAD, attemptsTombstoned: PAYLOAD }));
+    const tombKeysPlanted = Object.keys(localStorage).filter(k => k.indexOf("as:tomb:") === 0).length;
+
+    $("dashRefreshBtn").click();
+    const reloaded = await until(() => /attempt\(s\) (saved on this device|in shared storage)/.test($("dashStatus").textContent), 5000);
+    results.push({ surface: "Dashboard Refresh reloads tombstone rows",
+      pass: reloaded, note: reloaded ? "status settled: " + $("dashStatus").textContent.slice(0, 60) : "Refresh never settled" });
+
+    /* Attempts tab: the deleted row stays listed — class tomb, a "deleted"
+       badge beside its status, and no Release button (nobody to release to) */
+    document.querySelector('#dashTabs [data-tab="attempts"]').click();
+    await wait(300);
+    results.push(audit("Dashboard Attempts tab with a tombstoned row (deleted badge)", $("dashBody")));
+    const tRow = document.querySelector(`#dashBody tr[data-att="${rec2.attemptId}"]`);
+    results.push({ surface: "Tombstoned attempt row is present-but-marked (tomb class, deleted badge, no Release)",
+      pass: !!tRow && tRow.classList.contains("tomb") && !!tRow.querySelector(".dstatus.del") &&
+            !tRow.querySelector("[data-rel]") && tRow.textContent.indexOf("PWN") !== -1,
+      note: !tRow ? "deleted record's row MISSING from the Attempts table"
+        : `tomb=${tRow.classList.contains("tomb")} badge=${!!tRow.querySelector(".dstatus.del")} release=${!!tRow.querySelector("[data-rel]")}` });
+
+    /* detail pane on the tombstoned record: tombstoneNoteHtml prints the
+       marker's deletedBy / deletedAt; no student view (the record is on no
+       student surface) and no second Delete button (already marked) */
+    if(tRow){
+      tRow.click();
+      await wait(300);
+      results.push(audit("Dashboard detail pane on a tombstoned record (hostile deletedBy/deletedAt/reason)", $("dashDetailBody")));
+      const tNote = [...document.querySelectorAll("#dashDetailBody .dash-warn")].find(p => /Deleted/.test(p.textContent));
+      const tTxt = tNote ? tNote.textContent.replace(/\s+/g, " ").trim() : "";
+      results.push({ surface: "Tombstone note names deleter and time as inert text; no student view, no second delete",
+        pass: !!tNote && tTxt.indexOf("PWN") !== -1 && !tNote.querySelector("img") && !tNote.querySelector("b[data-x]") &&
+              !$("dashStudentView") && !$("dashDeleteAttemptBtn") && !window.__XSS_FIRED,
+        note: !tNote ? "no tombstone note in the detail pane"
+          : `studentView=${!!$("dashStudentView")} deleteBtn=${!!$("dashDeleteAttemptBtn")} rendered: ` + tTxt.slice(0, 160) });
+      $("dashDetailClose").click();
+      await wait(150);
+    }
+
+    /* Students tab: the deleted student's card (dashed, badge in the heading,
+       "deleted marker(s)" sub-line from the orphan marker, deleted-student
+       body line, NO sign-in link, NO Delete button); the live student's card
+       counts its deleted attempt and keeps both buttons; the hostile tomb
+       KEY renders as a deleted card with no controls at all */
+    document.querySelector('#dashTabs [data-tab="students"]').click();
+    await wait(300);
+    results.push(audit("Students tab with deleted student card + deleted rows (hostile name, hostile tomb key)", $("dashBody")));
+    const cards = [...document.querySelectorAll("#dashBody .dcard")];
+    const dCard = cards.find(c => c.textContent.indexOf("AS-PRFLXSS2") !== -1);
+    const dSub = dCard && dCard.querySelector(".dcard-sub") ? dCard.querySelector(".dcard-sub").textContent : "";
+    results.push({ surface: "Deleted student card: dashed, badge, marker count, no sign-in link, no Delete button",
+      pass: !!dCard && dCard.classList.contains("deleted") && !!dCard.querySelector("h3 .dstatus.del") &&
+            /1 deleted marker\(s\)/.test(dSub) && dCard.textContent.indexOf("Deleted student") !== -1 &&
+            !dCard.querySelector(".copy-link") && !dCard.querySelector(".student-del"),
+      note: !dCard ? "AS-PRFLXSS2 card missing"
+        : `deleted=${dCard.classList.contains("deleted")} badge=${!!dCard.querySelector("h3 .dstatus.del")} link=${!!dCard.querySelector(".copy-link")} del=${!!dCard.querySelector(".student-del")} sub="${dSub}"` });
+    const xCard = cards.find(c => c.textContent.indexOf("AS-XSSTEST2") !== -1);
+    const xSub = xCard && xCard.querySelector(".dcard-sub") ? xCard.querySelector(".dcard-sub").textContent : "";
+    results.push({ surface: "Live student card counts its deleted attempt and keeps its buttons",
+      pass: !!xCard && !xCard.classList.contains("deleted") && /, 1 deleted\b/.test(xSub) &&
+            !!xCard.querySelector(`tr.tomb[data-att="${rec2.attemptId}"] .dstatus.del`) &&
+            !!xCard.querySelector('.copy-link[data-code="AS-XSSTEST2"]') &&
+            !!xCard.querySelector('.student-del[data-code="AS-XSSTEST2"]'),
+      note: !xCard ? "AS-XSSTEST2 card missing" : `sub="${xSub}" deletedRow=${!!xCard.querySelector(`tr.tomb[data-att="${rec2.attemptId}"]`)}` });
+    const hCard = cards.find(c => c.classList.contains("deleted") && c !== dCard &&
+      c.querySelector("h3").textContent.indexOf("PWN") !== -1 && c.querySelector("h3").textContent.indexOf("AS-") === -1);
+    results.push({ surface: "Hostile tomb:student: key renders a deleted card with no controls",
+      pass: !!hCard && !!hCard.querySelector("h3 .dstatus.del") && !hCard.querySelector(".copy-link") &&
+            !hCard.querySelector(".student-del") && !hCard.querySelector("img") && !window.__XSS_FIRED,
+      note: hCard ? "card present, badge on, no link/delete button" : "no deleted card for the hostile key" });
+
+    /* Practice Sets tab: the seen-set caveat for AS-XSSTEST2 must say the
+       deleted attempt was left out (never silent) — printed beside the
+       hostile display name in the marks hint */
+    $("dashFilterStudent").value = "AS-XSSTEST2";
+    document.querySelector('#dashTabs [data-tab="sets"]').click();
+    await wait(400);
+    results.push(audit("Practice Sets marks hint with the seen-set caveat (hostile name)", $("dashBody")));
+    const caveat = [...document.querySelectorAll("#dashBody .dash-hint")].find(p => p.textContent.indexOf("deleted attempt") !== -1);
+    results.push({ surface: "Seen-set caveat counts the deleted attempt out",
+      pass: !!caveat && /1 deleted attempt not counted/.test(caveat.textContent) && !caveat.querySelector("img"),
+      note: caveat ? "rendered: " + caveat.textContent.replace(/\s+/g, " ").slice(-90) : "no caveat in the marks hint" });
+    $("dashFilterStudent").value = "";
+
+    /* The two confirmation panels. Never click Delete: the proof plants its
+       markers directly and must not create any itself. The gate is asserted
+       by driving #dtcInput and reading #dtcGo.disabled, then Cancel. */
+    function gateChecks(code){
+      const go = $("dtcGo"), inp = $("dtcInput");
+      const fire = v => { inp.value = v; inp.dispatchEvent(new Event("input", { bubbles: true })); return go.disabled; };
+      const g = [];
+      g.push(["armed on open", go.disabled === true]);
+      g.push(["wrong code", fire(code.slice(0, -1)) === true]);
+      g.push(["hostile input", fire(PAYLOAD) === true]);
+      g.push(["lowercase exact code", fire(code.toLowerCase()) === false]);
+      g.push(["cleared again", fire("") === true]);        // leave it disarmed before Cancel
+      return g;
+    }
+    document.querySelector('#dashTabs [data-tab="students"]').click();
+    await wait(300);
+    const sDel = document.querySelector('#dashBody .student-del[data-code="AS-XSSTEST2"]');
+    if(sDel){
+      sDel.click();
+      await wait(200);
+      results.push(audit("Delete-student confirmation panel (hostile display name)", $("dashDetailBody")));
+      const facts = document.querySelector("#dashDetailBody .dtc-facts");
+      const fTxt = facts ? facts.textContent.replace(/\s+/g, " ") : "";
+      results.push({ surface: "Delete-student panel names the student inert and counts attempts/assignments",
+        pass: !!facts && !$("dashDetail").classList.contains("hidden") && fTxt.indexOf("PWN") !== -1 &&
+              fTxt.indexOf("AS-XSSTEST2") !== -1 && /Attempts: \d+ on record/.test(fTxt) &&
+              /1 already deleted/.test(fTxt) && /Assignments: \d+/.test(fTxt) &&
+              !!$("dtcGo") && !!$("dtcInput") && !!$("dtcCancel"),
+        note: facts ? fTxt.slice(0, 200) : "no .dtc-facts rendered" });
+      const g = gateChecks("AS-XSSTEST2");
+      results.push({ surface: "Delete-student gate: button disabled until the exact code is typed",
+        pass: g.every(x => x[1]), note: g.map(x => x[0] + "=" + (x[1] ? "ok" : "WRONG")).join(", ") });
+      $("dtcCancel").click();
+      await wait(150);
+    } else {
+      results.push({ surface: "Delete-student confirmation panel (hostile display name)", pass: false, note: "no Delete student… button on the live card" });
+    }
+    /* per-attempt panel, from the live record's detail pane (hostile testName
+       + display name + status badge in the facts) */
+    const lRow = document.querySelector(`#dashBody tr[data-att="${rec.attemptId}"]`);
+    if(lRow){
+      lRow.click();
+      await wait(300);
+      const aDel = $("dashDeleteAttemptBtn");
+      if(aDel){
+        aDel.click();
+        await wait(200);
+        results.push(audit("Delete-attempt confirmation panel (hostile name + testName)", $("dashDetailBody")));
+        const facts = document.querySelector("#dashDetailBody .dtc-facts");
+        const fTxt = facts ? facts.textContent.replace(/\s+/g, " ") : "";
+        results.push({ surface: "Delete-attempt panel names the attempt inert",
+          pass: !!facts && fTxt.indexOf("PWN") !== -1 && fTxt.indexOf("AS-XSSTEST2") !== -1 &&
+                /Test:/.test(fTxt) && !!facts.querySelector(".dstatus") && !!$("dtcGo") && $("dtcGo").disabled,
+          note: facts ? fTxt.slice(0, 200) : "no .dtc-facts rendered" });
+        const g = gateChecks("AS-XSSTEST2");
+        results.push({ surface: "Delete-attempt gate: button disabled until the exact code is typed",
+          pass: g.every(x => x[1]), note: g.map(x => x[0] + "=" + (x[1] ? "ok" : "WRONG")).join(", ") });
+        $("dtcCancel").click();
+        await wait(150);
+      } else {
+        results.push({ surface: "Delete-attempt confirmation panel (hostile name + testName)", pass: false, note: "live completed record has no Delete this attempt… button" });
+      }
+    } else {
+      results.push({ surface: "Delete-attempt confirmation panel (hostile name + testName)", pass: false, note: "live record row missing from the Students tab" });
+    }
+    const tombKeysNow = Object.keys(localStorage).filter(k => k.indexOf("as:tomb:") === 0).length;
+    results.push({ surface: "Cancel closes the panel; the proof wrote no tombstone of its own",
+      pass: $("dashDetail").classList.contains("hidden") && tombKeysNow === tombKeysPlanted &&
+            localStorage.getItem("as:tomb:student:AS-XSSTEST2") === null &&
+            localStorage.getItem("as:tomb:" + rec.attemptId) === null,
+      note: `tomb rows: ${tombKeysNow} (planted ${tombKeysPlanted}); detail hidden=${$("dashDetail").classList.contains("hidden")}` });
 
     /* Practice Sets tab (2026-08-31): the hostile pset row's name reaches the
        set list, the builder (opened via Edit), and the assign form's <select>

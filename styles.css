@@ -1124,6 +1124,19 @@
      of blue, matching the .dstatus.to "timed-out" red already in this file */
   .dash-rel.dash-danger{ border-color:var(--cb-red); color:var(--cb-red); }
   .dash-rel.dash-danger:hover{ background:#FBE9EB; }
+  /* tombstones (2026-09-18): a deleted record stays listed, marked and muted */
+  .dstatus.del{ background:#ECEEF3; color:#5B6270; }
+  .dtable tbody tr.tomb td{ opacity:.55; }
+  .dtable tbody tr.tomb td:first-child{ text-decoration:line-through; text-decoration-color:#9AA0AE; }
+  .dcard.deleted{ border-style:dashed; }
+  .dcard h3 .student-del{ margin-left:10px; }
+  /* the confirmation panel: type the code back */
+  .dtc-facts{ margin:10px 0 12px; font-size:14px; line-height:1.7; }
+  .dtc-ask{ margin-top:14px; }
+  .dtc-actions{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:8px; }
+  .dtc-input{ font-size:16px; letter-spacing:2px; padding:8px 12px; border:1.5px solid #9AA0AE;
+    border-radius:8px; font-family:var(--sans); text-transform:uppercase; width:190px; }
+  .dash-rel.dash-danger:disabled{ opacity:.45; cursor:not-allowed; background:#fff; }
   /* Phase F §3: assignment panel */
   .assign-form{ margin-bottom:22px; }
   .af-grid{

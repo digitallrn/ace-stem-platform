@@ -56,6 +56,46 @@ business (and of internal identifiers: `ACESTEM_CONFIG`, `acestem-admin`,
 user-facing copy says Ace SAT; never show a real or issuable student code as
 an example (use `AS-XXXXXXXX`).
 
+**Deletion is a tombstone, never an edit or a hard delete (2026-09-18).**
+The tutor can delete one attempt or one student from the dashboard; both
+write a SEPARATE marker row — `tomb:<attemptKey>` / `tomb:student:<CODE>`,
+owner_code the student, value `{kind:"tombstone", target, deletedAt,
+deletedBy, …}` plus a server-copied identity summary (testId, assignmentId,
+status — never answers, score or a name). The record and profile rows stay
+byte-identical, so an audit can always tell "removed" (row + marker) from
+"never existed". Server side (`supabase/migrations/2026-09-18_tombstones.sql`):
+`fn_tombstone_attempt` / `fn_tombstone_student` are SECURITY DEFINER, EXECUTE
+for `authenticated` only, and re-check the JWT role; a trigger makes `tomb:`
+rows permanent (no UPDATE/DELETE by anyone); every student RPC raises
+`student deleted` for a retired code and `fn_upsert_attempt` raises `attempt
+deleted` for a marked key — the client treats exactly those two messages as
+terminal (the queued write is dropped with a console warning; everything
+else keeps its backoff). Student side: `Attempts.loadStudentRecords()`
+returns `{live, tombstones}`; a deleted attempt is on NO student surface, and
+its stub feeds `buildAssignmentIndex` only through its explicit assignmentId
+so the assignment stays Completed (25ef8f7) — an untagged deleted sitting
+never closes a later one. `Attempts.assignments()` answers `"deleted"` for a
+retired code (every entry fails closed; nothing on the device is removed —
+not even a deleted attempt's local copy, which the marker's key keeps off
+every surface). An untagged deleted sitting keeps closed only an assignment
+that existed when it was deleted (`assignedAt` before `deletedAt`).
+Dashboard: present-but-marked everywhere, excluded from analysis and the seen
+set, retired codes never re-issued or re-assigned; the confirmation names the
+student/attempt and requires the code typed back; one target per action, no
+bulk path. `deleteArchived` (export-gated archive rotation, §7b) is
+unchanged and never touches `tomb:` rows. Proofs: `tests/tombstone.test.js`,
+`tests/tombstone-live-proof.js` (anon against the live project), and the
+tombstone cases in `tests/tutor-writes.test.js`; the SPR audit skips marked
+records and prints how many. **Do not add a hard-delete, an un-delete, or any
+multi-target delete to the dashboard.** Two honest limits: the tutor-only and
+permanence guarantees are REMOTE-mode properties — in local/artifact mode a
+marker is a row like any other (same posture as the unauthenticated local
+dashboard); and a device that never comes online after a deletion keeps
+working from its cache. **Deploy order: app first, then the migration** (the
+HEAD client reads `student deleted` as an outage and signs in from cache).
+The one thing no test can reach is the authenticated tutor call itself — the
+migration header names the two non-destructive human probes.
+
 ## Read first
 `SCHEMA-v1.2.md` — the data contract. It's authoritative over instinct,
 including for anything below.

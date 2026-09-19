@@ -100,7 +100,9 @@ const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled"
   "markFor", "seenCounts", "countsText", "viaText", "markHtml", "selectedStudent", "setRefKeys",
   "dedupNoticeHtml", "overlapFor", "assignOverlapHtml", "overlapNotes", "refreshAssignOverlap",
   "builderHeldAs", "pushRef", "builderDuplicateGroups", "builderAddRef", "refKey", "fmtDay", "nameFor",
-  "studentCell", "codeOptionLabel", "formCodes"];
+  "studentCell", "codeOptionLabel", "formCodes",
+  // tombstones (2026-09-18): the seen set and the code pickers read these
+  "tombFor", "isDeletedStudent", "isTombstoned", "deletedAttemptsOf"];
 const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI"];
 const extracted = NAMES.map(n => { try{ return [n, extractFn(src, n)]; }catch(e){ return [n, ""]; } });
 const BODY = extracted.map(x => x[1]).join("\n") + "\n" +
@@ -144,7 +146,7 @@ function build(opts){
   const setTimeoutStub = (fn, ms) => { timers.push({ fn, ms, cleared: false }); return timers.length; };
   const clearTimeoutStub = id => { if(timers[id - 1]) timers[id - 1].cleared = true; };
   const factory = new Function("window", "document", "$", "escapeHtml", "StudentCode", "setTimeout", "clearTimeout", "wipe", `
-    let recs = [], profiles = {}, builder = null, tab = ${JSON.stringify(opts.tab || "sets")};
+    let recs = [], profiles = {}, builder = null, tab = ${JSON.stringify(opts.tab || "sets")}, tombs = {};
     const loads = { render: 0 };
     const testsById = {};
     (window.TEST_MANIFEST || []).forEach(t => { testsById[t.testId] = t; (t.legacyIds || []).forEach(old => { testsById[old] = t; }); });

@@ -312,6 +312,23 @@ if(!archivePath){
     qIndex[testId + "|" + q.id] = q;
     (T[testId].legacyIds || []).forEach(l => { qIndex[l + "|" + q.id] = q; });
   })));
+  /* Tombstoned records (deleted by the tutor, 2026-09-18): the export
+     carries `tombstones` — one {key, value} per deletion marker — and the
+     records themselves stay in `records`, byte-identical. A deleted record
+     is on no student surface and its grade can never be seen, so it is
+     SKIPPED here, and the count is always printed so a skip is never
+     silent. A record is tombstoned only by an attempt marker whose target
+     names it, or by a student marker for its code. */
+  const tombTargets = new Set(), tombCodes = new Set();
+  (Array.isArray(raw.tombstones) ? raw.tombstones : []).forEach(t => {
+    const v = t && t.value && typeof t.value === "object" ? t.value : t;
+    if(!v || v.kind !== "tombstone" || typeof v.target !== "string") return;
+    if(v.targetKind === "attempt") tombTargets.add(v.target);
+    else if(v.targetKind === "student") tombCodes.add(String(v.target).toUpperCase());
+  });
+  const isTombstoned = r => tombTargets.has(r.attemptId) ||
+    tombCodes.has(String((r.student && r.student.key) || "").toUpperCase());
+  let skippedTomb = 0;
   let audited = 0, sprSeen = 0, moved = [], unknown = 0, storedDisagree = [];
   /* Practice-set records (kind:"set", 2026-08-31) are handled EXPLICITLY:
      their answers key by fully-qualified refs and resolve through the
@@ -324,6 +341,7 @@ if(!archivePath){
   const setUnresolvedDetail = [];
   records.forEach(r => {
     if(!r || !r.answers || !r.testId) return;
+    if(isTombstoned(r)){ skippedTomb++; return; }     // deleted: not audited, counted below
     audited++;
     const isSet = r.kind === "set";
     const provByRef = {};
@@ -374,6 +392,8 @@ if(!archivePath){
     (setSeen ? ` (${setSeen} practice-set record(s), resolved via snapshot provenance)` : "") +
     `, ${sprSeen} answered SPR item(s)` +
     (unknown ? `, ${unknown} answer(s) for questions not in the library (skipped)` : ""));
+  console.log(`    ${skippedTomb} tombstoned (deleted) record(s) skipped — not audited by design` +
+    (skippedTomb ? "; the export's tombstones name them" : ""));
   if(setUnresolved){
     console.log(`    ${setUnresolved} SET answer(s) whose snapshot ref could not be resolved:`);
     setUnresolvedDetail.forEach(d => console.log("      " + d));

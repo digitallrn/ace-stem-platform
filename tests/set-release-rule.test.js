@@ -146,8 +146,17 @@ check(decideRelease("hardened", formSubmit) === false && decideRelease("flawed",
   "a normal form submit never self-releases under any guard (control)");
 
 console.log("--- 2. the real migration carries the structural + shape guards ---");
-const sql = fs.readFileSync(path.join(__dirname, "..", "supabase", "migrations",
-  "2026-08-31_practice_sets.sql"), "utf8");
+/* The LIVE definition is whichever migration re-creates fn_upsert_attempt
+   LAST (2026-09-18 tombstones restated it to add two refusals). Checking the
+   2026-08-31 file alone would prove a superseded body, so pick the newest
+   migration that defines the function — a later restatement that dropped a
+   guard reds this test instead of silently shipping. */
+const migDir = path.join(__dirname, "..", "supabase", "migrations");
+const defining = fs.readdirSync(migDir).filter(f => /\.sql$/.test(f)).sort()
+  .filter(f => /create or replace function public\.fn_upsert_attempt\(/.test(fs.readFileSync(path.join(migDir, f), "utf8")));
+check(defining.length >= 1 && defining[defining.length - 1] >= "2026-09-18_tombstones.sql",
+  "the newest migration defining fn_upsert_attempt is the tombstone one (or later)", defining.join(", "));
+const sql = fs.readFileSync(path.join(migDir, defining[defining.length - 1]), "utf8");
 // isolate the release branch: the `if coalesce(v_released ...` up to the
 // insert that follows it (skip the leading comment)
 const ifIdx = sql.indexOf("if coalesce(v_released");
