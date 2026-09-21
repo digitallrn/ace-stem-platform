@@ -109,6 +109,19 @@ window.AttemptStore = (function(){
      match is deliberately exact — a network error, a 401, a "not your
      record" must never be mistaken for a deletion. Returns "student",
      "attempt", or null. */
+  /* Subscribers told when a write is refused because the tutor deleted the
+     attempt or the student (2026-09-21). One signal, three sources: the sync
+     queue's terminal drop (remote), the recorder finding its own marker in
+     the store (local/artifact, and remote's mirror when the dashboard runs
+     on the same device), and nothing else. Handlers must never throw into
+     the caller — a sitting is on the other end of these. */
+  const deletedSubs = [];
+  function notifyDeleted(key, reason, code){
+    for(const fn of deletedSubs.slice()){
+      try{ fn(key, reason, code); }catch(e){}
+    }
+  }
+
   function deletedError(e){
     if(!e || typeof e.message !== "string") return null;
     const st = typeof e.status === "number" ? e.status : 0;
@@ -131,7 +144,27 @@ window.AttemptStore = (function(){
   function qWrite(items){
     try{ localStorage.setItem(QKEY, JSON.stringify(items)); }catch(e){}
   }
+  /* Keys the server has refused as deleted this page-load. Belt and braces
+     for the terminal drop: without it the 45s checkpoint would re-enqueue
+     the same dead key every tick — refused, dropped, re-added — so "not
+     retried" would be true of the item and false of the write. The app ends
+     such a sitting anyway; this makes the drop terminal even if nothing is
+     listening (a dashboard-only page, a handler that threw). */
+  const refusedKeys = Object.create(null);
   function enqueue(item){
+    if(refusedKeys[item.key]){
+      /* Not queued — but not silent either. A sitting can be re-entered
+         after the refusal (a refresh that failed left a stale Resume card),
+         and swallowing this would let it record into a dead record with no
+         signal at all. Re-fire the verdict instead, DEFERRED: enqueue runs
+         synchronously inside save(), and ending the sitting from here would
+         clear `rec` underneath that loop. */
+      try{ console.warn("[AttemptStore] write for " + item.key +
+        " NOT queued — the server already refused this key as " + refusedKeys[item.key] + " deleted."); }catch(e){}
+      const why = refusedKeys[item.key], code = item.code;
+      setTimeout(()=>{ notifyDeleted(item.key, why, code); }, 0);
+      return;
+    }
     const q = qRead();
     // one pending entry per key: a later write of the same record supersedes
     const i = q.findIndex(x => x.key === item.key);
@@ -174,6 +207,16 @@ window.AttemptStore = (function(){
             try{ console.warn("[AttemptStore.sync] DROPPED a queued write for " + item.key +
               " — the server refused it: " + gone + " deleted (tutor tombstone). Not retried."); }catch(e2){}
             qWrite(qRead().filter(x => x.key !== item.key));
+            refusedKeys[item.key] = gone;         // nothing re-queues it this page-load
+            /* The server has spoken about a write this device still holds.
+               If it is the LIVE sitting's key, the app ends that sitting
+               honestly rather than letting it keep answering into a record
+               nothing will ever accept again (2026-09-21). */
+            /* the OWNING code goes with it: the queue is one device-wide
+               list holding writes for every code that has ever written here,
+               so a 'student deleted' refusal for a sibling's leftover write
+               must not end the signed-in student's session */
+            notifyDeleted(item.key, gone, item.code);
             /* the pill reports a refusal only when the STUDENT was deleted:
                that write is genuinely not online and never will be. An
                'attempt deleted' refusal means the server already holds that
@@ -264,6 +307,21 @@ window.AttemptStore = (function(){
     /* the refusal count belongs to a session: sign-in, sign-out and a
        deleted-session ending all start the next one clean */
     clearRefused(){ refusedByCode = {}; },
+    /* app.js subscribes once at boot: (attemptKey, "attempt"|"student",
+       ownerCode). `ownerCode` is present whenever the signal came from a
+       queued write; the recorder's own probe omits it, and that path is
+       already scoped by the key. */
+    onDeleted(fn){ if(typeof fn === "function") deletedSubs.push(fn); },
+    notifyDeleted: notifyDeleted,
+    /* Drop every queued write for one key — used when the sitting it belongs
+       to has been deleted, so nothing keeps retrying or resurfacing it. */
+    dropQueued(key){
+      try{
+        const q = qRead();
+        const left = q.filter(x => x.key !== key);
+        if(left.length !== q.length) qWrite(left);
+      }catch(e){}
+    },
     setAuthToken(t){ authToken = t || null; },
     hasAuthToken(){ return !!authToken; },
     deletedError: deletedError,
@@ -704,9 +762,27 @@ window.Attempts = (function(){
       const snapshot = build();
       if(!snapshot) break;
       dirty = false;
-      const ok = await AttemptStore.set(rec.attemptId, snapshot);
+      const key = rec.attemptId;
+      const ok = await AttemptStore.set(key, snapshot);
       lastSaveOk = ok;
       if(!ok) dirty = true;                      // retry at the next checkpoint
+      /* Has the tutor deleted THIS sitting? In remote mode the server's
+         refusal is the authority and arrives through the sync queue, but a
+         marker can also be sitting in this store already: local and artifact
+         mode have no server at all, and in remote mode the tutor's own
+         dashboard mirrors markers into the same localStorage when they
+         proctor on this device. One read of the store we just wrote to
+         closes both, and the app ends the sitting.
+         NEVER AWAITED: in artifact mode this store is the artifact's shared
+         storage, so awaiting it would put a second network round-trip inside
+         every checkpoint — and inside suspend(), which Save and Exit waits
+         on. The probe is advisory, so it runs beside the save, not in it.
+         Never throws: recording must not break the test loop. */
+      try{
+        AttemptStore.get(TOMB_PREFIX + key).then(t => {
+          if(t && t.kind === "tombstone" && t.target === key) AttemptStore.notifyDeleted(key, "attempt");
+        }).catch(()=>{});
+      }catch(e){}
     } while(pendingSave);
     saving = false;
     drainWaiters.splice(0).forEach(res => res());
@@ -1061,6 +1137,29 @@ window.Attempts = (function(){
     /* for tests/diagnostics: snapshots whose write never landed */
     orphanCount(){ return orphans.length; },
 
+    /* The tutor deleted this sitting while it was live (2026-09-21). The
+       opposite of detach(): detach DRAINS an unpersisted write before
+       letting go, because a finished sitting must not be lost. Here the
+       record is deleted — every write is refused and every retry is noise —
+       so we let go WITHOUT writing, drop anything already queued for it, and
+       forget any orphaned snapshot of it. Returns the key it abandoned, or
+       null when that key was not the live sitting (a stale refusal for some
+       earlier attempt must not touch the one in progress). */
+    abandonDeleted(key){
+      try{
+        if(!rec || (key && rec.attemptId !== key)) return null;
+        const gone = rec.attemptId;
+        stopTicker();
+        rec = null; appState = null;
+        qMeta = {}; liveSpr = {}; clock = null; curModule = null;
+        dirty = false; pendingSave = false; lastSaveOk = null;
+        orphans = orphans.filter(s => s && s.attemptId !== gone);
+        AttemptStore.dropQueued(gone);
+        drainWaiters.splice(0).forEach(res => res());
+        return gone;
+      }catch(e){ rec = null; appState = null; return null; }
+    },
+
     /* ---- Save and Exit + Resume (BLUEBOOK-PARITY Phase C; failure semantics
        Phase F §8: a refused exit keeps recording alive in place) ---- */
     async suspend(resumeBlob){
@@ -1083,6 +1182,13 @@ window.Attempts = (function(){
            checkpoint — clearing it here directly would just be overwritten. */
         deliberateExit = true;
         await save();                             // flush immediately, then leave
+        /* abandonDeleted() ran while this call was parked behind an
+           in-flight save: the tutor deleted the sitting, `rec` is gone and
+           every write to that key is refused. Report it as exited — writing
+           or re-arming the ticker here would be recording into a deleted
+           sitting, and reading rec.* would throw. The deletion landing owns
+           the screen from here. */
+        if(!rec) return true;
         if(lastSaveOk !== true){
           // exit refused — keep recording, but drop the blob: the student is
           // still testing, so a later successful checkpoint must not persist
@@ -1243,12 +1349,19 @@ window.Attempts = (function(){
         const rowKey = "assign:" + key + ":" + assignmentId;
         const a = await AttemptStore.get(rowKey);
         if(!a || typeof a !== "object") return;
-        a.completedAttemptId = (rec && rec.attemptId) || a.completedAttemptId || "unknown";
+        /* a real attempt id or nothing: "unknown" is a completion no index
+           can ever verify, and it survives the attempt being deleted */
+        const id = (rec && rec.attemptId) || a.completedAttemptId;
+        if(!id) return;
+        a.completedAttemptId = id;
         await AttemptStore.setLocal(rowKey, a);
       }catch(e){}
     },
 
     currentAttemptId(){ return rec ? rec.attemptId : null; },
+    /* the live record's status, so a caller can tell a sitting that is still
+       running from one that has already been submitted */
+    currentStatus(){ return rec ? (rec.status || null) : null; },
 
     /* Deep clone of the live record, or null. Set-completion needs the
        finished record to offer immediate review even when the storage write
@@ -1414,8 +1527,10 @@ window.Attempts = (function(){
         if(!keys) return null;
         let best = null;
         for(const k of keys){
-          // a tombstoned sitting is never resumable — same rule as the index
-          if(await AttemptStore.get(TOMB_PREFIX + k)) continue;
+          /* a tombstoned sitting is never resumable — same rule as the index,
+             and FAIL CLOSED: a marker we cannot read is not "no marker" */
+          const t = await AttemptStore.getResult(TOMB_PREFIX + k);
+          if(t.status === "error" || (t.status === "ok" && t.value && t.value.kind === "tombstone")) continue;
           const r = await AttemptStore.get(k);
           /* Either blob makes an attempt resumable: `resume` from a deliberate
              Save-and-Exit, `checkpoint` from an interruption. Requiring

@@ -238,15 +238,19 @@ function sqlContract(sql){
       if(!grants.every(g => /to authenticated;$/.test(g))) out.push(fn + ": granted to something other than authenticated alone: " + grants.join(" | "));
     }
   }
-  if(!/'attempt'\)/.test(fnBody(sql, "fn_tombstone_attempt") || "")) out.push("fn_tombstone_attempt: does not pin reason 'attempt' (finished-only)");
+  if(!/'attempt'\)/.test(fnBody(sql, "fn_tombstone_attempt") || "")) out.push("fn_tombstone_attempt: does not pin reason 'attempt'");
   /* the untagged-record rule: which assignments existed at deletion, computed
      for records WITHOUT an assignmentId, by owner + exact testId, sentinel
      excluded by exact key (not a LIKE pattern — `_` is a wildcard) */
   const anyBody = fnBody(sql, "fn_tombstone_attempt_any") || "";
-  const vat = /if v_rec\.value ->> 'assignmentId' is null then([\s\S]*?)end if;/.exec(anyBody);
+  const vat = /if v_rec\.value ->> 'assignmentId' is null([\s\S]*?)end if;/.exec(anyBody);
   if(!vat) out.push("fn_tombstone_attempt_any: no assignmentsAtDeletion block for untagged records");
   else {
     const b = vat[1];
+    /* the list means "these assignments may stay closed", so it is only
+       recorded for a FINISHED record — an in-progress one closes nothing */
+    if(!/and coalesce\(v_rec\.value ->> 'status', ''\) in \('completed', 'timed-out'\) then/.test(b))
+      out.push("assignmentsAtDeletion: not restricted to finished records");
     if(!/jsonb_agg\(split_part\(a\.key, ':', 3\)/.test(b)) out.push("assignmentsAtDeletion: does not collect assignment ids");
     if(!/a\.owner_code = v_owner/.test(b) || !/a\.key like 'assign:' \|\| v_owner \|\| ':%'/.test(b)) out.push("assignmentsAtDeletion: not scoped to the owner's assignment rows");
     if(!/a\.value ->> 'testId' = v_rec\.value ->> 'testId'/.test(b)) out.push("assignmentsAtDeletion: not scoped to the record's testId");
@@ -254,7 +258,15 @@ function sqlContract(sql){
   }
   if(!/'assignmentsAtDeletion', v_at\)/.test(anyBody)) out.push("fn_tombstone_attempt_any: the marker does not carry assignmentsAtDeletion");
   if(/p_reason/.test((fnBody(sql, "fn_tombstone_attempt") || "").split("as $$")[0])) out.push("fn_tombstone_attempt: exposes a reason argument");
-  if(!/not in \('completed', 'timed-out'\) then\s*\n?\s*raise exception 'attempt is in progress'/.test(fnBody(sql, "fn_tombstone_attempt_any") || "")) out.push("fn_tombstone_attempt_any: no finished-only refusal for reason 'attempt'");
+  /* 2026-09-21: an IN-PROGRESS attempt is deletable, so the finished-only
+     refusal must be GONE — and with it gone, fn_upsert_attempt's tomb check
+     has to be serialised against a concurrent tombstone by taking the
+     record's row lock, or a submit racing a deletion could land a completed
+     record behind a marker that says in-progress. */
+  if(/raise exception 'attempt is in progress'/.test(fnBody(sql, "fn_tombstone_attempt_any") || "")) out.push("fn_tombstone_attempt_any: still refuses an in-progress attempt");
+  const lockSel = /select r\.owner_code,[\s\S]*?where r\.key = p_key\s*\n\s*for update;/.test(fnBody(sql, "fn_upsert_attempt") || "");
+  if(!lockSel) out.push("fn_upsert_attempt: does not take the record's row lock (FOR UPDATE) before its tomb check");
+  if(!/select \* into v_rec from public\.records r where r\.key = p_key for update;/.test(fnBody(sql, "fn_tombstone_attempt_any") || "")) out.push("fn_tombstone_attempt_any: does not lock the record row");
   for(const fn of ["fn_get_assignments", "fn_get_own_attempts", "fn_get_profile", "fn_get_set", "fn_insert_bug", "fn_upsert_attempt"]){
     const body = fnBody(sql, fn);
     if(!body){ out.push(fn + ": not restated"); continue; }
@@ -349,6 +361,17 @@ function sqlContract(sql){
         sqlSrc.replace("create trigger records_protect_tombstones\n  before update or delete on public.records\n  for each row execute function public.fn_protect_tombstones();",
           "-- create trigger records_protect_tombstones before update or delete on public.records for each row execute function public.fn_protect_tombstones();"),
         /no BEFORE UPDATE OR DELETE trigger/],
+      ["assignmentsAtDeletion recorded on an in-progress marker too",
+        sqlSrc.replace("  if v_rec.value ->> 'assignmentId' is null\n     and coalesce(v_rec.value ->> 'status', '') in ('completed', 'timed-out') then",
+          "  if v_rec.value ->> 'assignmentId' is null then"),
+        /not restricted to finished records/],
+      ["the finished-only refusal put back (an in-progress sitting could not be cleared)",
+        sqlSrc.replace("  select * into v_rec from public.records r where r.key = p_key for update;\n  if not found then\n    raise exception 'no such attempt';\n  end if;",
+          "  select * into v_rec from public.records r where r.key = p_key for update;\n  if not found then\n    raise exception 'no such attempt';\n  end if;\n  if p_reason = 'attempt' and coalesce(v_rec.value ->> 'status', '') not in ('completed', 'timed-out') then\n    raise exception 'attempt is in progress';\n  end if;"),
+        /still refuses an in-progress attempt/],
+      ["fn_upsert_attempt's row lock dropped (a submit could race a deletion)",
+        sqlSrc.replace("   where r.key = p_key\n     for update;", "   where r.key = p_key;"),
+        /does not take the record's row lock/],
       ["assignmentsAtDeletion no longer scoped to the record's testId",
         sqlSrc.replace("       and a.value ->> 'testId' = v_rec.value ->> 'testId';\n  end if;", ";\n  end if;"),
         /not scoped to the record's testId/],
@@ -383,8 +406,29 @@ function sqlContract(sql){
     await w.flush();
     check(w.fetches.some(f => /\/rpc\/fn_upsert_attempt$/.test(f.url)) && !w.fetches.some(f => /fn_tombstone/.test(f.url)),
       "control: an attempt write reaches fn_upsert_attempt, and no fetch ever names a tombstone function", w.fetches.map(f => f.url).join(","));
-    /* the recorder's own API has no tombstone method */
-    check(!Object.keys(w.AT).some(k => /tomb|delete/i.test(k) && k !== "tombstoneStub"), "Attempts exposes no deleting/tombstoning method (only the read-side stub shaper)", Object.keys(w.AT).join(","));
+    /* The recorder's API carries nothing that could CREATE a marker. Two
+       names mention deletion and both are read-side or give-up-side:
+       tombstoneStub shapes a marker the store already holds, and
+       abandonDeleted (2026-09-21) lets go of a sitting the tutor deleted —
+       it must write NOTHING, which is asserted below, not just named. */
+    const ALLOWED = { tombstoneStub: 1, abandonDeleted: 1 };
+    check(!Object.keys(w.AT).some(k => /tomb|delete/i.test(k) && !ALLOWED[k]), "Attempts exposes no deleting/tombstoning method beyond the read-side stub shaper and abandonDeleted", Object.keys(w.AT).join(","));
+    {
+      const w2 = loadAttempts({ search: "?devstorage=1" });
+      const A2 = "attempt:t1:100:aaaa";
+      seedLocal(w2.ls, A2, rec(A2, { status: "in-progress", submittedAt: null }));
+      const before = w2.ls.getItem("devstore:" + A2);
+      w2.AT.resume(rec(A2, { status: "in-progress", submittedAt: null }), { currentTest: null, moduleState: {} });
+      w2.ls.setItem("devstore:__syncqueue", JSON.stringify([{ key: A2, kind: "attempt", code: CODE, value: rec(A2), tries: 0, nextAt: 0 }]));
+      const gone = w2.AT.abandonDeleted(A2);
+      check(gone === A2 && w2.AT.currentAttemptId() === null && w2.ls.getItem("devstore:" + A2) === before
+        && JSON.parse(w2.ls.getItem("devstore:__syncqueue")).length === 0,
+        "abandonDeleted: lets go of the live sitting, writes NOTHING (the record is byte-identical), and drops its queued writes");
+      const w3 = loadAttempts({ search: "?devstorage=1" });
+      w3.AT.resume(rec(A2, { status: "in-progress", submittedAt: null }), { currentTest: null, moduleState: {} });
+      check(w3.AT.abandonDeleted("attempt:t1:999:zzzz") === null && w3.AT.currentAttemptId() === A2,
+        "abandonDeleted refuses a key that is not the live sitting — a stale refusal never kills the sitting in progress");
+    }
   });
 
   /* =================== (c) student surfaces + dashboard marking =================== */
@@ -479,6 +523,15 @@ function sqlContract(sql){
     const d4 = dashWorld({ recs: [rec(A), rec("attempt:t1:200:bbbb")], tombs: { ["tomb:" + A]: tomb(A) } });
     check(d4.completedAttemptsOf(CODE).length === 1 && d4.deletedAttemptsOf(CODE).length === 1 && /1 deleted attempt not counted/.test(d4.seenCaveat({ deleted: 1, unindexed: 0 })),
       "set builder: a deleted attempt leaves the seen set and is counted in the caveat");
+    /* …but a deleted IN-PROGRESS sitting never entered the seen set, so it is
+       not reported as a loss. The caveat is fed the COMPUTED count, not a
+       literal, or the check could not fail. */
+    const P = "attempt:t1:300:cccc";
+    const d4b = dashWorld({ recs: [rec(A), rec(P, { status: "in-progress", submittedAt: null })],
+      tombs: { ["tomb:" + A]: tomb(A), ["tomb:" + P]: tomb(P, { status: "in-progress", submittedAt: null }) } });
+    const nDel = d4b.deletedAttemptsOf(CODE).length;
+    check(nDel === 1 && d4b.seenCaveat({ deleted: nDel, unindexed: 0 }) === "1 deleted attempt not counted.",
+      "a deleted IN-PROGRESS sitting is not reported as a lost comparison — it never entered the seen set (without the finished-only filter this reads 2)", "deleted=" + nDel);
     /* 'retired codes are never re-issued': the seen-code set and Generate */
     const RET = "AS-RETIRED2";
     const dk = dashWorld({ recs: [], assigns: [], profiles: {}, tombs: { ["tomb:student:" + RET]: studentTomb(RET) } }, [RET, OTHER]);
@@ -605,10 +658,17 @@ function sqlContract(sql){
     const un = mk("unavailable");
     check((await un.world.refreshStudentState(CODE)) === false && un.ended.length === 0, "refreshStudentState: \"unavailable\" is false and ends nothing");
     /* every caller checks for the string before painting a screen */
+    /* every caller either RETURNS on "deleted" (the string), or is a .then
+       form that only re-renders on a literal true — no caller may treat the
+       string as a success. Counted so a new call site cannot slip past
+       unguarded: 4 awaited returns (three post-sitting handlers + the
+       ended-sitting landing) and 2 .then forms (review exit, and the
+       finished-attempt-deleted refresh). */
     const callers = (appSrc.match(/refreshStudentState\(state\.userName\)/g) || []).length;
     const guarded = (appSrc.match(/if\(\(await refreshStudentState\(state\.userName\)\) === "deleted"\) return;/g) || []).length;
-    const thenGuard = /refreshStudentState\(state\.userName\)\.then\(ok => \{\s*if\(ok === true/.test(appSrc);
-    check(callers === 4 && guarded === 3 && thenGuard, "all four post-sitting callers honour \"deleted\" (three return, the .then one only re-renders on true)", callers + "/" + guarded + "/" + thenGuard);
+    const thenForms = (appSrc.match(/refreshStudentState\(state\.userName\)\.then\(ok => \{\s*if\(ok === true/g) || []).length;
+    check(callers === 6 && guarded === 4 && thenForms === 2,
+      "every caller honours \"deleted\": 4 awaited returns + 2 .then forms that re-render only on literal true", callers + "/" + guarded + "/" + thenForms);
     check(/const refreshed = await refreshStudentState\(code\);\s*if\(refreshed === "deleted"\) return false;/.test(extractFn(appSrc, "signInWithCode")),
       "signInWithCode returns false on \"deleted\" without showing another screen");
   });
@@ -644,8 +704,336 @@ function sqlContract(sql){
     const lt = mkLocal.localTombstone(rec(U, { assignmentId: null }), "attempt", "2026-09-18T10:00:00.000Z", "acestem-admin (local)");
     check(JSON.stringify(lt.assignmentsAtDeletion.slice().sort()) === JSON.stringify(["a3", "a4"]) && mkLocal.localTombstone(rec(U), "attempt", "x", "y").assignmentsAtDeletion.length === 0,
       "local-mode marker: assignmentsAtDeletion = this code's assignments of that test (none for a tagged record)", JSON.stringify(lt.assignmentsAtDeletion));
+    /* and the local writer applies the SAME status gate as the SQL, so the
+       two deployment modes cannot write different markers for one shape */
+    const ltLive = mkLocal.localTombstone(rec(U, { assignmentId: null, status: "in-progress", submittedAt: null }), "attempt", "2026-09-18T10:00:00.000Z", "acestem-admin (local)");
+    check(ltLive.status === "in-progress" && ltLive.assignmentsAtDeletion.length === 0,
+      "local-mode marker: an untagged IN-PROGRESS sitting records no assignmentsAtDeletion — the same gate fn_tombstone_attempt_any applies", JSON.stringify(ltLive.assignmentsAtDeletion));
     const d5 = dashWorld({ recs: [rec(U, { assignmentId: null })], tombs: {}, assigns: [{ code: CODE, list: [newer] }] });
     check(d5.assignRowStatus(CODE, newer) === "completed", "control: the same untagged sitting, undeleted, closes it");
+  });
+
+  /* ============ IN-PROGRESS deletion (2026-09-21) ============
+     The tutor can now mark a sitting that is still in progress — the case
+     that clears a stale sitting blocking a testVersion bump. Its contract is
+     the OPPOSITE of the finished one at the assignment: nothing was
+     submitted, so the assignment becomes startable again. Everything else
+     (dead on the device, no resume, no card) is the same. */
+  await run("(i) the assignment: an in-progress marker leaves it STARTABLE; a finished one keeps it Completed", async () => {
+    const w = loadAttempts({ search: "?devstorage=1" });
+    const A = "attempt:t1:100:aaaa";
+    const a1 = { assignmentId: "a1", testId: "t1", category: "practice" };
+    const mk = status => {
+      const stub = w.AT.tombstoneStub("tomb:" + A, tomb(A, { status: status, submittedAt: status === "in-progress" ? null : "2026-09-01T02:00:00.000Z" }));
+      const state = { tests: [{ testId: "t1", testName: "T1", testVersion: "v1", legacyIds: [] }], assignments: [a1], assignAttempts: {}, resumeRecords: {} };
+      const world = appWorld(state);
+      world.buildAssignmentIndex([stub]);
+      return { state, world, stub };
+    };
+    const live = mk("in-progress");
+    check(live.world.assignmentComplete(a1) === false && live.world.assignmentState(a1) === "ready",
+      "in-progress marker: the assignment is STARTABLE again — nothing was submitted", live.world.assignmentState(a1));
+    check(live.state.assignAttempts.a1.completed === null && live.state.assignAttempts.a1.resumable === null,
+      "in-progress marker: the assignment holds neither a completed nor a resumable attempt (no Active/Resume card)");
+    check(Object.keys(live.state.resumeRecords).length === 0 && live.world.attemptResumable(live.stub) === false,
+      "in-progress marker: never resumable, never in the crash-resume map");
+    /* THE CONTROL that proves the two are told apart by the marker's own
+       status and nothing else: the identical marker, status completed */
+    const done = mk("completed");
+    check(done.world.assignmentComplete(a1) === true && done.world.assignmentState(a1) === "completed",
+      "control: the SAME marker with status completed keeps the assignment Completed — `status` is the only discriminator");
+    /* and the dashboard agrees, both ways */
+    const dLive = dashWorld({ recs: [rec(A, { status: "in-progress", submittedAt: null })], tombs: { ["tomb:" + A]: tomb(A, { status: "in-progress" }) }, assigns: [{ code: CODE, list: [a1] }] });
+    check(dLive.assignRowStatus(CODE, a1) === "pending", "dashboard: a marked in-progress sitting is neither in-progress nor completed — the row is startable", dLive.assignRowStatus(CODE, a1));
+    const dDone = dashWorld({ recs: [rec(A)], tombs: { ["tomb:" + A]: tomb(A) }, assigns: [{ code: CODE, list: [a1] }] });
+    check(dDone.assignRowStatus(CODE, a1) === "completed", "control: the finished one still reads Completed on the dashboard");
+    const dUnmarked = dashWorld({ recs: [rec(A, { status: "in-progress", submittedAt: null })], tombs: {}, assigns: [{ code: CODE, list: [a1] }] });
+    check(dUnmarked.assignRowStatus(CODE, a1) === "in-progress", "control: unmarked, the same sitting still reads in-progress");
+  });
+  await run("(i) the ways an assignment could still read Completed after its sitting was deleted", async () => {
+    const w = loadAttempts({ search: "?devstorage=1" });
+    const LIVE = "attempt:t1:300:cccc", OLD = "attempt:t1:100:aaaa";
+    const tests = [{ testId: "t1", testName: "T1", testVersion: "v1", legacyIds: [] }];
+    const stub = w.AT.tombstoneStub("tomb:" + LIVE, tomb(LIVE, { status: "in-progress", assignmentId: "a1", submittedAt: null }));
+    /* 1. the sole-assignment untagged fallback. Deleting the tagged sitting
+       empties the assignment's completed AND resumable slots, which is
+       exactly the condition that opens the fallback — an older untagged
+       completed run of the same test must NOT be allowed to close it. */
+    {
+      const a1 = { assignmentId: "a1", testId: "t1", category: "practice" };
+      const state = { tests: tests, assignments: [a1], assignAttempts: {}, resumeRecords: {} };
+      const world = appWorld(state);
+      const untaggedOld = rec(OLD, { assignmentId: null, conditions: "self-administered" });
+      world.buildAssignmentIndex([stub, untaggedOld]);
+      check(world.assignmentComplete(a1) === false && world.assignmentState(a1) === "ready",
+        "an older untagged completed run does NOT close the assignment whose in-progress sitting was just deleted", world.assignmentState(a1));
+      /* control: with no record of its own, the same assignment DOES take
+         the untagged run through the fallback — the migration rule is intact */
+      const state2 = { tests: tests, assignments: [a1], assignAttempts: {}, resumeRecords: {} };
+      const world2 = appWorld(state2);
+      world2.buildAssignmentIndex([untaggedOld]);
+      check(world2.assignmentComplete(a1) === true, "control: with no explicit record the untagged fallback still fires (the migration rule is unchanged)");
+      /* The guard also lands on ONE pre-existing shape, deliberately: an
+         assignment whose only explicit record is an in-progress sitting with
+         no resume/checkpoint blob (begun, then abandoned before the first
+         module). That used to open the fallback and let an old untagged run
+         mark it Completed; now it reads startable — which is what the
+         dashboard already said for it (attemptsForAssignment short-circuits
+         on any explicit record), so the two views agree where they did not. */
+      const state3 = { tests: tests, assignments: [a1], assignAttempts: {}, resumeRecords: {} };
+      const world3 = appWorld(state3);
+      const blankLive = rec(LIVE, { status: "in-progress", submittedAt: null, assignmentId: "a1" });   // no resume, no checkpoint
+      world3.buildAssignmentIndex([blankLive, untaggedOld]);
+      check(world3.assignmentComplete(a1) === false && world3.assignmentState(a1) === "ready",
+        "a blank in-progress record of its own also keeps the fallback shut — the assignment is startable, matching the dashboard", world3.assignmentState(a1));
+      const dBlank = dashWorld({ recs: [blankLive, rec(OLD, { assignmentId: null })], tombs: {}, assigns: [{ code: CODE, list: [a1] }] });
+      check(dBlank.assignRowStatus(CODE, a1) === "in-progress", "…and the dashboard still calls that live record in-progress (it is not deleted), so neither view says Completed");
+    }
+    /* 2. the persisted completedAttemptId hint must not outlive the attempt
+       it names once that attempt is deleted */
+    {
+      const a1 = { assignmentId: "a1", testId: "t1", category: "practice", completedAttemptId: LIVE };
+      const state = { tests: tests, assignments: [a1], assignAttempts: {}, resumeRecords: {}, tombstoned: { [LIVE]: true } };
+      const world = appWorld(state);
+      world.buildAssignmentIndex([stub]);
+      check(world.assignmentComplete(a1) === false, "a hint naming a DELETED attempt is ignored — the assignment is startable again");
+      const state2 = { tests: tests, assignments: [a1], assignAttempts: {}, resumeRecords: {}, tombstoned: {} };
+      const world2 = appWorld(state2);
+      world2.buildAssignmentIndex([]);
+      check(world2.assignmentComplete(a1) === true,
+        "control: a hint whose attempt is merely ARCHIVED AWAY (not deleted) still closes the assignment — the reason the hint exists");
+    }
+    /* 3. nothing writes a completion the index cannot check. Read CODE, not
+       prose: the comment explaining the removal says "unknown" itself. */
+    const stripC = s => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
+    const submit = stripC(extractFn(appSrc, "submitModule"));
+    check(!/\|\| "unknown"/.test(submit) && /const finishedId = Attempts\.currentAttemptId\(\);\s*if\(finishedId\) state\.activeAssignment\.completedAttemptId = finishedId;/.test(submit),
+      "submitModule stamps the hint only with a REAL attempt id, never the literal \"unknown\"", submit.match(/completedAttemptId[^\n]*/g));
+    const ca = stripC(attemptsSrc.slice(attemptsSrc.indexOf("async completeAssignment("), attemptsSrc.indexOf("currentAttemptId()")));
+    check(ca.length > 100 && !/"unknown"/.test(ca), "Attempts.completeAssignment never writes \"unknown\" either", ca.length);
+    {
+      const w2 = loadAttempts({ search: "?devstorage=1" });
+      seedLocal(w2.ls, "assign:" + CODE + ":a1", { assignmentId: "a1", testId: "t1" });
+      await w2.AT.completeAssignment(CODE, "a1");            // no live recorder
+      const row = JSON.parse(w2.ls.getItem("devstore:assign:" + CODE + ":a1"));
+      check(!("completedAttemptId" in row) || !row.completedAttemptId,
+        "with the recorder let go (the sitting was deleted), finalising writes NO completion hint", JSON.stringify(row));
+    }
+  });
+  await run("(i) a card rendered before the marker landed cannot resume into a dead sitting", async () => {
+    for(const fn of ["resumeTestFlow", "resumeSetFlow"]){
+      const src = extractFn(appSrc, fn);
+      check(/if\(isTombstonedRecord\(record\)\)\{ renderHome\(\); showOnly\("screen-home"\); return true; \}/.test(src),
+        fn + " refuses a tombstoned record and lands home instead of starting a sitting on it");
+    }
+    /* and the store-level lookup fails CLOSED on an unreadable marker */
+    const w = loadAttempts({ sharedStorage: { throwOn: /^tomb:/ } });
+    const L = "attempt:t1:300:cccc";
+    w.store[L] = JSON.stringify(rec(L, { status: "in-progress", submittedAt: null, checkpoint: { moduleIndex: 0 } }));
+    check((await w.AT.findInProgress(CODE, "t1", "v1")) === null, "findInProgress: a marker read that THROWS refuses the record (fails closed, never resumes it)");
+    const w2 = loadAttempts({ sharedStorage: true });
+    w2.store[L] = JSON.stringify(rec(L, { status: "in-progress", submittedAt: null, checkpoint: { moduleIndex: 0 } }));
+    check((await w2.AT.findInProgress(CODE, "t1", "v1")) !== null, "control: with a readable store the same record is resumable");
+  });
+  await run("(i) the refused key is never re-queued, so 'terminal' is true of the write and not just the item", async () => {
+    const LIVE = "attempt:t1:300:cccc";
+    const w = loadAttempts({ config: REAL_CFG, fetch: async (url) => /fn_upsert_attempt/.test(url) ? { status: 400, body: { message: "attempt deleted" } } : { status: 200, body: [] } });
+    await w.AS.set(LIVE, rec(LIVE, { status: "in-progress", submittedAt: null }));
+    await w.flush();
+    check(JSON.parse(w.ls.getItem("devstore:__syncqueue") || "[]").length === 0, "the refused write is dropped");
+    await w.AS.set(LIVE, rec(LIVE, { status: "in-progress", submittedAt: null, answers: { q1: 1 } }));   // the next 45s checkpoint
+    const q = JSON.parse(w.ls.getItem("devstore:__syncqueue") || "[]");
+    check(q.length === 0, "the NEXT checkpoint for that key is not queued again — no refuse/drop/re-add treadmill", JSON.stringify(q));
+    await w.AS.set("attempt:t1:400:dddd", rec("attempt:t1:400:dddd"));
+    check(JSON.parse(w.ls.getItem("devstore:__syncqueue") || "[]").length === 1, "control: a different attempt still queues normally");
+  });
+  await run("(i) the device: a marked in-progress sitting is absent everywhere, and Past is untouched", async () => {
+    const w = loadAttempts({ search: "?devstorage=1" });
+    const LIVE = "attempt:t1:300:cccc", DONE = "attempt:t1:100:aaaa";
+    seedLocal(w.ls, LIVE, rec(LIVE, { status: "in-progress", submittedAt: null, assignmentId: "a2", checkpoint: { moduleIndex: 0, questionIndex: 3 } }));
+    seedLocal(w.ls, DONE, rec(DONE));
+    const before = await w.AT.loadStudentRecords(CODE);
+    check(before.live.length === 2 && (await w.AT.pastAttempts(CODE)).length === 1, "control: before the marker, both records load and one is in Past");
+    seedLocal(w.ls, "tomb:" + LIVE, tomb(LIVE, { status: "in-progress", assignmentId: "a2" }));
+    const after = await w.AT.loadStudentRecords(CODE);
+    check(after.live.map(r => r.attemptId).join() === DONE && after.tombstones.length === 1 && after.tombstones[0].status === "in-progress",
+      "the marked sitting leaves `live`; its stub carries status in-progress", JSON.stringify(after.live.map(r => r.attemptId)));
+    const past = await w.AT.pastAttempts(CODE);
+    check(past.length === 1 && past[0].attemptId === DONE, "PAST IS UNCHANGED — deleting a sitting in progress touches no finished attempt");
+    check((await w.AT.findInProgress(CODE, "t1", "v1")) === null, "findInProgress (the resume lookup) refuses it");
+    check(!!w.ls.getItem("devstore:" + LIVE), "the partial record itself is still on the device, untouched — nothing was erased");
+    /* the offline test-cache pin lets go too, so a superseded build can be evicted after a bump */
+    const pin = new Function("state", "window", "localStorage", "canonTestId", "testIdAliases", "testById", "TESTCACHE_PREFIX",
+      extractFn(appSrc, "resumableVersionsFor") + "\nreturn resumableVersionsFor;")(
+      { resumeRecords: {}, assignAttempts: {} }, {}, w.ls, id => id, () => ["t1"], id => ({ testId: id }), "acestem:testcache:");
+    check(pin("t1").length === 0, "a marked sitting no longer pins its build in the offline test cache");
+    w.ls.removeItem("devstore:tomb:" + LIVE);
+    check(pin("t1").join() === "v1", "control: unmarked, the same sitting still pins its build");
+  });
+  await run("(i) a live sitting: the refused write ends it honestly, and writes nothing on the way out", async () => {
+    /* remote: the server refuses the checkpoint, the queue drops it as
+       terminal, and the app is told which key died */
+    const LIVE = "attempt:t1:300:cccc";
+    const w = loadAttempts({ config: REAL_CFG, fetch: async (url) => /fn_upsert_attempt/.test(url) ? { status: 400, body: { message: "attempt deleted" } } : { status: 200, body: [] } });
+    const killed = [];
+    w.AS.onDeleted((key, reason) => killed.push([key, reason]));
+    await w.AS.set(LIVE, rec(LIVE, { status: "in-progress", submittedAt: null }));
+    await w.flush();
+    const q = JSON.parse(w.ls.getItem("devstore:__syncqueue") || "[]");
+    check(q.length === 0 && w.warns.some(s => /DROPPED a queued write for " ?attempt:t1:300:cccc|DROPPED a queued write for attempt:t1:300:cccc/.test(s)),
+      "remote: the refused checkpoint is dropped as TERMINAL, never retried, and says so in the console", JSON.stringify(q));
+    check(killed.length === 1 && killed[0][0] === LIVE && killed[0][1] === "attempt", "remote: the app is told exactly which attempt died, and why", JSON.stringify(killed));
+    check(w.AS.syncState(CODE).refused === 0,
+      "the pill does NOT redden for it — the sitting ending is the signal, and the existing rule (only 'student deleted' reddens) is unchanged");
+    /* local / artifact: no server ever answers, so the recorder finds its own
+       marker in the store it just wrote to (this also covers the tutor
+       marking it from a dashboard on the SAME device in remote mode) */
+    const w2 = loadAttempts({ search: "?devstorage=1" });
+    const killed2 = [];
+    w2.AS.onDeleted((key, reason) => killed2.push([key, reason]));
+    seedLocal(w2.ls, "tomb:" + LIVE, tomb(LIVE, { status: "in-progress" }));
+    w2.AT.resume(rec(LIVE, { status: "in-progress", submittedAt: null }), { currentTest: { testId: "t1", modules: [] }, moduleState: {} });
+    await w2.AT.questionShown("q1");
+    await new Promise(r => setImmediate(r));
+    await w2.AT.suspend({ moduleIndex: 0 });
+    await new Promise(r => setImmediate(r));          // the probe is advisory: it settles beside the save, not inside it
+    check(killed2.some(k => k[0] === LIVE && k[1] === "attempt"), "local/artifact: the recorder finds its own marker on the next save and reports it", JSON.stringify(killed2));
+    /* and the probe must never be awaited by the save path — Save and Exit
+       waits on save(), and in artifact mode this store is a network hop */
+    const saveSrc = attemptsSrc.slice(attemptsSrc.indexOf("  async function save()"), attemptsSrc.indexOf("  function startTicker()"));
+    check(/AttemptStore\.get\(TOMB_PREFIX \+ key\)\.then\(/.test(saveSrc) && !/await AttemptStore\.get\(TOMB_PREFIX/.test(saveSrc),
+      "the checkpoint probe is fire-and-forget — a slow or hanging store read can never stall a save, a suspend, or Save and Exit");
+    /* a marker for a DIFFERENT attempt never reports this one */
+    const w3 = loadAttempts({ search: "?devstorage=1" });
+    const killed3 = [];
+    w3.AS.onDeleted((key, reason) => killed3.push([key, reason]));
+    seedLocal(w3.ls, "tomb:attempt:t1:999:zzzz", tomb("attempt:t1:999:zzzz"));
+    w3.AT.resume(rec(LIVE, { status: "in-progress", submittedAt: null }), { currentTest: { testId: "t1", modules: [] }, moduleState: {} });
+    await w3.AT.suspend({ moduleIndex: 0 });
+    await new Promise(r => setImmediate(r));
+    check(killed3.length === 0, "control: someone else's marker never reports this sitting", JSON.stringify(killed3));
+  });
+  await run("(i) app.js routes the kill signal: this sitting ends, a stale key is ignored, a deleted student ends the session", async () => {
+    const A = "attempt:t1:100:aaaa";
+    /* app.js's OWN registration line is lifted verbatim and evaluated with
+       the handlers, so the suite exercises store -> subscriber -> landing.
+       Without it the whole kill path hangs on one line nothing checked. */
+    const regLine = (appSrc.match(/^[ \t]*AttemptStore\.onDeleted\([A-Za-z0-9_$]+\);[ \t]*$/m) || [])[0];
+    check(!!regLine, "app.js subscribes its router to the store's deletion signal (the one line the whole kill path hangs on)", String(regLine));
+    const build = (liveKey, refresh, liveStatus) => {
+      const calls = [];
+      const state = { sessionGen: 1, timerInterval: 5, breakInterval: 6, readyTimer: 7, moduleOverTimer: null, timerRunning: true,
+        currentTest: { testId: "t1" }, moduleState: { m: 1 }, activeAssignment: { assignmentId: "a1" }, reviewMode: null, pendingStart: {}, userName: CODE };
+      const els = {};
+      const el = id => els[id] || (els[id] = { textContent: "", value: "", onclick: null,
+        classList: { add(){ calls.push("hide:" + id); }, remove(){}, toggle(){}, contains(){ return true; } } });
+      const subList = [];
+      const AttemptStore = { onDeleted(fn){ subList.push(fn); }, notifyDeleted(k, r, c){ subList.slice().forEach(fn => { try{ fn(k, r, c); }catch(e){} }); } };
+      const body = extractFn(appSrc, "onAttemptDeleted") + "\nasync " + extractFn(appSrc, "endSittingDeleted") + "\n" + (regLine || "") +
+        "\nreturn { onAttemptDeleted, endSittingDeleted, els, calls, state, subs: AttemptStore, notify: (k, r, c) => AttemptStore.notifyDeleted(k, r, c) };";
+      return new Function("state", "el", "calls", "els", "Attempts", "resetTestChrome", "refreshStudentState", "endDeletedSession", "renderHome", "showOnly", "clearInterval", "clearTimeout", "AttemptStore",
+        body)(state, el, calls, els,
+        { currentAttemptId: () => liveKey, currentStatus: () => liveStatus || "in-progress", abandonDeleted: k => { calls.push("abandon:" + k); return k; } },
+        () => calls.push("resetTestChrome"), async () => { calls.push("refresh"); return refresh === undefined ? true : refresh; },
+        () => calls.push("endDeletedSession"), () => calls.push("renderHome"), id => calls.push("show:" + id),
+        id => calls.push("clearInterval:" + id), id => calls.push("clearTimeout:" + id), AttemptStore);
+    };
+    {
+      /* through the real subscription, not by calling the router directly */
+      const d = build(A);
+      let n = 0;
+      d.subs.onDeleted = () => { n++; };          // no-op: the count comes from the real one below
+      d.notify("probe:none", "attempt", CODE);    // proves a subscriber exists at all
+      check(d.calls.length === 0 && n === 0, "a signal for an unrelated key reaches the subscriber and is ignored (a subscriber exists)");
+      d.notify(A, "attempt", CODE);
+      await new Promise(r => setImmediate(r));
+      check(d.calls.indexOf("abandon:" + A) !== -1 && d.calls.indexOf("show:screen-loaderror") !== -1,
+        "a refusal delivered through the STORE reaches the landing — store, subscriber and handler are joined", d.calls.join(","));
+    }
+    {
+      /* a FINISHED attempt deleted after the fact is not a sitting that ended */
+      const d = build(A, undefined, "completed");
+      d.notify(A, "attempt", CODE);
+      await new Promise(r => setImmediate(r));
+      check(d.calls.indexOf("abandon:" + A) !== -1 && d.calls.indexOf("show:screen-loaderror") === -1
+        && d.calls.indexOf("resetTestChrome") === -1 && d.state.currentTest !== null && d.state.sessionGen === 1,
+        "a deleted FINISHED attempt lets the recorder go and refreshes, but paints no 'sitting was ended' screen and touches neither the session nor the screen", d.calls.join(","));
+    }
+    const d = build(A);
+    d.onAttemptDeleted(A, "attempt");
+    await new Promise(r => setImmediate(r));
+    check(d.calls.indexOf("abandon:" + A) !== -1 && d.calls.indexOf("resetTestChrome") !== -1 && d.calls.indexOf("clearInterval:5") !== -1
+      && d.calls.indexOf("clearInterval:6") !== -1 && d.calls.indexOf("clearTimeout:7") !== -1,
+      "the live sitting is abandoned (no save), its clocks and chrome are torn down", d.calls.join(","));
+    check(d.state.currentTest === null && d.state.moduleState && Object.keys(d.state.moduleState).length === 0 && d.state.activeAssignment === null && d.state.sessionGen === 2,
+      "the sitting's state is dropped and the session generation is retired, so an in-flight load cannot land a test");
+    check(d.calls.indexOf("show:screen-loaderror") !== -1 && d.calls.indexOf("hide:loadErrRetry") !== -1
+      && /This sitting was ended/.test(d.els.loadErrTitle.textContent) && /nothing further was saved/.test(d.els.loadErrBody.textContent),
+      "the student lands on an honest screen — not a hang — with no retry button", d.els.loadErrTitle.textContent + " | " + d.els.loadErrBody.textContent);
+    check(d.calls.indexOf("show:screen-loaderror") < d.calls.indexOf("refresh"),
+      "the screen is PAINTED BEFORE the refresh — a store read with no time bound must never leave a dead test screen live and clickable", d.calls.join(","));
+    check(d.calls.indexOf("endDeletedSession") === -1, "a single deleted attempt does NOT end the whole session");
+    /* the module-over delay: a sitting ended under it must not be resumed,
+       submitted, or painted over by the confirmation screen 2.6s later */
+    {
+      const run = (mutate) => {
+        const calls = [], timers = [];
+        const state = { sessionGen: 1, moduleOverTimer: null, moduleIndex: 0, currentTest: { testId: "t1", kind: "form" } };
+        const fn = new Function("state", "showOnly", "setTimeout", "clearTimeout", "showSetDone", "showSubmitted", "beginModule",
+          extractFn(appSrc, "showModuleOver") + "\nreturn showModuleOver;")(
+          state, id => calls.push("show:" + id), (f) => { timers.push(f); return timers.length; }, () => calls.push("clearTimeout"),
+          () => calls.push("showSetDone"), () => calls.push("showSubmitted"), () => calls.push("beginModule"));
+        fn(true);
+        mutate(state);
+        timers.forEach(f => f());
+        return calls;
+      };
+      check(run(s => { s.sessionGen++; s.currentTest = null; }).join() === "show:screen-moduleover",
+        "a sitting ended under the module-over delay: the delay fires and does NOTHING — no submitted screen over the honest landing");
+      check(run(() => {}).join() === "show:screen-moduleover,showSubmitted", "control: with the sitting intact the delay shows the confirmation as before");
+      const calls2 = run(s => { s.currentTest = null; });
+      check(calls2.indexOf("showSubmitted") === -1 && calls2.indexOf("beginModule") === -1,
+        "and with currentTest dropped but the generation unchanged it still does nothing — beginModule can never run against a dropped test");
+    }
+    /* a refusal naming some other attempt must not touch the live sitting */
+    const d2 = build(A);
+    d2.onAttemptDeleted("attempt:t1:999:zzzz", "attempt");
+    await new Promise(r => setImmediate(r));
+    check(d2.calls.length === 0 && d2.state.currentTest !== null, "control: a stale refusal for another attempt leaves the sitting alone", d2.calls.join(","));
+    /* with no sitting running (between tests, or in review) nothing happens */
+    const d3 = build(null);
+    d3.onAttemptDeleted(A, "attempt");
+    await new Promise(r => setImmediate(r));
+    check(d3.calls.length === 0, "control: with no live sitting the signal is inert");
+    /* the student was deleted: one landing, the session's own */
+    const d4 = build(A);
+    d4.onAttemptDeleted(A, "student", CODE);
+    await new Promise(r => setImmediate(r));
+    check(d4.calls.indexOf("abandon:" + A) !== -1 && d4.calls.indexOf("endDeletedSession") !== -1 && d4.calls.indexOf("show:screen-loaderror") === -1,
+      "a deleted STUDENT abandons the sitting without writing and ends the session — one landing, not two", d4.calls.join(","));
+    /* THE SHARED-LAPTOP CASE: the sync queue is one device-wide list, so it
+       can hold a sibling's leftover write. A 'student deleted' refusal that
+       names SOMEONE ELSE'S code must not touch this student's session. */
+    const d6 = build(A);
+    d6.onAttemptDeleted("attempt:t1:900:zzzz", "student", OTHER);
+    await new Promise(r => setImmediate(r));
+    check(d6.calls.length === 0 && d6.state.currentTest !== null,
+      "a 'student deleted' refusal for ANOTHER student's queued write leaves this student's sitting and session untouched", d6.calls.join(","));
+    const d7 = build(A);
+    d7.onAttemptDeleted(A, "student");                 // no code at all
+    await new Promise(r => setImmediate(r));
+    check(d7.calls.length === 0, "…and an unattributed 'student deleted' signal ends nothing either (the session ends only on a positive match)");
+    const d8 = build(A);
+    d8.onAttemptDeleted(A, "student", CODE.toLowerCase());
+    await new Promise(r => setImmediate(r));
+    check(d8.calls.indexOf("endDeletedSession") !== -1, "control: the same signal with the signed-in code (any case) does end the session");
+    /* the refresh says the code is gone too: the session's landing replaces
+       the sitting one (painted first, since the refresh is unbounded) */
+    const d5 = build(A, "deleted");
+    d5.onAttemptDeleted(A, "attempt");
+    await new Promise(r => setImmediate(r));
+    check(d5.calls.indexOf("refresh") !== -1 && d5.calls.indexOf("renderHome") === -1,
+      "if the refresh reports the code deleted, the ended-sitting handler stops there and leaves the session's own landing in place", d5.calls.join(","));
   });
 
   /* =================== (e) the SPR audit =================== */
@@ -934,7 +1322,8 @@ function sqlContract(sql){
     /* the RPC's own refusals get their own wording; a 401 keeps the sign-in advice */
     AS.adminRpc = async () => { const e = new Error("attempt is in progress"); e.status = 400; throw e; };
     const r1 = await d.tutorTombstone("attempt", A);
-    check(/^Not deleted — the deletion marker for attempt attempt:t1:100:aaaa: the server says the sitting is still in progress/.test(r1.message) && !/Sign in again/.test(r1.message), "a 400 'attempt is in progress' is explained, without 'sign in again'", r1.message);
+    check(/^Not deleted — the deletion marker for attempt attempt:t1:100:aaaa: the server is still on the older migration, which only allowed finished attempts — re-apply supabase\/migrations\/2026-09-18_tombstones\.sql/.test(r1.message) && !/Sign in again/.test(r1.message),
+      "a 400 'attempt is in progress' names the deploy window it really means (app live, migration not re-applied), without 'sign in again'", r1.message);
     AS.adminRpc = async () => { const e = new Error("JWT expired"); e.status = 401; throw e; };
     const r2 = await d.tutorTombstone("attempt", A);
     check(/the tutor sign-in has expired/.test(r2.message) && /Sign in again and retry/.test(r2.message), "a 401 keeps the generic expired-session wording", r2.message);
@@ -962,11 +1351,11 @@ function sqlContract(sql){
       fire(ev, arg){ (this.handlers[ev] || []).forEach(fn => fn(arg || {})); }, click(){ this.fire("click"); } }; return e; };
     const $ = id => els[id] || (els[id] = mkEl());
     const NAMES = ["tombFor", "isDeletedStudent", "isTombstoned", "orphanStubs", "deleteGateOk", "statusBadge", "nameFor", "studentCell", "codeOptionLabel",
-      "isFinishedAttempt", "isDeletableAttempt", "fmtDate", "num", "cnt", "countPair", "scoreStr", "timingLabel", "timingBadgeHtml", "viewStudents",
+      "isFinishedAttempt", "isInProgressAttempt", "isDeletableAttempt", "fmtDate", "num", "cnt", "countPair", "scoreStr", "timingLabel", "timingBadgeHtml", "viewStudents",
       "renderConfirmPanel", "confirmDeleteAttempt", "confirmDeleteStudent"];
     const body = "const testsById = {};\n" + NAMES.map(n => extractFn(dashSrc, n)).join("\n\n") +
       "\nconst calls = [];\nasync function deleteAttempt(r){ calls.push(['attempt', r.attemptId]); return { ok: true }; }\nasync function deleteStudent(c){ calls.push(['student', c]); return { ok: true }; }" +
-      "\nreturn { viewStudents, confirmDeleteAttempt, confirmDeleteStudent, calls, get openAttemptId(){ return openAttemptId; }, setOpen(id){ openAttemptId = id; }, set(o){ Object.assign(S, o); tombs = S.tombs; recs = S.recs; assigns = S.assigns; profiles = S.profiles; source = S.source; } };";
+      "\nreturn { viewStudents, confirmDeleteAttempt, confirmDeleteStudent, isDeletableAttempt, isInProgressAttempt, calls, get openAttemptId(){ return openAttemptId; }, setOpen(id){ openAttemptId = id; }, set(o){ Object.assign(S, o); tombs = S.tombs; recs = S.recs; assigns = S.assigns; profiles = S.profiles; source = S.source; } };";
     const S = { tombs: {}, recs: [], assigns: [], profiles: {}, source: "storage" };
     const d = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date",
       "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, openAttemptId = null;\n" + body)(S, esc, escAttr, StudentCode, $, Date);
@@ -995,8 +1384,8 @@ function sqlContract(sql){
     d.confirmDeleteStudent(CODE);
     check(d.openAttemptId === null, "the student panel clears openAttemptId — a lazy load settling can never replace it with openDetail()");
     const p = $("dashDetailBody").innerHTML;
-    check(/Delete this student\?/.test(p) && /Erin &lt;K&gt;/.test(p) && new RegExp(CODE).test(p) && /3 on record — 2 finished, 1 in progress, 1 already deleted/.test(p) && /Assignments:<\/b> 1/.test(p),
-      "student panel names the (escaped) display name, the code, the attempt counts and the assignment count", p.slice(0, 400));
+    check(/Delete this student\?/.test(p) && /Erin &lt;K&gt;/.test(p) && new RegExp(CODE).test(p) && /3 on record — 1 finished, 1 in progress, 1 already deleted/.test(p) && /Assignments:<\/b> 1/.test(p),
+      "student panel names the (escaped) display name, the code, and counts each attempt ONCE (an already-marked one is not also counted as finished)", p.slice(0, 400));
     check(!/<option|multiple|checkbox/.test(p) && /there is no bulk delete/.test(p), "student panel: one target, says so");
     const go = $("dtcGo"), input = $("dtcInput");
     check(/id="dtcGo" disabled>/.test(p), "panel opens with Delete disabled");
@@ -1025,10 +1414,27 @@ function sqlContract(sql){
     d.confirmDeleteAttempt(rec(B, { assignmentId: null }));
     check(/may become startable again/.test($("dashDetailBody").innerHTML), "an untagged attempt's panel says its assignment may become startable");
     check(/id="dtcGo" disabled>/.test($("dashDetailBody").innerHTML), "attempt panel opens disabled");
-    /* not offered for an in-progress record, a deleted record, or a record without a real code */
+    /* IN PROGRESS (2026-09-21): offered, and the panel says in plain words
+       that the sitting ends, that answers from now on are not saved, and
+       that the assignment becomes startable again */
+    fresh();
+    const liveRec = rec(B, { status: "in-progress", submittedAt: null, assignmentId: "a2" });
+    check(d.isDeletableAttempt(liveRec) === true, "an in-progress sitting is offered for deletion");
+    d.confirmDeleteAttempt(liveRec);
+    const ip = $("dashDetailBody").innerHTML;
+    check(/Delete this sitting in progress\?/.test(ip) && /This sitting is IN PROGRESS/.test(ip) && /<b>ends it<\/b>/.test(ip)
+      && /<b>not counted<\/b>/.test(ip) && /startable again/.test(ip) && /never be resumed/.test(ip)
+      && /as soon as it sees the marker/.test(ip),
+      "the in-progress panel names the sitting, the loss and the re-sit before the code is typed", ip.slice(0, 500));
+    check(/not erased or edited <b>by this deletion<\/b>/.test(ip) && /may write one last checkpoint/.test(ip),
+      "…and the audit promise is exact: the deletion edits nothing, but a sitting still open on the device may write one last checkpoint before it stops");
+    check(/id="dtcGo" disabled>/.test(ip) && /Type the student code/.test(ip), "the in-progress panel is gated like any other");
+    check(!/their assignment for it stays <b>Completed<\/b>/.test(ip), "the in-progress panel never claims the assignment stays Completed");
+    /* still not offered for an already-deleted record or one without a real code */
     const before = $("dashDetailBody").innerHTML;
-    d.confirmDeleteAttempt(rec(B, { status: "in-progress" })); d.confirmDeleteAttempt(rec(O)); d.confirmDeleteAttempt(rec(A, { student: { code: "?", key: "?" } }));
-    check($("dashDetailBody").innerHTML === before && d.calls.length === 0, "the panel refuses an in-progress, an already-deleted, and a code-less record");
+    d.calls.length = 0;
+    d.confirmDeleteAttempt(rec(O)); d.confirmDeleteAttempt(rec(A, { student: { code: "?", key: "?" } }));
+    check($("dashDetailBody").innerHTML === before && d.calls.length === 0, "the panel still refuses an already-deleted and a code-less record");
   });
 
   /* =================== (h) the gate, and no bulk / no hard delete =================== */
@@ -1045,8 +1451,11 @@ function sqlContract(sql){
     const stripComments = s => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
     const code = stripComments(dashSrc);
     const students = extractFn(dashSrc, "viewStudents");
-    check((students.match(/student-del/g) || []).length === 1 && (code.match(/Delete student…/g) || []).length === 1 && (code.match(/Delete this attempt…/g) || []).length === 1,
-      "exactly one 'Delete student…' button per card and one 'Delete this attempt…' button per detail pane");
+    const od = stripComments(extractFn(dashSrc, "openDetail"));
+    check((students.match(/student-del/g) || []).length === 1 && (code.match(/Delete student…/g) || []).length === 1
+      && (code.match(/Delete this attempt…/g) || []).length === 1 && (code.match(/Delete this sitting…/g) || []).length === 1
+      && (od.match(/Delete this attempt…/g) || []).length === 1 && (od.match(/Delete this sitting…/g) || []).length === 1,
+      "exactly one 'Delete student…' per card, and ONE attempt button per detail pane — its finished and in-progress labels are the two branches of a single emitter inside openDetail");
     check(!/deleteAll|deleteStudents\(|deleteAttempts\(|tombstoneAll|tombstoneStudents|Delete all|delete all|Delete selected/i.test(code)
       && !/type="checkbox"[^>]*(att|student|del|tomb)/i.test(code),
       "no bulk affordance anywhere in dashboard.js code (no *All/*Students/*Attempts deleter, no 'Delete all/selected', no per-row delete checkboxes)");

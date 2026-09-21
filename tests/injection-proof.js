@@ -23,7 +23,9 @@
    also the tutor-side deletion markers (tomb:<attemptKey>, tomb:student:
    <CODE>): hostile deletedBy/deletedAt/reason/identity fields through the
    Attempts table, the Students cards, the detail-pane tombstone note, the
-   seen-set caveat and both delete-confirmation panels (gate asserted,
+   seen-set caveat and every delete-confirmation panel: student, finished
+   attempt, and (2026-09-21) the separate in-progress "Delete this sitting
+   in progress?" panel, whose wording is asserted both ways (gate asserted,
    never confirmed — the proof writes no marker of its own).
    NOTE: run this with local mode active (no config.js beside the page), since
    it uses the acestem-admin route, which a remote deployment removes.
@@ -953,6 +955,23 @@
       startedAt: "2026-07-29T14:00:00.000Z", lastSavedAt: "2026-07-29T15:00:00.000Z",
       submittedAt: "2026-07-29T15:00:00.000Z" });
     localStorage.setItem("as:" + rec2.attemptId, JSON.stringify(rec2));
+    /* ...and a THIRD, IN PROGRESS (2026-09-21): tutor deletion now reaches a
+       sitting that was never submitted, and that case renders a DIFFERENT
+       confirmation panel, so it needs its own poisoned target. Planted here
+       beside rec2 — after every student-side drive — so no Past card, resume
+       or Score Details surface above ever sees it, and left UNMARKED so its
+       delete button is offered. The live recorder record from the Review
+       Mode block is also in progress but carries no payload (begin() writes
+       the real testName and a real code), so it cannot prove escaping.
+       assignmentId is hostile on purpose: it makes the in-progress branch
+       that talks about the assignment render, while matching no real
+       assignmentId, so no assignment row's status can move (the record is
+       explicitly tagged, so it never enters the untagged fallback either). */
+    const { rec: rec3 } = poisonedRecord(test, {
+      attemptId: "attempt:" + test.testId + ":1700000005:xss5",
+      startedAt: "2026-07-28T14:00:00.000Z", lastSavedAt: "2026-07-28T14:20:00.000Z",
+      submittedAt: null, status: "in-progress", released: false, assignmentId: PAYLOAD });
+    localStorage.setItem("as:" + rec3.attemptId, JSON.stringify(rec3));
     const hostileTomb = (target, code) => JSON.stringify({
       kind: "tombstone", targetKind: "attempt", target: target, code: code,
       deletedAt: PAYLOAD, deletedBy: PAYLOAD, reason: PAYLOAD, testId: PAYLOAD,
@@ -1122,11 +1141,75 @@
     } else {
       results.push({ surface: "Delete-attempt confirmation panel (hostile name + testName)", pass: false, note: "live record row missing from the Students tab" });
     }
+    /* ---- the IN-PROGRESS panel (2026-09-21). Same drive as the finished
+       case above (row -> detail pane -> panel -> gate -> Cancel) against
+       rec3, which is deletable but unsubmitted. A regression that serves the
+       FINISHED copy for a live sitting would still pass every check above,
+       so the wording is asserted here in both directions: the in-progress
+       sentences must be present, and the finished case's "stays Completed"
+       promise — false for a sitting that submitted nothing — must not be. */
+    const pRow = document.querySelector(`#dashBody tr[data-att="${rec3.attemptId}"]`);
+    if(pRow){
+      pRow.click();
+      await wait(300);
+      const pDel = $("dashDeleteAttemptBtn");
+      const pLabel = pDel ? pDel.textContent.replace(/\s+/g, " ").trim() : "";
+      results.push({ surface: "In-progress record offers “Delete this sitting…”, not “Delete this attempt…”",
+        pass: !!pDel && pLabel === "Delete this sitting…",
+        note: pDel ? "button reads: " + pLabel : "NO delete button on the in-progress record's detail pane" });
+      if(pDel){
+        pDel.click();
+        await wait(200);
+        results.push(audit("Delete-SITTING confirmation panel (in-progress, hostile name + testName)", $("dashDetailBody")));
+        const h2 = $("dashDetailBody").querySelector("h2");
+        const facts = document.querySelector("#dashDetailBody .dtc-facts");
+        const warn = document.querySelector("#dashDetailBody .dash-warn");
+        const fTxt = facts ? facts.textContent.replace(/\s+/g, " ") : "";
+        const wTxt = warn ? warn.textContent.replace(/\s+/g, " ") : "";
+        const wHtml = warn ? warn.innerHTML : "";
+        const hTxt = h2 ? h2.textContent.replace(/\s+/g, " ").trim() : "";
+        /* each phrase as the panel emits it: plain text in the rendered
+           pane, and the emphasised ones as real <b> markup (a <b> the PANEL
+           wrote, never one the payload smuggled in — audit() above already
+           proved no injected element exists) */
+        const want = [
+          ["title", hTxt === "Delete this sitting in progress?"],
+          ["IN PROGRESS", wTxt.indexOf("This sitting is IN PROGRESS") !== -1 &&
+                          wHtml.indexOf("<b>This sitting is IN PROGRESS.</b>") !== -1],
+          ["ends it", wTxt.indexOf("ends it") !== -1 && wHtml.indexOf("<b>ends it</b>") !== -1],
+          ["never be resumed", wTxt.indexOf("never be resumed") !== -1],
+          ["not counted", wTxt.indexOf("is not counted — never scored, never released, on no surface of theirs.") !== -1 &&
+                          wHtml.indexOf("<b>not counted</b>") !== -1],
+          ["startable again", wTxt.indexOf("startable again") !== -1 && wHtml.indexOf("<b>startable again</b>") !== -1],
+          ["hostile name + testName inert in the facts", fTxt.indexOf("PWN") !== -1 &&
+            fTxt.indexOf("AS-XSSTEST2") !== -1 && !facts.querySelector("img") && !facts.querySelector("b[data-x]")],
+          ["payload inert in the consequences", !warn.querySelector("img") && !warn.querySelector("b[data-x]")],
+          ["gate armed on open", !!$("dtcGo") && $("dtcGo").disabled === true && !!$("dtcInput") && !!$("dtcCancel")]
+        ];
+        results.push({ surface: "In-progress panel: title + consequences say the sitting ends, hostile strings inert",
+          pass: !!h2 && !!facts && !!warn && want.every(x => x[1]) && !window.__XSS_FIRED,
+          note: (!h2 || !facts || !warn) ? "panel structure missing (h2/.dtc-facts/.dash-warn)"
+            : want.filter(x => !x[1]).map(x => x[0] + "=MISSING").join(", ") || "all phrases present; title: " + hTxt });
+        results.push({ surface: "In-progress panel does NOT promise the finished case's “assignment stays Completed”",
+          pass: !!warn && wHtml.indexOf("stays <b>Completed</b>") === -1 && wTxt.indexOf("stays Completed") === -1 &&
+                wTxt.indexOf("no Past card") === -1,
+          note: warn ? wTxt.slice(0, 220) : "no .dash-warn rendered" });
+        const g3 = gateChecks("AS-XSSTEST2");
+        results.push({ surface: "Delete-sitting gate: button disabled until the exact code is typed",
+          pass: g3.every(x => x[1]), note: g3.map(x => x[0] + "=" + (x[1] ? "ok" : "WRONG")).join(", ") });
+        $("dtcCancel").click();
+        await wait(150);
+      }
+    } else {
+      results.push({ surface: "Delete-SITTING confirmation panel (in-progress, hostile name + testName)",
+        pass: false, note: "in-progress record's row missing from the Students tab" });
+    }
     const tombKeysNow = Object.keys(localStorage).filter(k => k.indexOf("as:tomb:") === 0).length;
     results.push({ surface: "Cancel closes the panel; the proof wrote no tombstone of its own",
       pass: $("dashDetail").classList.contains("hidden") && tombKeysNow === tombKeysPlanted &&
             localStorage.getItem("as:tomb:student:AS-XSSTEST2") === null &&
-            localStorage.getItem("as:tomb:" + rec.attemptId) === null,
+            localStorage.getItem("as:tomb:" + rec.attemptId) === null &&
+            localStorage.getItem("as:tomb:" + rec3.attemptId) === null,
       note: `tomb rows: ${tombKeysNow} (planted ${tombKeysPlanted}); detail hidden=${$("dashDetail").classList.contains("hidden")}` });
 
     /* Practice Sets tab (2026-08-31): the hostile pset row's name reaches the

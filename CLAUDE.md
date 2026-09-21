@@ -56,8 +56,10 @@ business (and of internal identifiers: `ACESTEM_CONFIG`, `acestem-admin`,
 user-facing copy says Ace SAT; never show a real or issuable student code as
 an example (use `AS-XXXXXXXX`).
 
-**Deletion is a tombstone, never an edit or a hard delete (2026-09-18).**
-The tutor can delete one attempt or one student from the dashboard; both
+**Deletion is a tombstone, never an edit or a hard delete (2026-09-18;
+in-progress attempts added 2026-09-21).**
+The tutor can delete one attempt — finished **or in progress** — or one
+student from the dashboard; both
 write a SEPARATE marker row — `tomb:<attemptKey>` / `tomb:student:<CODE>`,
 owner_code the student, value `{kind:"tombstone", target, deletedAt,
 deletedBy, …}` plus a server-copied identity summary (testId, assignmentId,
@@ -74,7 +76,18 @@ else keeps its backoff). Student side: `Attempts.loadStudentRecords()`
 returns `{live, tombstones}`; a deleted attempt is on NO student surface, and
 its stub feeds `buildAssignmentIndex` only through its explicit assignmentId
 so the assignment stays Completed (25ef8f7) — an untagged deleted sitting
-never closes a later one. `Attempts.assignments()` answers `"deleted"` for a
+never closes a later one. **The marker's `status` is the only thing that
+tells the two cases apart**: a FINISHED one keeps its assignment Completed, an
+IN-PROGRESS one leaves it **startable** (nothing was submitted), because
+`attemptCompleted` is false for the stub and `attemptResumable` needs a
+resume/checkpoint blob a stub never carries. So never let a marker reach a
+surface with a missing or invented status, never let the untagged fallback
+open for an assignment that has an explicit record, and never write a
+`completedAttemptId` hint that names no real attempt. A sitting deleted while
+it is LIVE ends honestly: the queue's terminal refusal (or, with no server,
+the recorder finding its own marker on the next checkpoint) reaches
+`AttemptStore.onDeleted`, and app.js abandons the recorder **without
+writing** and lands on a plain "This sitting was ended" screen. `Attempts.assignments()` answers `"deleted"` for a
 retired code (every entry fails closed; nothing on the device is removed —
 not even a deleted attempt's local copy, which the marker's key keeps off
 every surface). An untagged deleted sitting keeps closed only an assignment
@@ -92,12 +105,16 @@ multi-target delete to the dashboard.** Two honest limits: the tutor-only and
 permanence guarantees are REMOTE-mode properties — in local/artifact mode a
 marker is a row like any other (same posture as the unauthenticated local
 dashboard); and a device that never comes online after a deletion keeps
-working from its cache. **Deploy order: app first, then the migration** (the
-HEAD client reads `student deleted` as an outage and signs in from cache).
+working from its cache — including a sitting deleted while that device was
+offline, which it will still resume. **Deploy order: app first, then the
+migration** (the HEAD client reads `student deleted` as an outage and signs
+in from cache). **The migration changed on 2026-09-21 and must be re-applied
+after that deploy** — same order, same file, `create or replace` throughout.
 The one thing no test can reach is the authenticated tutor call itself — the
 migration header names the non-destructive human probes (A: the tutor call is
 permitted; B: markers are permanent; D: the untagged-record rule runs as
-written) and an optional full run C. Async flows (a content fetch, a set
+written; E: an in-progress sitting can be marked and is then refused its own
+writes) and an optional full run C. Async flows (a content fetch, a set
 resolve or resume, a review open) capture `state.sessionGen` and bail if the
 session ended under them — keep that fence on any new await in a start path.
 

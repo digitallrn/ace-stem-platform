@@ -84,15 +84,20 @@ function makeStore(opts){
     async adminSelectAll(){ return [...server.entries()].map(([k, r]) => ({ key: k, owner_code: r.owner, value: clone(r.value) })); },
     /* the tutor-only tombstone RPCs (2026-09-18), modelled on the migration:
        a marker row per key, never an edit or a delete of the record, an
-       existing marker returned untouched, finished-only for the per-attempt
-       call, every attempt the code owns for the per-student call. Each
+       existing marker returned untouched, any status for the per-attempt
+       call (2026-09-21), every attempt the code owns for the per-student
+       call. Each
        marker written counts as an accepted server op on THAT key, which is
        what licenses the mirror write that must follow it. */
     async adminRpc(fn, args){
       calls.push(["adminRpc", fn, JSON.stringify(args)]);
       /* assignmentsAtDeletion: as the SQL computes it — for an untagged
          record, every assignment row the owner holds for that testId */
-      const atDeletion = r => (r.value && r.value.assignmentId) ? [] :
+      /* v_at defaults to [] and is filled ONLY inside the untagged AND
+         FINISHED branch, so a tagged record and an in-progress one (which
+         closes no assignment, 2026-09-21) both get [] */
+      const FINISHED = new Set(["completed", "timed-out"]);
+      const atDeletion = r => (!r.value || r.value.assignmentId || !FINISHED.has(String(r.value.status))) ? [] :
         [...server.entries()].filter(([k, a]) => k.indexOf("assign:" + r.owner + ":") === 0 && !/:__none$/.test(k) && a.value && a.value.testId === (r.value && r.value.testId))
           .map(([k]) => k.split(":")[2]).sort();
       const tombOf = (k, r, reason) => ({ kind: "tombstone", targetKind: "attempt", target: k, code: r.owner,
@@ -107,8 +112,9 @@ function makeStore(opts){
         if(rejecting("rpc", k)){ ops.push(["admin", k, "rejected"]); throw expired(); }
         const rec = server.get(args.p_key);
         if(!rec) refuse(k, "no such attempt");
-        const st = rec.value && rec.value.status;
-        if(st !== "completed" && st !== "timed-out") refuse(k, "attempt is in progress");
+        /* 2026-09-21: no status check — finished AND in-progress attempts are
+           markable. The marker copies whatever status the record has, which
+           is what the client keys the assignment on. */
         if(!server.has(k)) server.set(k, { owner: rec.owner, value: tombOf(args.p_key, rec, "attempt") });
         ops.push(["admin", k, "ok"]);
         return clone(server.get(k).value);
@@ -180,7 +186,7 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   "dismissBug", "deleteAttempt", "toggleRelease", "assignmentsForSet", "isDeletableAttempt", "nameFor",
   "fmtDate", "freshAssignmentRow", "newSetId", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
   // tombstones (2026-09-18): the third helper and the two deletion actions
-  "isFinishedAttempt", "isTombstoned", "isDeletedStudent", "tombFor", "orphanStubs", "localTombstone",
+  "isFinishedAttempt", "isInProgressAttempt", "isTombstoned", "isDeletedStudent", "tombFor", "orphanStubs", "localTombstone",
   "isTombValue", "tutorTombstone", "deleteStudent", "deleteGateOk", "adoptArchive",
   "tombstoneRejectedText", "assignmentsAtDeletion", "sameTest"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
@@ -731,17 +737,67 @@ const noSync = t => !/sync/i.test(t);
       "already marked: refused on the client, no second server call, the original marker untouched");
   });
   await run(async () => {
-    /* finished-only, on both sides: the client gate refuses an in-progress
-       record without a server call; the server (modelled) refuses one too */
+    /* 2026-09-21: an IN-PROGRESS sitting is markable — that is the case the
+       tutor needs (a stale sitting blocking a testVersion bump). The marker
+       carries status "in-progress", which is what leaves the assignment
+       startable; the record itself is untouched, as always. */
     const s = makeStore({}); const d = build(s);
-    const live = Object.assign(REC(), { status: "in-progress" });
+    const live = Object.assign(REC(), { status: "in-progress", submittedAt: null, attemptId: "attempt:202606asiav1:9:live" });
     s.seedBoth(live.attemptId, live, C1); d.seed({ recs: [live] });
+    const recBefore = rowJson(s, live.attemptId);
     const r = await d.fns.deleteAttempt(live);
-    check(r.ok === false && !s.calls.some(c => c[0] === "adminRpc") && !s.server.has("tomb:" + live.attemptId),
-      "an in-progress sitting is never tombstoned individually — refused before any server call");
-    const r2 = await d.fns.tutorTombstone("attempt", live.attemptId);
-    check(r2.ok === false && /^Not deleted — the deletion marker for attempt/.test(r2.message) && !s.server.has("tomb:" + live.attemptId) && !s.mirror.has("tomb:" + live.attemptId),
-      "control: the helper called directly on an in-progress record is refused by the server and mirrors nothing", r2.message);
+    const tk = "tomb:" + live.attemptId;
+    const tv = s.server.has(tk) ? s.server.get(tk).value : null;
+    check(r.ok === true && !!tv && tv.status === "in-progress" && tv.reason === "attempt" && tv.assignmentId === "a-1",
+      "an in-progress sitting IS marked, and the marker reports status in-progress", JSON.stringify(tv));
+    /* an UNTAGGED in-progress sitting records no assignmentsAtDeletion — it
+       closed nothing, so the list would be a claim with nothing behind it */
+    const sU = makeStore({}); const dU = build(sU);
+    const untag = Object.assign(REC(), { status: "in-progress", submittedAt: null, assignmentId: null, attemptId: "attempt:202606asiav1:6:unt" });
+    sU.seedBoth("assign:" + C1 + ":a-1", { assignmentId: "a-1", testId: untag.testId }, C1);
+    sU.seedBoth(untag.attemptId, untag, C1); dU.seed({ recs: [untag] });
+    await dU.fns.deleteAttempt(untag);
+    const tvU = sU.server.get("tomb:" + untag.attemptId).value;
+    check(JSON.stringify(tvU.assignmentsAtDeletion) === "[]", "an untagged IN-PROGRESS marker carries an empty assignmentsAtDeletion", JSON.stringify(tvU.assignmentsAtDeletion));
+    const sF = makeStore({}); const dF = build(sF);
+    const untagDone = Object.assign(REC(), { assignmentId: null, attemptId: "attempt:202606asiav1:6:und" });
+    sF.seedBoth("assign:" + C1 + ":a-1", { assignmentId: "a-1", testId: untagDone.testId }, C1);
+    sF.seedBoth(untagDone.attemptId, untagDone, C1); dF.seed({ recs: [untagDone] });
+    await dF.fns.deleteAttempt(untagDone);
+    check(JSON.stringify(sF.server.get("tomb:" + untagDone.attemptId).value.assignmentsAtDeletion) === '["a-1"]',
+      "control: the same record FINISHED records the assignment it may keep closed");
+    check(rowJson(s, live.attemptId) === recBefore && d.state().recs.length === 1,
+      "IMMUTABLE: the partial record is byte-identical on server and mirror, and stays listed");
+    check(JSON.stringify(s.mirror.get(tk)) === JSON.stringify(tv) && !s.calls.some(c => c[0] === "adminDelete" || c[0] === "adminUpsert"),
+      "the marker is mirrored and no row was deleted or upserted");
+    const t = status(d);
+    check(/^Marked the attempt for AS-ABCDEFGH deleted/.test(t)
+      && /It was IN PROGRESS: it can no longer be resumed, and their device ends the sitting as soon as it sees the marker\. Its assignment is startable again\./.test(t)
+      && !/Note: this browser showed it as/.test(t) && noSync(t),
+      "the status line says what an in-progress deletion means, from the MARKER, without the word 'sync' (nothing syncs a tutor write)", t);
+    /* the same line, derived from the marker rather than this browser's copy:
+       an untagged sitting must not be told its assignment reopened */
+    const sUn = makeStore({}); const dUn = build(sUn);
+    const untagged = Object.assign(REC(), { status: "in-progress", submittedAt: null, assignmentId: null, attemptId: "attempt:202606asiav1:8:unt" });
+    sUn.seedBoth(untagged.attemptId, untagged, C1); dUn.seed({ recs: [untagged] });
+    await dUn.fns.deleteAttempt(untagged);
+    const tUn = status(dUn);
+    check(/It wasn't tied to an assignment; if it was standing in for one, that assignment is startable again\./.test(tUn) && !/Its assignment is startable again/.test(tUn),
+      "an untagged in-progress deletion never names an assignment it does not have", tUn);
+    /* and when the sitting was submitted between the last Refresh and the
+       delete, the line reports the SERVER's status and says so */
+    const sRace = makeStore({}); const dRace = build(sRace);
+    const stale = Object.assign(REC(), { status: "in-progress", submittedAt: null, attemptId: "attempt:202606asiav1:7:race" });
+    sRace.seedBoth(stale.attemptId, Object.assign({}, stale, { status: "completed" }), C1);   // the server has moved on
+    dRace.seed({ recs: [stale] });                                                            // this browser has not
+    await dRace.fns.deleteAttempt(stale);
+    const tRace = status(dRace);
+    check(!/It was IN PROGRESS/.test(tRace) && /Note: this browser showed it as in-progress, but the server recorded it as completed/.test(tRace),
+      "a sitting submitted since the last Refresh is reported from the marker, and the disagreement is said out loud", tRace);
+    /* and a second one is refused on the client, like any marked record */
+    const n = s.calls.filter(c => c[0] === "adminRpc").length;
+    const r2 = await d.fns.deleteAttempt(live);
+    check(r2.ok === false && s.calls.filter(c => c[0] === "adminRpc").length === n, "already marked: the second in-progress delete never reaches the server");
   });
   await run(async () => {
     /* deleteStudent rejected: nothing anywhere */

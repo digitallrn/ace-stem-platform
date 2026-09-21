@@ -308,8 +308,12 @@ window.Dashboard = (function(){
     return recs.filter(r => r && r.student && r.student.key === code &&
       (r.status === "completed" || r.status === "timed-out") && !isTombstoned(r));
   }
+  /* Only the deleted attempts that WOULD have counted: the seen set is built
+     from completed sittings, so warning about a deleted in-progress one
+     would report a loss that never happened (2026-09-21). */
   function deletedAttemptsOf(code){
-    return recs.filter(r => r && r.student && r.student.key === code && isTombstoned(r));
+    return recs.filter(r => r && r.student && r.student.key === code && isTombstoned(r) &&
+      (r.status === "completed" || r.status === "timed-out"));
   }
   function recordAnswerKeys(r){
     const a = r.answers;
@@ -755,17 +759,25 @@ window.Dashboard = (function(){
     return source === "storage" && !!r && (r.status === "completed" || r.status === "timed-out");
   }
   /* The TOMBSTONE gate (the per-attempt "Delete this attempt…" button):
-     finished, not already tombstoned, and not a deleted student's (all of a
-     deleted student's attempts are already marked). Finished-only is what
-     keeps a resumable record from being marked out from under a student who
-     could still resume into it; the server enforces the same rule
-     (fn_tombstone_attempt refuses an in-progress record). One rule, shared
-     by the button's own gate (openDetail) and deleteAttempt's belt-and-braces
+     loaded from storage, not already marked, not a deleted student's (all of
+     theirs are marked already), and owned by a real code — the confirmation
+     asks for that code to be typed back, so a record without one could never
+     clear the gate.
+     IN-PROGRESS ATTEMPTS ARE INCLUDED (2026-09-21). They were refused while
+     the rule was "never delete a sitting a student could still resume", but
+     that is the case the tutor actually needs: a stale or abandoned sitting
+     blocks a testVersion bump and has to be clearable. What makes it safe is
+     not refusing it here — it is that a marked sitting is dead on the device
+     (not resumable, not crash-resumed, no card) and a live one ends honestly
+     instead of writing into a key the server refuses. The confirmation says
+     so in plain words before the code is typed. One rule, shared by the
+     button's own gate (openDetail) and deleteAttempt's belt-and-braces
      recheck, so the two can never drift apart. */
   function isDeletableAttempt(r){
-    return isFinishedAttempt(r) && !isTombstoned(r) && !isDeletedStudent(r.student && r.student.key) &&
+    return source === "storage" && !!r && !isTombstoned(r) && !isDeletedStudent(r.student && r.student.key) &&
       StudentCode.valid(r.student && r.student.key);   // the gate needs a real code to type back
   }
+  function isInProgressAttempt(r){ return !!r && r.status === "in-progress"; }
 
   function givenLabel(entry, q){
     if(entry.given === null || entry.given === undefined) return "—";
@@ -1726,14 +1738,23 @@ window.Dashboard = (function(){
      local/artifact mode this store IS the record, so the same rows are
      written here with the local identity. Idempotent: an existing marker is
      never overwritten, so the original who/when always stands.
-     `kind` is "attempt" (id = attemptId, finished only) or "student"
-     (id = code: every attempt the code owns, in-progress included, then the
-     student marker LAST — it is the commit point that refuses sign-in). */
-  /* For an UNTAGGED record: the assignments that exist for this code and
-     test right now — the only ones the marker may keep closed (the student
-     home reads this list; the server computes the same for remote markers) */
+     `kind` is "attempt" (id = attemptId — finished OR in progress since
+     2026-09-21; the marker's own `status` is then what decides the
+     assignment: Completed for a finished one, startable again for a
+     sitting) or "student" (id = code: ALL of that code's attempts, live ones
+     too, then the student marker LAST — it is the commit point that refuses
+     sign-in). */
+  /* For an UNTAGGED, FINISHED record: the assignments that exist for this
+     code and test right now — the only ones the marker may keep closed (the
+     student home reads this list). An IN-PROGRESS sitting closes nothing, so
+     its marker carries an empty list rather than a claim with no meaning
+     behind it; fn_tombstone_attempt_any applies the same status gate, so the
+     two marker writers agree row for row. (Deliberately a literal status
+     check, not isFinishedAttempt — that one also gates the export-armed hard
+     delete and must not be able to drift into this.) */
   function assignmentsAtDeletion(r){
     if(!r || r.assignmentId) return [];
+    if(r.status !== "completed" && r.status !== "timed-out") return [];
     const code = r.student && r.student.key;
     const out = [];
     assigns.forEach(entry => {
@@ -1770,7 +1791,10 @@ window.Dashboard = (function(){
     const msg = (e && typeof e.message === "string") ? e.message : "";
     if(st >= 400 && st < 500 && st !== 401){
       const why = msg === "no such attempt"        ? "the server has no record with that key (press Refresh — it may never have uploaded, or was archived away)"
-                : msg === "attempt is in progress" ? "the server says the sitting is still in progress — only a finished attempt can be deleted"
+                /* the app can delete a sitting in progress since 2026-09-21;
+                   a server still saying this is running the older migration,
+                   which is exactly the app-first deploy window */
+                : msg === "attempt is in progress" ? "the server is still on the older migration, which only allowed finished attempts — re-apply supabase/migrations/2026-09-18_tombstones.sql"
                 : msg === "tutor sign-in required" ? "the server did not see a tutor session"
                 : msg === "invalid attempt key" || msg === "invalid code" ? "the server did not accept the key (" + msg + ")"
                 : (st === 404 || /could not find the function/i.test(msg)) ? "the server has no delete function yet — the 2026-09-18 migration has not been applied"
@@ -2682,7 +2706,10 @@ window.Dashboard = (function(){
       ${versionNote}
       ${(r.modules||[]).map(m => `<span class="dmod">${esc(m.section)} ${esc(m.moduleLabel)}: ${mmss(m.timeSpentSeconds)} (${esc(m.endedBy||"?")})</span>`).join(" ")}
       <div class="dash-qlist">${qRows || '<p class="dash-empty">No answers recorded.</p>'}</div>
-      ${canDelete ? '<p><button class="dash-rel dash-danger" id="dashDeleteAttemptBtn" title="Marks this attempt deleted (asks you to type the student code back)">Delete this attempt…</button></p>' : ""}`;
+      ${canDelete ? '<p><button class="dash-rel dash-danger" id="dashDeleteAttemptBtn" title="Marks this ' +
+        (isInProgressAttempt(r) ? "sitting deleted — it can never be resumed" : "attempt deleted") +
+        ' (asks you to type the student code back)">' +
+        (isInProgressAttempt(r) ? "Delete this sitting…" : "Delete this attempt…") + '</button></p>' : ""}`;
     if(canOpen){
       const btn = $("dashStudentView");
       if(btn) btn.addEventListener("click", ()=>{
@@ -2709,16 +2736,26 @@ window.Dashboard = (function(){
      marked "deleted". One attempt or one student per call — there is no
      bulk path, and none of this touches the archive-then-delete button. */
 
-  /* Finished attempts only (isDeletableAttempt; the server refuses an
-     in-progress record too). The assignment this attempt belonged to stays
-     "Completed" on BOTH sides: here assignRowStatus still sees the record;
-     on the student's device the tombstone's identity summary feeds
-     buildAssignmentIndex, so completion still derives without the record
-     (the persisted completedAttemptId hint is usually absent in remote mode
-     — students can't write assignment rows — which is exactly why the stub
-     exists). Takes the record itself, not an id. */
+  /* Finished or in progress (isDeletableAttempt). The marker's own `status`
+     is what decides the assignment, on BOTH sides and without a second
+     field:
+       FINISHED  — the assignment stays "Completed". Here assignRowStatus
+                   still sees the record; on the student's device the
+                   marker's identity summary feeds buildAssignmentIndex, so
+                   completion still derives without the record (the persisted
+                   completedAttemptId hint is usually absent in remote mode —
+                   students can't write assignment rows — which is exactly
+                   why the stub exists).
+       IN PROGRESS — nothing was submitted, so the assignment is STARTABLE
+                   again: attemptCompleted() is false for such a stub and
+                   attemptResumable() needs a resume/checkpoint blob, which a
+                   stub never carries, so the assignment holds neither a
+                   completed nor a resumable attempt. assignRowStatus does
+                   the same here by refusing to count a marked record as
+                   "in-progress".
+     Takes the record itself, not an id. */
   async function deleteAttempt(r){
-    if(!isDeletableAttempt(r)) return { ok: false, message: "Not deleted — this attempt can't be marked (not finished, already deleted, or the student was deleted)." };
+    if(!isDeletableAttempt(r)) return { ok: false, message: "Not deleted — this attempt can't be marked (already deleted, the student was deleted, or it has no student code)." };
     const who = nameFor(r.student && r.student.key) || (r.student && r.student.code) || "?";
     const res = await tutorTombstone("attempt", r.attemptId);
     if(!res.ok){
@@ -2732,7 +2769,18 @@ window.Dashboard = (function(){
        status line with its own "Loading…" */
     res.rows.forEach(row => { tombs[row.key] = row.value; });
     renderAll();
+    /* What happened is what the MARKER says, not what this browser's copy
+       said: the row may have been refreshed minutes ago and the sitting may
+       have been submitted since. The marker is the server's answer (or, with
+       no server, the one just written from the current row). */
+    const tv = res.rows && res.rows[0] && res.rows[0].value;
+    const live = !!tv && tv.status === "in-progress";
+    const mismatch = !!(tv && typeof tv.status === "string" && tv.status !== r.status);
     $("dashStatus").textContent = "Marked the attempt for " + who + " deleted — it is on no student surface now; the record is kept for audit." +
+      (live ? " It was IN PROGRESS: it can no longer be resumed, and their device ends the sitting as soon as it sees the marker." +
+        (r.assignmentId ? " Its assignment is startable again." : " It wasn't tied to an assignment; if it was standing in for one, that assignment is startable again.") : "") +
+      (mismatch ? " Note: this browser showed it as " + r.status + ", but the server recorded it as " + tv.status +
+        " — it changed since the last Refresh, and the marker follows the server." : "") +
       (res.warning ? " " + res.warning : "");
     return res;
   }
@@ -2813,7 +2861,7 @@ window.Dashboard = (function(){
     const code = StudentCode.normalize(r.student && r.student.key);
     const name = nameFor(code);
     renderConfirmPanel({
-      title: "Delete this attempt?",
+      title: isInProgressAttempt(r) ? "Delete this sitting in progress?" : "Delete this attempt?",
       what: "attempt",
       code: code,
       goLabel: "Delete attempt",
@@ -2821,13 +2869,21 @@ window.Dashboard = (function(){
         `<div><b>Student:</b> ${name ? esc(name) + " " : '<span class="dash-hint">(no display name)</span> '}<span class="dcode">${esc(code)}</span></div>` +
         `<div><b>Test:</b> ${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</div>` +
         `<div><b>Date:</b> ${fmtDate(r.startedAt)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b></div>`,
-      consequencesHtml:
-        "<b>What happens:</b> the attempt is <b>marked deleted</b> — a marker row with your identity and the time. " +
-        "The student's device stops showing it (no Past card, no Score Details, no review); " +
-        (r.assignmentId
-          ? "their assignment for it stays <b>Completed</b>. "
-          : "this attempt is not tied to an assignment, so if it was standing in for one, that assignment may become startable again. ") +
-        "<b>What does not happen:</b> the record is not erased or edited (it stays here, marked, for audit), nothing else of theirs changes, and there is no un-delete.",
+      consequencesHtml: isInProgressAttempt(r)
+        ? "<b>This sitting is IN PROGRESS.</b> Marking it deleted <b>ends it</b>: it can never be resumed, it leaves their home screen, and " +
+          "if the student is sitting it right now their device stops the test as soon as it sees the marker and tells them their tutor ended it. " +
+          "Anything they answer between now and then is <b>not counted</b> — never scored, never released, on no surface of theirs. " +
+          (r.assignmentId
+            ? "Because nothing was submitted, their assignment becomes <b>startable again</b> — they can sit it from the beginning. "
+            : "Nothing was submitted, so no assignment is marked completed by it. ") +
+          "<b>What does not happen:</b> the partial record is not erased or edited <b>by this deletion</b> (it stays here, marked, for audit — a sitting still open on their device may write one last checkpoint into it before it stops), " +
+          "nothing else of theirs changes, and there is no un-delete."
+        : "<b>What happens:</b> the attempt is <b>marked deleted</b> — a marker row with your identity and the time. " +
+          "The student's device stops showing it (no Past card, no Score Details, no review); " +
+          (r.assignmentId
+            ? "their assignment for it stays <b>Completed</b>. "
+            : "this attempt is not tied to an assignment, so if it was standing in for one, that assignment may become startable again. ") +
+          "<b>What does not happen:</b> the record is not erased or edited (it stays here, marked, for audit), nothing else of theirs changes, and there is no un-delete.",
       onGo: () => deleteAttempt(r)
     });
   }
@@ -2836,9 +2892,11 @@ window.Dashboard = (function(){
     if(!StudentCode.valid(c) || isDeletedStudent(c) || source !== "storage") return;
     const name = nameFor(c);
     const mine = recs.filter(r => r && r.student && r.student.key === c);
-    const done = mine.filter(r => r.status === "completed" || r.status === "timed-out").length;
-    const live = mine.filter(r => r.status === "in-progress").length;
     const already = mine.filter(isTombstoned).length;
+    /* counts of what this deletion will actually mark: an attempt already
+       marked is reported once, under "already deleted", not twice */
+    const done = mine.filter(r => !isTombstoned(r) && (r.status === "completed" || r.status === "timed-out")).length;
+    const live = mine.filter(r => !isTombstoned(r) && r.status === "in-progress").length;
     const nAssign = ((assigns.find(a => a.code === c) || {}).list || []).length;
     renderConfirmPanel({
       title: "Delete this student?",

@@ -16,6 +16,7 @@
     moduleState: {},             // moduleId -> {answers, flags:Set, eliminated:{qid:Set}, passageHtml:{qid:html}}
     timerInterval: null,
     readyTimer: null,            // the loading→ready delay; cleared if the session ends underneath it
+    moduleOverTimer: null,       // the module-over→next/submitted delay; same fence
     sessionGen: 0,               // bumped when a session ends; async flows compare it before continuing
     timeRemainingSec: 0,
     timerHidden: false,
@@ -452,6 +453,7 @@
     clearInterval(state.breakInterval); state.breakInterval = null;
     state.timerRunning = false;
     if(state.readyTimer){ clearTimeout(state.readyTimer); state.readyTimer = null; }
+    if(state.moduleOverTimer){ clearTimeout(state.moduleOverTimer); state.moduleOverTimer = null; }
     resetTestChrome();
     /* then the recorder: drain its last local save and drop its handle, so
        no tab-hide/close flush can rebuild a retired code's record (same
@@ -476,6 +478,84 @@
     el("signinError").classList.remove("hidden");
     showOnly("screen-signin");
   }
+
+  /* ---- the tutor deleted the sitting that is running right now ----
+     (2026-09-21, when in-progress attempts became deletable.) Three things
+     can tell us: the sync queue's terminal refusal from the server, the
+     recorder finding its own marker in this store (local/artifact mode, or
+     the tutor's dashboard mirroring one on this very device), and a student
+     deletion sweeping it up. The session-generation fence covers a SESSION
+     ending under an async load; this is a different signal — the student is
+     still signed in, only this attempt is gone — so it gets its own landing.
+     Nothing is written on the way out: every write to that key is refused
+     now, so draining one would only queue noise. */
+  async function endSittingDeleted(key){
+    state.sessionGen++;                       // an in-flight test load must not land
+    clearInterval(state.timerInterval); state.timerInterval = null;
+    clearInterval(state.breakInterval); state.breakInterval = null;
+    state.timerRunning = false;
+    if(state.readyTimer){ clearTimeout(state.readyTimer); state.readyTimer = null; }
+    if(state.moduleOverTimer){ clearTimeout(state.moduleOverTimer); state.moduleOverTimer = null; }
+    resetTestChrome();
+    Attempts.abandonDeleted(key);             // let go WITHOUT saving; drop its queued writes
+    state.currentTest = null;
+    state.moduleState = {};
+    state.activeAssignment = null;
+    state.reviewMode = null;
+    state.pendingStart = null;
+    /* PAINT FIRST. resetTestChrome only closes overlays: until a showOnly
+       runs, the student is still looking at a live test screen whose
+       currentTest is now null, and a Next/Back/navigator click would throw.
+       The refresh below is a store read with no time bound (one round trip
+       per key in artifact mode), so it must not gate the screen. */
+    el("loadErrTitle").textContent = "This sitting was ended";
+    el("loadErrBody").textContent = "Your tutor removed this sitting, so it has stopped here and nothing further was saved. " +
+      "Nothing else of yours has changed. If this is a surprise, tell your tutor.";
+    el("loadErrRetry").classList.add("hidden");       // retrying cannot bring it back
+    el("loadErrHome").textContent = "Back to home";
+    el("loadErrHome").onclick = ()=>{ renderHome(); showOnly("screen-home"); };
+    showOnly("screen-loaderror");
+    /* then catch the cards up: nothing was submitted, so the assignment is
+       startable again. A failed read keeps the prior cards; a "deleted" one
+       means the whole code went too and its own landing replaces this. */
+    if((await refreshStudentState(state.userName)) === "deleted") return;
+    if(!el("screen-home").classList.contains("hidden")) renderHome();   // they went home while it ran
+  }
+  /* One subscriber for both reasons. A refusal naming some OTHER attempt (a
+     stale queued write for a sitting finished long ago) must never touch the
+     one in progress, so the key has to match what the recorder holds. */
+  function onAttemptDeleted(key, reason, code){
+    const live = Attempts.currentAttemptId ? Attempts.currentAttemptId() : null;
+    if(reason === "student"){
+      /* The sync queue is ONE device-wide list: on a shared laptop it can
+         hold a sibling's leftover write. A refusal naming THEIR code must
+         never end THIS student's session, so the signal has to name the
+         signed-in code. No code (an older signal, or one from a path that
+         cannot know) is not a match either — the session ends only on a
+         positive one. */
+      const mine = String(state.userName || "").trim().toUpperCase();
+      if(!code || String(code).trim().toUpperCase() !== mine) return;
+      if(live) Attempts.abandonDeleted(live);   // no write: every write is refused now
+      endDeletedSession();                      // one landing: sign-in, with the reason
+      return;
+    }
+    if(!live || live !== key) return;
+    /* A FINISHED sitting the tutor removed afterwards is not a sitting that
+       "was ended": the student submitted, the record reached the store, and
+       nothing stopped mid-flight. Let the recorder go so its flushes stop
+       being refused, refresh so it leaves Past — but say nothing about a
+       sitting ending, and leave the session and any open screen alone. */
+    const st = Attempts.currentStatus ? Attempts.currentStatus() : null;
+    if(st === "completed" || st === "timed-out"){
+      Attempts.abandonDeleted(key);
+      refreshStudentState(state.userName).then(ok => {
+        if(ok === true && !el("screen-home").classList.contains("hidden")) renderHome();
+      });
+      return;
+    }
+    endSittingDeleted(key);
+  }
+  AttemptStore.onDeleted(onAttemptDeleted);
 
   /* Shared by all three entry points: typing a code, a magic-link fragment,
      and restoring a saved device session. Returns false when sign-in could
@@ -879,6 +959,11 @@
     const out = [];
     const push = rec => {
       if(!rec || rec.status !== "in-progress" || !(rec.resume || rec.checkpoint)) return;
+      /* a sitting the tutor deleted pins nothing: it can never be resumed,
+         so holding its build in the cache would only keep a superseded
+         version alive after a bump (2026-09-21). This path reads records
+         straight out of localStorage, so it checks the marker the same way */
+      try{ if(localStorage.getItem("devstore:tomb:" + rec.attemptId)) return; }catch(e){}
       /* a live SET sitting pins the form builds its snapshot references —
          evicting one would break that set's offline resume just as surely as
          evicting a test sitting's own build */
@@ -1493,6 +1578,7 @@
   function resumeSetFlow(record){
     if(!record || record.kind !== "set") return false;
     if(!(record.resume || record.checkpoint)) return false;
+    if(isTombstonedRecord(record)){ renderHome(); showOnly("screen-home"); return true; }   // see resumeTestFlow
     showOnly("screen-loading");
     const gen = state.sessionGen;          // see withTestContent
     buildSetTestFromRecord(record, true).then(built => {
@@ -1799,7 +1885,16 @@
          assignments, only explicit assignmentIds count; every attempt started
          since the model exists carries one. Same care as legacyIds: absent
          references resolve, they don't vanish. */
-      if(!completed && !resumable && assignCountByTest[canon] === 1 && !isLegacyAssign(a) && !isSetAssign(a)){
+      /* …and only when this assignment has NO record of its own. Before
+         2026-09-21 that was implied: an assignment with an explicit record
+         had a completed or a resumable one, so the gate was shut. A deleted
+         IN-PROGRESS sitting is the first shape that leaves an assignment
+         holding an explicit record that is neither — and without this guard
+         the fallback would open and let some older untagged completed run of
+         the same test mark it Completed, which is the opposite of the
+         re-sit the tutor just asked for. The dashboard's
+         attemptsForAssignment short-circuits on the same rule. */
+      if(!explicit.length && !completed && !resumable && assignCountByTest[canon] === 1 && !isLegacyAssign(a) && !isSetAssign(a)){
         const pool = (nullByTest[canon] || []).filter(r => categoryMatchesConditions(a.category, r.conditions) && stubMayClose(a, r));
         completed = pool.find(attemptCompleted) || null;
         resumable = pool.filter(attemptResumable).sort(byStartDesc)[0] || null;
@@ -1886,7 +1981,14 @@
      still reads done. A resumable attempt resumes; then window/expiry gates. */
   function assignmentComplete(a){
     const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
-    return !!(idx.completed || a.completedAttemptId);
+    /* The persisted hint survives a record being archived away, which is why
+       it is ORed in — but it must not survive the attempt it names being
+       DELETED (2026-09-21). Otherwise a deleted sitting would pin its
+       assignment Completed for ever on this device, and a deleted
+       in-progress one would never become startable. */
+    const hint = a.completedAttemptId;
+    const hintDeleted = !!(hint && state.tombstoned && state.tombstoned[hint]);
+    return !!(idx.completed || (hint && !hintDeleted));
   }
   function assignmentState(a){
     const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
@@ -2286,6 +2388,11 @@
      so a failed fetch never leaves a blank test. */
   function resumeTestFlow(entry, record){
     if(!entry || !record) return false;
+    /* A card rendered before the marker landed can still offer Resume (the
+       index is only as fresh as the last refresh). Refuse here too, the way
+       every review surface already does — resuming would start a live
+       sitting on a record the server refuses every write for. */
+    if(isTombstonedRecord(record)){ renderHome(); showOnly("screen-home"); return true; }
     /* Pinned to the record's version: a sitting resumes on the exact build it
        began on, even after a bump replaced the current file (ATTEMPTS-SPEC
        §9). Attempts.resume keeps the record's own testVersion, and checkpoint
@@ -3276,7 +3383,13 @@
       state.lastWasProctored = !!(state.activeAssignment && state.activeAssignment.category === "test");
       if(state.activeAssignment){
         // Phase F §2: the assignment is consumed — its card becomes Completed
-        state.activeAssignment.completedAttemptId = Attempts.currentAttemptId() || "unknown";
+        /* Only ever the id of a REAL attempt. The old `|| "unknown"` stamped
+           a completion the index can never check against a record, and once
+           the recorder can be let go mid-sitting (a deleted in-progress
+           sitting, 2026-09-21) that fallback would fire and pin the
+           assignment Completed with nothing behind it. */
+        const finishedId = Attempts.currentAttemptId();
+        if(finishedId) state.activeAssignment.completedAttemptId = finishedId;
         Attempts.completeAssignment(state.userName, state.activeAssignment.assignmentId);
         state.activeAssignment = null;
       }
@@ -3286,11 +3399,20 @@
 
   function showModuleOver(isFinal){
     showOnly("screen-moduleover");
-    setTimeout(()=>{
+    /* Fenced and tracked like the other two delays (readyTimer): if the
+       sitting or the session ends under this one — the tutor deleted it —
+       the honest landing must stand, and beginModule must not run against a
+       currentTest that has just been dropped. */
+    const gen = state.sessionGen;
+    if(state.moduleOverTimer) clearTimeout(state.moduleOverTimer);
+    state.moduleOverTimer = setTimeout(()=>{
+      state.moduleOverTimer = null;
+      if(gen !== state.sessionGen) return;
+      if(!state.currentTest) return;
       if(isFinal){
         // sets get their own completion screen (raw N/M + straight-to-review);
         // forms keep the release-gated confirmation exactly as before
-        if(state.currentTest && state.currentTest.kind === "set") showSetDone();
+        if(state.currentTest.kind === "set") showSetDone();
         else showSubmitted();          // score-visibility (b): confirmation only
       }
       else beginModule(state.moduleIndex);

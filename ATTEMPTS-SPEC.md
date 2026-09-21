@@ -292,7 +292,25 @@ messages as terminal for the sync queue. A deleted attempt is on no student
 surface; its marker's summary still keeps its assignment Completed (via its
 explicit assignmentId; an untagged deleted sitting keeps closed only an
 assignment that existed when it was deleted, never one created after). Nothing
-on the device is removed. The dashboard shows deleted records and students
+on the device is removed.
+
+*Amended 2026-09-21 — in-progress attempts.* A sitting that is still in
+progress can be marked too; that is what clears a stale sitting blocking a
+`testVersion` bump. The marker's **`status`** is the whole discriminator: a
+finished attempt's marker keeps its assignment Completed, an in-progress
+one leaves the assignment **startable**, because nothing was submitted
+(`attemptCompleted` is false for the stub, and `attemptResumable` needs a
+resume/checkpoint blob no stub carries). Consequences the client owes that
+rule: the sole-assignment untagged fallback stays shut for an assignment that
+has an explicit record of its own; a `completedAttemptId` hint naming a
+deleted attempt is ignored; nothing writes a hint that names no real attempt.
+A sitting marked while it is LIVE ends honestly rather than hanging — the
+queue's terminal `attempt deleted` refusal (or, with no server, the recorder
+finding its own marker on the next checkpoint) reaches `AttemptStore.onDeleted`,
+and the app abandons the recorder **without writing**, drops that key's queued
+writes, and lands on a plain "This sitting was ended" screen. The refused key
+is never re-queued, so the refusal is terminal for the write and not merely
+for one queue item. The dashboard shows deleted records and students
 present-but-marked, excludes them from analysis and the seen set, never re-issues or
 re-assigns a retired code, and requires the student code typed back to
 confirm; one target per action, no bulk path. Exports carry `tombstones`

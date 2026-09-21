@@ -2,7 +2,10 @@
        SUPABASE_URL=https://<ref>.supabase.co SUPABASE_PUBLISHABLE_KEY=sb_publishable_… node tests/tombstone-live-proof.js
    (or SUPABASE_ANON_KEY for a legacy key; or leave both unset and it reads
    config.js if that file holds real values). Optional: --deleted-code
-   AS-XXXXXXXX (a code you have deleted) proves the student RPCs refuse it.
+   AS-XXXXXXXX (a code you have deleted) proves the student RPCs refuse it;
+   --after-probe-b (or --deleted-attempt <key>) proves a DELETED SITTING
+   refuses the write a device still holding it would make — the in-progress
+   protection, exercisable with nothing but the anon key.
 
    The Phase H proofs (PHASE-H-SPEC §8) were run from the browser console:
    "confirm the anon key cannot select/insert/update/delete records directly
@@ -105,6 +108,38 @@ const say = r => r.status + " " + (r.code ? r.code + " " : "") + String(r.messag
   /* ---- 3. the student write RPC cannot mint a tomb: key ---- */
   const forged = await rpc("fn_upsert_attempt", { p_code: "AS-ZZZZZZZZ", p_key: "tomb:attempt:proof:0:zzzz", p_value: { kind: "tombstone" } });
   check(forged.status === 400 && /invalid attempt key/.test(forged.message), "fn_upsert_attempt refuses a tomb: key ('invalid attempt key')", say(forged));
+
+  /* ---- 3b. a DELETED ATTEMPT refuses the write a device still holding that
+     sitting would make. This is the in-progress protection, and it IS
+     anon-exercisable: fn_upsert_attempt is the student path, and the tomb
+     check fires before any write, so nothing is created.
+     Guarded behind --after-probe-b because it needs a marker to already
+     exist: probe B (see the migration header) leaves tomb:attempt:probe:0:zzzz
+     in the table for ever, naming no real student. WITHOUT that marker the
+     same call would INSERT a junk row, so it is skipped rather than risked. */
+  const probeKey = argOf("--deleted-attempt") || "attempt:probe:0:zzzz";
+  if(args.indexOf("--after-probe-b") !== -1 || argOf("--deleted-attempt")){
+    const r = await rpc("fn_upsert_attempt", { p_code: "AS-ZZZZZZZZ", p_key: probeKey, p_value: { status: "in-progress" } });
+    check(r.status === 400 && r.message === "attempt deleted",
+      "a device still holding a DELETED sitting is refused its write with exactly 'attempt deleted' (the terminal refusal the client drops on)", say(r));
+    /* The ONLY outcome in which the insert was actually reached: no marker
+       existed, so this call CREATED a row. Say so loudly and hand over the
+       cleanup — a silent junk row in live data is worse than a red check. */
+    if(r.status >= 200 && r.status < 300){
+      fail++; failures.push("this run WROTE A ROW — see the cleanup line above");
+      console.log("  !! NO MARKER EXISTED for " + probeKey + ": this call CREATED a live row. Probe B was not run first.");
+      console.log("     Remove it in the SQL editor (it is not a tomb: row, so the trigger allows this):");
+      console.log("       delete from records where key = '" + probeKey + "';");
+      console.log("     Then run human probe B and re-run this proof.");
+    } else {
+      const after = await call("GET", "/rest/v1/records?select=key&key=eq." + encodeURIComponent(probeKey));
+      check(!(after.status >= 200 && after.status < 300), "…and anon still cannot read the table to check (the refusal came from the RPC, not from a read)", say(after));
+    }
+  } else {
+    console.log("skip | --after-probe-b not given: the 'attempt deleted' refusal was not exercised.");
+    console.log("       Run human probe B first (it leaves a permanent marker naming no student), then re-run with --after-probe-b.");
+    console.log("       Without an existing marker the same call would CREATE a row, so it is skipped rather than risked.");
+  }
 
   /* ---- 4. optional: a code David has deleted is refused everywhere ---- */
   const dc = argOf("--deleted-code");

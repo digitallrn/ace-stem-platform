@@ -1,7 +1,13 @@
 -- 2026-09-18 — tutor-side deletion as TOMBSTONES (a student, or one attempt).
+-- 2026-09-21 — REVISED: an IN-PROGRESS attempt can be marked too, and
+--              fn_upsert_attempt now takes the record's row lock before its
+--              tomb check. If you applied the 2026-09-18 version already,
+--              APPLY THIS FILE AGAIN (after the matching app code is live):
+--              it is `create or replace` throughout, so re-applying only
+--              replaces the function bodies. Existing markers are untouched.
 --
--- ⚠ NOT YET APPLIED. Apply THIS file in the Supabase SQL editor — never re-run
--- schema.sql against live data (its drop-policy preamble is destructive).
+-- ⚠ Apply THIS file in the Supabase SQL editor — never re-run schema.sql
+-- against live data (its drop-policy preamble is destructive).
 -- This file is additive and re-runnable. Apply it AFTER the matching app
 -- code is live — see DEPLOY ORDER below; migration-first is NOT safe.
 --
@@ -42,10 +48,10 @@
 -- AND each re-checks the JWT role claim inside the body (definer bypasses
 -- RLS, so the grant alone is not the whole story). No anon RPC can write a
 -- 'tomb:' key: fn_upsert_attempt requires an 'attempt:' key and fn_insert_bug
--- mints its own 'bug:' key. Individual deletion is FINISHED attempts only,
--- enforced here (the exposed function has no way to say otherwise; the
--- in-progress case exists only inside fn_tombstone_student, through an
--- internal function nobody can EXECUTE). Proof: tests/tombstone.test.js (SQL
+-- mints its own 'bug:' key. Individual deletion covers FINISHED and
+-- IN-PROGRESS attempts (2026-09-21); the exposed function still has no
+-- `reason` argument, so a client cannot dress a single deletion up as part
+-- of a student deletion. Proof: tests/tombstone.test.js (SQL
 -- contract) and tests/tombstone-live-proof.js (anon against the live
 -- project). NOTE `authenticated` means "any Supabase Auth user" — keep
 -- Authentication → Providers → Email → "Allow new users to sign up" OFF, as
@@ -59,6 +65,16 @@
 -- is dropped, never retried, and the sync pill says so); every other error
 -- keeps its retry/backoff.
 --
+-- A DELETED IN-PROGRESS SITTING (2026-09-21)
+-- The marker carries the record's `status`, and that one field is what the
+-- client keys on: a FINISHED attempt's marker keeps its assignment
+-- Completed; an IN-PROGRESS one leaves the assignment STARTABLE, because
+-- nothing was submitted. On the device the sitting is dead: not resumable,
+-- not crash-resumed, not on any card. If the student is mid-module when the
+-- marker lands, their next checkpoint write is refused with 'attempt
+-- deleted', the queue drops it (terminal, never retried), and the app ends
+-- the sitting with a plain message instead of hanging or pretending to save.
+--
 -- WHAT A DELETED ATTEMPT LOOKS LIKE TO THE STUDENT
 -- fn_get_own_attempts excludes any attempt that has a tomb row and returns
 -- the student's tomb:attempt rows in the same result set (minus deletedBy —
@@ -68,14 +84,26 @@
 -- without it, removing the record would reopen the assignment for a retake,
 -- the bug fixed at 25ef8f7).
 --
--- DEPLOY ORDER: APP FIRST, then this migration. App before migration is
--- inert: the dashboard's delete reports "Not deleted — … the server has no
--- delete function yet — the 2026-09-18 migration has not been applied. This
--- browser's copy is unchanged." (from PostgREST's 404 / PGRST202) and no
--- student RPC changes. Migration BEFORE the app is NOT safe: the client at
--- HEAD treats a 400 'student deleted' as an outage and signs a deleted
--- student in from its cached rows, and its sync queue backs a refused write
--- off for ever. So: push, confirm the deploy is live, then apply this file.
+-- DEPLOY ORDER: APP FIRST, then this migration — on a first apply AND on the
+-- 2026-09-21 re-apply. Migration BEFORE the app is NOT safe either time: the
+-- client at HEAD treats a 400 'student deleted' as an outage and signs a
+-- deleted student in from its cached rows, and its sync queue backs a
+-- refused write off for ever. So: push, confirm the deploy is live, then
+-- apply this file. The window between the two differs:
+--   FIRST APPLY (no tombstone functions on the server yet) — inert. Every
+--     delete reports "Not deleted — … the server has no delete function yet
+--     — the 2026-09-18 migration has not been applied. This browser's copy
+--     is unchanged." (PostgREST 404 / PGRST202), and no student RPC changes.
+--   RE-APPLY (the 2026-09-18 functions are already live) — NOT inert.
+--     Deleting a student or a FINISHED attempt keeps working exactly as
+--     before. Deleting an IN-PROGRESS sitting is offered by the new
+--     dashboard and refused only at the end — after the confirmation panel
+--     has promised the sitting will end, and after the code has been typed
+--     back — with 400 'attempt is in progress', which the dashboard reports
+--     as "the server is still on the older migration … re-apply
+--     supabase/migrations/2026-09-18_tombstones.sql". Nothing is written, so
+--     the refusal is safe; it is just the one thing that will not work until
+--     this file is applied again. Keep that window short.
 --
 -- HUMAN CHECKS after both are live. The authenticated tutor call cannot be
 -- machine-verified past the password boundary (tests/tombstone-live-proof.js
@@ -120,6 +148,28 @@
 --      ["a-1","a-2"] — not a-3 (other test), not the __none sentinel.
 --      Afterwards delete the five seeded attempt:/assign: rows (never the
 --      tomb: row — it is permanent, and names no real student, like B's).
+--
+--   E. AN IN-PROGRESS ATTEMPT CAN BE MARKED, AND IS THEN REFUSED ITS OWN
+--      WRITES (2026-09-21). Unlike D, E's second half goes through a STUDENT
+--      RPC, whose first statement is fn_valid_code — so this probe's code
+--      must be structurally VALID (D's AS-PROBE0001 would raise 'invalid
+--      code' and never reach the tomb check), and the seed's owner_code must
+--      MATCH it, or the owner check raises 'not your record' first. Use
+--      AS-PRBPRBPR: well formed, and never issue it to a student.
+--        insert into records (key, owner_code, value) values
+--          ('attempt:probe:2:yyyy', 'AS-PRBPRBPR',
+--           '{"status":"in-progress","testId":"probe-t","student":{"key":"AS-PRBPRBPR"},"assignmentId":"a-1"}');
+--      then from the signed-in dashboard console:
+--        await AttemptStore.adminRpc("fn_tombstone_attempt", { p_key: "attempt:probe:2:yyyy" })
+--      must RESOLVE (not raise 'attempt is in progress') to a marker with
+--      status "in-progress". Then make the write a device still holding that
+--      sitting would make (fn_upsert_attempt is granted to anon AND to a
+--      signed-in bearer, so the same refusal applies either way):
+--        await AttemptStore.rpc("fn_upsert_attempt", { p_code: "AS-PRBPRBPR",
+--          p_key: "attempt:probe:2:yyyy", p_value: { status: "in-progress" } })
+--      must reject with exactly 'attempt deleted'. Delete the seeded
+--      attempt: row afterwards (never the tomb: row — it is permanent, and
+--      it is keyed on the attempt, so it retires no code).
 --
 --   C. OPTIONAL full run on a throwaway code that has a finished attempt:
 --      dashboard → Attempts → open it → "Delete this attempt…" → type the
@@ -179,6 +229,11 @@ create trigger records_protect_tombstones
 --    fn_tombstone_student reaches it, running as the definer.
 --    Marks one attempt deleted with the given reason; never edits or deletes
 --    the record; idempotent (an existing marker is returned untouched).
+--    `p_reason` is provenance only ('attempt' = deleted on its own,
+--    'student' = swept up by a student deletion); nothing keys behaviour on
+--    it. What the client keys on is the marker's `status`, copied from the
+--    record: a FINISHED attempt's marker keeps its assignment Completed, an
+--    IN-PROGRESS one leaves it startable, because nothing was submitted.
 -- ---------------------------------------------------------------------------
 create or replace function public.fn_tombstone_attempt_any(p_key text, p_reason text)
 returns jsonb
@@ -205,16 +260,21 @@ begin
     raise exception 'invalid reason';
   end if;
 
-  -- lock the record for the rest of this transaction: the finished-check
-  -- below and the marker write see one consistent row
+  -- Lock the record for the rest of this transaction, so the status this
+  -- marker reports and the marker write see one consistent row, and a
+  -- student's in-flight write on the same key serialises against us
+  -- (fn_upsert_attempt takes the same lock before its tomb check).
   select * into v_rec from public.records r where r.key = p_key for update;
   if not found then
     raise exception 'no such attempt';
   end if;
-  if p_reason = 'attempt'
-     and coalesce(v_rec.value ->> 'status', '') not in ('completed', 'timed-out') then
-    raise exception 'attempt is in progress';
-  end if;
+  -- 2026-09-21: an IN-PROGRESS attempt may be marked too. It was refused
+  -- until now to stop a sitting being deleted out from under a student who
+  -- could still resume it — but that is exactly the case the tutor needs:
+  -- a stale or abandoned sitting blocks a testVersion bump and has to be
+  -- clearable. The refusal was never load-bearing for anything else (see the
+  -- migration header); the client is what makes it safe, by ending such a
+  -- sitting honestly instead of letting it write into a refused key.
 
   -- already tombstoned: return the ORIGINAL marker, never a fresh one
   select r.value into v_tomb from public.records r where r.key = 'tomb:' || p_key;
@@ -230,7 +290,11 @@ begin
   -- Computed here, on one clock, from both rows at once. (Matches by the
   -- record's own testId: an assignment under a renamed testId is not seen,
   -- which errs toward startable.)
-  if v_rec.value ->> 'assignmentId' is null then
+  -- ...and only for a FINISHED record. The list means "these assignments may
+  -- stay closed"; an in-progress sitting closes none, so recording one on
+  -- its marker would be a claim with no meaning behind it (2026-09-21).
+  if v_rec.value ->> 'assignmentId' is null
+     and coalesce(v_rec.value ->> 'status', '') in ('completed', 'timed-out') then
     select coalesce(jsonb_agg(split_part(a.key, ':', 3) order by a.key), '[]'::jsonb)
       into v_at
       from public.records a
@@ -272,9 +336,10 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 2. fn_tombstone_attempt — TUTOR ONLY. Marks ONE FINISHED attempt deleted.
---    The only exposed per-attempt entry point, and it has no reason argument:
---    the finished-only rule cannot be argued away from the client.
+-- 2. fn_tombstone_attempt — TUTOR ONLY. Marks ONE attempt deleted, finished
+--    or in progress (2026-09-21). The only exposed per-attempt entry point,
+--    and it has no reason argument: the client cannot claim a deletion was
+--    part of a student deletion when it was not.
 -- ---------------------------------------------------------------------------
 create or replace function public.fn_tombstone_attempt(p_key text)
 returns jsonb
@@ -533,12 +598,21 @@ begin
     raise exception 'student deleted';
   end if;
 
+  -- FOR UPDATE: the tomb check below must be serialised against a concurrent
+  -- fn_tombstone_attempt, which locks this same row first. Without the lock a
+  -- submit could read "no marker", block on the insert, and land a COMPLETED
+  -- record after the marker was written — a record whose marker says
+  -- in-progress, which the client would then treat as a startable assignment
+  -- while the student believes they submitted. A row that does not exist yet
+  -- locks nothing, and cannot have a marker either (fn_tombstone_attempt
+  -- requires the record), so a brand-new attempt is unaffected.
   select r.owner_code,
          coalesce(r.value -> 'released', 'false'::jsonb),
          r.value ->> 'status'
     into v_owner, v_released, v_status
     from public.records r
-   where r.key = p_key;
+   where r.key = p_key
+     for update;
 
   if v_owner is not null and v_owner <> p_code then
     raise exception 'not your record';
