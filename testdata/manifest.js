@@ -393,5 +393,89 @@ window.TEST_MANIFEST = [
   ],
   "legacyIds": [],
   "pathway": "harder"
+ },
+ {
+  "testId": "202412usv1",
+  "testName": "2024 December US v1",
+  "testVersion": "2026-09-24-a",
+  "moduleCount": 4,
+  "questionCount": 97,
+  "sections": [
+   {
+    "section": "Reading and Writing",
+    "moduleCount": 2,
+    "questionCount": 54
+   },
+   {
+    "section": "Math",
+    "moduleCount": 2,
+    "questionCount": 43
+   }
+  ],
+  "legacyIds": [],
+  "pathway": "harder"
+ },
+ {
+  "testId": "202505usv1",
+  "testName": "2025 May US v1",
+  "testVersion": "2026-09-24-a",
+  "moduleCount": 4,
+  "questionCount": 98,
+  "sections": [
+   {
+    "section": "Reading and Writing",
+    "moduleCount": 2,
+    "questionCount": 54
+   },
+   {
+    "section": "Math",
+    "moduleCount": 2,
+    "questionCount": 44
+   }
+  ],
+  "legacyIds": [],
+  "pathway": "harder"
+ },
+ {
+  "testId": "202512asiav1",
+  "testName": "2025 December Asia v1",
+  "testVersion": "2026-09-24-a",
+  "moduleCount": 4,
+  "questionCount": 98,
+  "sections": [
+   {
+    "section": "Reading and Writing",
+    "moduleCount": 2,
+    "questionCount": 54
+   },
+   {
+    "section": "Math",
+    "moduleCount": 2,
+    "questionCount": 44
+   }
+  ],
+  "legacyIds": [],
+  "pathway": "harder"
+ },
+ {
+  "testId": "202503asiav2",
+  "testName": "2025 March Asia v2",
+  "testVersion": "2026-09-24-a",
+  "moduleCount": 4,
+  "questionCount": 97,
+  "sections": [
+   {
+    "section": "Reading and Writing",
+    "moduleCount": 2,
+    "questionCount": 54
+   },
+   {
+    "section": "Math",
+    "moduleCount": 2,
+    "questionCount": 43
+   }
+  ],
+  "legacyIds": [],
+  "pathway": "harder"
  }
 ];
