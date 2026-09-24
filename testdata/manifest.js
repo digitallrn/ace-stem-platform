@@ -9,7 +9,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202606asiav1",
   "testName": "2026 June Asia v1",
-  "testVersion": "2026-09-08-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -51,7 +51,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202511asiav1",
   "testName": "2025 November Asia v1",
-  "testVersion": "2026-08-19-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -91,7 +91,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202510usv3",
   "testName": "2025 October US v3",
-  "testVersion": "2026-09-04-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -111,7 +111,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202508asiav1",
   "testName": "2025 August Asia v1",
-  "testVersion": "2026-08-19-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -131,7 +131,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202509asiav4",
   "testName": "2025 September Asia v4",
-  "testVersion": "2026-09-04-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -151,7 +151,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202506asiav2",
   "testName": "2025 June Asia v2",
-  "testVersion": "2026-09-08-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -171,7 +171,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202503usv1",
   "testName": "2025 March US v1",
-  "testVersion": "2026-08-19-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -191,7 +191,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202503usv2",
   "testName": "2025 March US v2",
-  "testVersion": "2026-09-08-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -211,7 +211,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202509asiav2",
   "testName": "2025 September Asia v2",
-  "testVersion": "2026-09-04-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 97,
   "sections": [
@@ -231,7 +231,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202512usv2",
   "testName": "2025 December US v2",
-  "testVersion": "2026-08-19-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -251,7 +251,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202506asiav4",
   "testName": "2025 June Asia v4",
-  "testVersion": "2026-09-04-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -271,7 +271,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202608intv1",
   "testName": "2026 August International v1",
-  "testVersion": "2026-08-27-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -293,7 +293,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202608usv0",
   "testName": "2026 August US v0",
-  "testVersion": "2026-09-06-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -313,7 +313,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202408usv2",
   "testName": "2024 August US v2",
-  "testVersion": "2026-09-08-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -355,7 +355,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202412asiav1",
   "testName": "2024 December Asia v1",
-  "testVersion": "2026-09-10-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -376,7 +376,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202406intv1",
   "testName": "2024 June International v1",
-  "testVersion": "2026-09-10-a",
+  "testVersion": "2026-09-23-a",
   "moduleCount": 4,
   "questionCount": 97,
   "sections": [

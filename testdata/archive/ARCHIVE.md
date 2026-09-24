@@ -17,36 +17,52 @@ and answered, not what the app knows about it later.
 
 | archived build | source commit | committed | commit subject |
 | --- | --- | --- | --- |
+| `202406intv1@2026-09-10-a.js` | `eae066ca3559` | 2026-09-10 | Add 202412asiav1 (2024 December Asia v1) and 202406intv1 (2024 June International v1) at testVersion 2026-09-10-a; manifest 17 -> 19; dedup-index.js |
+| `202408usv2@2026-09-08-a.js` | `6e72808689de` | 2026-09-08 | Add 202408usv2 (2024 August US v2) and 202506usv1 (2025 June US v1) at testVersion 2026-09-08-a; manifest 15 -> 17; dedup-index.js |
+| `202412asiav1@2026-09-10-a.js` | `eae066ca3559` | 2026-09-10 | Add 202412asiav1 (2024 December Asia v1) and 202406intv1 (2024 June International v1) at testVersion 2026-09-10-a; manifest 17 -> 19; dedup-index.js |
 | `202503usv1@2026-08-14-a.js` | `1de689c46460` | 2026-08-15 | Add 2025 March US v1 (202503usv1), testVersion 2026-08-14-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202503usv1@2026-08-14-b.js` | `c6ca013b2626` | 2026-08-15 | 2025 March US v1: testVersion 2026-08-14-b (Stage-3 round two) *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202503usv1@2026-08-14-c.js` | `911726dd3414` | 2026-08-15 | 2025 March US v1: testVersion 2026-08-14-c (Stage-3 round three) *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
+| `202503usv1@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
 | `202503usv2@2026-08-15-a.js` | `5746f0794759` | 2026-08-15 | Add 2025 March US v2 (202503usv2), testVersion 2026-08-15-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202503usv2@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
 | `202503usv2@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |
+| `202503usv2@2026-09-08-a.js` | `28d192d525cd` | 2026-09-08 | Bump 202503usv2, 202506asiav2, 202606asiav1 to testVersion 2026-09-08-a; archive the superseded builds; dedup-index.js |
 | `202506asiav2@2026-08-13-a.js` | `a6805e321d09` | 2026-08-13 | Add 202506asiav2 — 2025 June Asia v2, testVersion 2026-08-13-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202506asiav2@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
 | `202506asiav2@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |
+| `202506asiav2@2026-09-08-a.js` | `28d192d525cd` | 2026-09-08 | Bump 202503usv2, 202506asiav2, 202606asiav1 to testVersion 2026-09-08-a; archive the superseded builds; dedup-index.js |
 | `202506asiav4@2026-08-13-a.js` | `19e09b0a1566` | 2026-08-20 | Export 202506asiav4 (2025 June Asia v4) -- Stage 2 complete, 8 adjudications applied, 213 math-marking candidates deferred to next-bump |
+| `202506asiav4@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |
 | `202508asiav1@2026-08-11-a.js` | `e8c8ff3ec096` | 2026-08-11 | Add 202508asiav1 — 2025 August Asia v1, testVersion 2026-08-11-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
+| `202508asiav1@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
 | `202509asiav2@2026-08-17-a.js` | `bcb654260b05` | 2026-08-17 | add 202509asiav2 (2026-08-17-a) *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202509asiav2@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
+| `202509asiav2@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |
 | `202509asiav4@2026-08-12-a.js` | `2d2b630a9bfd` | 2026-08-12 | Add 202509asiav4 — 2025 September Asia v4, testVersion 2026-08-12-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202509asiav4@2026-08-13-a.js` | `bc3650d67739` | 2026-08-12 | 202509asiav4 -> testVersion 2026-08-13-a: two adjudicated answers *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202509asiav4@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
+| `202509asiav4@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |
 | `202510usv3@2026-08-08-a.js` | `5071ba5860d9` | 2026-08-08 | Test library: add 2025 October US v3 (202510usv3, 2026-08-08-a) *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202510usv3@2026-08-08-b.js` | `d4f28a9986ee` | 2026-08-08 | Test library: 2025 October US v3 -> testVersion 2026-08-08-b *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202510usv3@2026-08-09-a.js` | `72930111b9df` | 2026-08-09 | Test library: four corrections, one deploy at testVersion 2026-08-09-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202510usv3@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
+| `202510usv3@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |
 | `202511asiav1@2026-08-05-a.js` | `ab4545e9b900` | 2026-08-05 | Test library: add 2025 November Asia v1 (202511asiav1, 2026-08-05-a) *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
+| `202511asiav1@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
+| `202512usv2@2026-08-19-a.js` | `c1909a0d9042` | 2026-08-19 | Add 2025 December US v2 (202512usv2) -- twelfth live test |
 | `202603asiav1@2026-08-06-a.js` | `5b4618a35e9a` | 2026-08-06 | Test library: add 2026 March Asia v1 (202603asiav1, 2026-08-06-a) |
 | `202603asiav1@2026-08-09-a.js` | `72930111b9df` | 2026-08-09 | Test library: four corrections, one deploy at testVersion 2026-08-09-a |
 | `202606asiav1@2026-08-01-c.js` | `15f0ad05d3d5` | 2026-08-01 | Test library: per-test files, manifest, lazy load, offline cache *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202606asiav1@2026-08-09-a.js` | `72930111b9df` | 2026-08-09 | Test library: four corrections, one deploy at testVersion 2026-08-09-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202606asiav1@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
+| `202606asiav1@2026-09-08-a.js` | `28d192d525cd` | 2026-09-08 | Bump 202503usv2, 202506asiav2, 202606asiav1 to testVersion 2026-09-08-a; archive the superseded builds; dedup-index.js |
 | `202606asiav2@2026-08-01-a.js` | `b3a50f822a66` | 2026-08-01 | Test library: 2026 June Asia v2 ships; the stub retires *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202606asiav2@2026-08-02-a.js` | `c9ba946970bb` | 2026-08-02 | Test library: 2026 June Asia v2 -> 2026-08-02-a, token conventions current *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202606asiav2@2026-08-02-b.js` | `fbd74e830adb` | 2026-08-02 | Test library: 2026 June Asia v2 -> 2026-08-02-b, curly quotes and two content fixes *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202606asiav2@2026-08-09-a.js` | `72930111b9df` | 2026-08-09 | Test library: four corrections, one deploy at testVersion 2026-08-09-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
+| `202608intv1@2026-08-27-a.js` | `cce270652c48` | 2026-08-27 | Export 202608intv1 (2026 August International v1) |
+| `202608usv0@2026-09-06-a.js` | `66e1ce9ac28c` | 2026-09-06 | Stage 5: export 202608usv0 (2026 August US v0), testVersion 2026-09-06-a |
 
 Builds that predate the per-test library (the single-file `test-data.js`
 era, before commit `15f0ad05d3d5` / testVersion `2026-08-01-c`) are
