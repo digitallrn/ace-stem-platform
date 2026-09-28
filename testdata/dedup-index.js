@@ -28917,7 +28917,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "202312intv1:ma1-q14",
-   "family": "fam:202312intv1:ma1-q14",
+   "family": "fam:bank-202608-salvage:q0003",
    "skeleton": [
     {
      "ref": "bank-202608-salvage:q0003",
@@ -29359,7 +29359,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "bank-202608-salvage:q0003",
-   "family": "fam:202312intv1:ma1-q14",
+   "family": "fam:bank-202608-salvage:q0003",
    "exact": [
     {
      "ref": "bank-202608-salvage:q0188",
@@ -32245,7 +32245,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "bank-202608-salvage:q0003",
-   "family": "fam:202312intv1:ma1-q14",
+   "family": "fam:bank-202608-salvage:q0003",
    "exact": [
     {
      "ref": "bank-202608-salvage:q0003",
@@ -33655,23 +33655,6 @@ window.DEDUP_INDEX = {
   }
  },
  "families": {
-  "fam:202312intv1:ma1-q14": {
-   "canonical": "202312intv1:ma1-q14",
-   "members": [
-    "202312intv1:ma1-q14",
-    "bank-202608-salvage:q0003",
-    "bank-202608-salvage:q0188"
-   ],
-   "exactClasses": [
-    [
-     "202312intv1:ma1-q14"
-    ],
-    [
-     "bank-202608-salvage:q0003",
-     "bank-202608-salvage:q0188"
-    ]
-   ]
-  },
   "fam:202312intv1:ma1-q20": {
    "canonical": "202312intv1:ma1-q20",
    "members": [
@@ -39343,6 +39326,23 @@ window.DEDUP_INDEX = {
     [
      "202608usv0:re2-q20",
      "202505usv1:re2-q19"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0003": {
+   "canonical": "bank-202608-salvage:q0003",
+   "members": [
+    "202312intv1:ma1-q14",
+    "bank-202608-salvage:q0003",
+    "bank-202608-salvage:q0188"
+   ],
+   "exactClasses": [
+    [
+     "202312intv1:ma1-q14"
+    ],
+    [
+     "bank-202608-salvage:q0003",
+     "bank-202608-salvage:q0188"
     ]
    ]
   },
