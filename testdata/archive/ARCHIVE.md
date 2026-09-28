@@ -28,6 +28,7 @@ and answered, not what the app knows about it later.
 | `202503usv2@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
 | `202503usv2@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |
 | `202503usv2@2026-09-08-a.js` | `28d192d525cd` | 2026-09-08 | Bump 202503usv2, 202506asiav2, 202606asiav1 to testVersion 2026-09-08-a; archive the superseded builds; dedup-index.js |
+| `202505usv1@2026-09-24-a.js` | `8d452383ca7c` | 2026-09-24 | Add 202412usv1, 202505usv1, 202512asiav1, 202503asiav2 at testVersion 2026-09-24-a; manifest 19 -> 23; dedup-index.js |
 | `202506asiav2@2026-08-13-a.js` | `a6805e321d09` | 2026-08-13 | Add 202506asiav2 — 2025 June Asia v2, testVersion 2026-08-13-a *(skill tags backfilled after the fact — bytes are a derivation of this commit's build, not that build itself; see testdata/archive/skill-backfills.json)* |
 | `202506asiav2@2026-08-19-a.js` | `c873f379f274` | 2026-08-19 | Skill tags live on ten forms -- testVersion 2026-08-19-a |
 | `202506asiav2@2026-09-04-a.js` | `5d56bb7a94bb` | 2026-09-04 | Test library: seven student-report corrections, one deploy at testVersion 2026-09-04-a |

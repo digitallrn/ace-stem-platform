@@ -418,7 +418,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202505usv1",
   "testName": "2025 May US v1",
-  "testVersion": "2026-09-24-a",
+  "testVersion": "2026-09-28-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -498,5 +498,26 @@ window.TEST_MANIFEST = [
   ],
   "legacyIds": [],
   "pathway": "easier"
+ },
+ {
+  "testId": "202412usv2",
+  "testName": "2024 December US v2",
+  "testVersion": "2026-09-28-a",
+  "moduleCount": 4,
+  "questionCount": 96,
+  "sections": [
+   {
+    "section": "Reading and Writing",
+    "moduleCount": 2,
+    "questionCount": 53
+   },
+   {
+    "section": "Math",
+    "moduleCount": 2,
+    "questionCount": 43
+   }
+  ],
+  "legacyIds": [],
+  "pathway": "harder"
  }
 ];
