@@ -21925,7 +21925,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "202412usv1:ma1-q19",
-   "family": "fam:202412usv1:ma1-q19",
+   "family": "fam:bank-202608-salvage:q0020",
    "skeleton": [
     {
      "ref": "202510usv1:ma1-q2",
@@ -22010,7 +22010,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "202412usv1:ma2-q2",
-   "family": "fam:202412usv1:ma2-q2",
+   "family": "fam:bank-202608-salvage:q0023",
    "skeleton": [
     {
      "ref": "bank-202608-salvage:q0023",
@@ -25266,7 +25266,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "202503asiav2:ma2-q1",
-   "family": "fam:202503asiav2:ma2-q1",
+   "family": "fam:bank-202608-salvage:q0147",
    "skeleton": [
     {
      "ref": "bank-202608-salvage:q0147",
@@ -26237,7 +26237,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "202510usv1:ma1-q2",
-   "family": "fam:202412usv1:ma1-q19",
+   "family": "fam:bank-202608-salvage:q0020",
    "skeleton": [
     {
      "ref": "202412usv1:ma1-q19",
@@ -29713,7 +29713,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "bank-202608-salvage:q0020",
-   "family": "fam:202412usv1:ma1-q19",
+   "family": "fam:bank-202608-salvage:q0020",
    "exact": [
     {
      "ref": "bank-202608-salvage:q0194",
@@ -29781,7 +29781,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "bank-202608-salvage:q0023",
-   "family": "fam:202412usv1:ma2-q2",
+   "family": "fam:bank-202608-salvage:q0023",
    "exact": [
     {
      "ref": "bank-202608-salvage:q0196",
@@ -31422,7 +31422,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "bank-202608-salvage:q0146",
-   "family": "fam:202412usv1:ma2-q2",
+   "family": "fam:bank-202608-salvage:q0023",
    "skeleton": [
     {
      "ref": "202412usv1:ma2-q2",
@@ -31457,7 +31457,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "bank-202608-salvage:q0147",
-   "family": "fam:202503asiav2:ma2-q1",
+   "family": "fam:bank-202608-salvage:q0147",
    "skeleton": [
     {
      "ref": "202503asiav2:ma2-q1",
@@ -32398,7 +32398,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "bank-202608-salvage:q0020",
-   "family": "fam:202412usv1:ma1-q19",
+   "family": "fam:bank-202608-salvage:q0020",
    "exact": [
     {
      "ref": "bank-202608-salvage:q0020",
@@ -32460,7 +32460,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "spr",
    "canonical": "bank-202608-salvage:q0023",
-   "family": "fam:202412usv1:ma2-q2",
+   "family": "fam:bank-202608-salvage:q0023",
    "exact": [
     {
      "ref": "bank-202608-salvage:q0023",
@@ -33008,7 +33008,7 @@ window.DEDUP_INDEX = {
    "section": "math",
    "type": "mcq",
    "canonical": "bank-202608-salvage:q0218",
-   "family": "fam:202503asiav2:ma2-q1",
+   "family": "fam:bank-202608-salvage:q0147",
    "skeleton": [
     {
      "ref": "202503asiav2:ma2-q1",
@@ -34226,27 +34226,6 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
-  "fam:202412usv1:ma1-q19": {
-   "canonical": "202412usv1:ma1-q19",
-   "members": [
-    "202412usv1:ma1-q19",
-    "202510usv1:ma1-q2",
-    "bank-202608-salvage:q0020",
-    "bank-202608-salvage:q0194"
-   ],
-   "exactClasses": [
-    [
-     "202412usv1:ma1-q19"
-    ],
-    [
-     "202510usv1:ma1-q2"
-    ],
-    [
-     "bank-202608-salvage:q0020",
-     "bank-202608-salvage:q0194"
-    ]
-   ]
-  },
   "fam:202412usv1:ma1-q8": {
    "canonical": "202412usv1:ma1-q8",
    "members": [
@@ -34272,27 +34251,6 @@ window.DEDUP_INDEX = {
     [
      "202412usv1:ma2-q11",
      "202412usv2:ma2-q11"
-    ]
-   ]
-  },
-  "fam:202412usv1:ma2-q2": {
-   "canonical": "202412usv1:ma2-q2",
-   "members": [
-    "202412usv1:ma2-q2",
-    "bank-202608-salvage:q0023",
-    "bank-202608-salvage:q0146",
-    "bank-202608-salvage:q0196"
-   ],
-   "exactClasses": [
-    [
-     "202412usv1:ma2-q2"
-    ],
-    [
-     "bank-202608-salvage:q0023",
-     "bank-202608-salvage:q0196"
-    ],
-    [
-     "bank-202608-salvage:q0146"
     ]
    ]
   },
@@ -34398,25 +34356,6 @@ window.DEDUP_INDEX = {
     ],
     [
      "202510usv1:ma1-q4"
-    ]
-   ]
-  },
-  "fam:202503asiav2:ma2-q1": {
-   "canonical": "202503asiav2:ma2-q1",
-   "members": [
-    "202503asiav2:ma2-q1",
-    "bank-202608-salvage:q0147",
-    "bank-202608-salvage:q0218"
-   ],
-   "exactClasses": [
-    [
-     "202503asiav2:ma2-q1"
-    ],
-    [
-     "bank-202608-salvage:q0147"
-    ],
-    [
-     "bank-202608-salvage:q0218"
     ]
    ]
   },
@@ -39494,6 +39433,27 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:bank-202608-salvage:q0020": {
+   "canonical": "bank-202608-salvage:q0020",
+   "members": [
+    "202412usv1:ma1-q19",
+    "202510usv1:ma1-q2",
+    "bank-202608-salvage:q0020",
+    "bank-202608-salvage:q0194"
+   ],
+   "exactClasses": [
+    [
+     "202412usv1:ma1-q19"
+    ],
+    [
+     "202510usv1:ma1-q2"
+    ],
+    [
+     "bank-202608-salvage:q0020",
+     "bank-202608-salvage:q0194"
+    ]
+   ]
+  },
   "fam:bank-202608-salvage:q0021": {
    "canonical": "bank-202608-salvage:q0021",
    "members": [
@@ -39504,6 +39464,27 @@ window.DEDUP_INDEX = {
     [
      "bank-202608-salvage:q0021",
      "bank-202608-salvage:q0195"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0023": {
+   "canonical": "bank-202608-salvage:q0023",
+   "members": [
+    "202412usv1:ma2-q2",
+    "bank-202608-salvage:q0023",
+    "bank-202608-salvage:q0146",
+    "bank-202608-salvage:q0196"
+   ],
+   "exactClasses": [
+    [
+     "202412usv1:ma2-q2"
+    ],
+    [
+     "bank-202608-salvage:q0023",
+     "bank-202608-salvage:q0196"
+    ],
+    [
+     "bank-202608-salvage:q0146"
     ]
    ]
   },
@@ -39920,6 +39901,25 @@ window.DEDUP_INDEX = {
     ],
     [
      "bank-202608-salvage:q0216"
+    ]
+   ]
+  },
+  "fam:bank-202608-salvage:q0147": {
+   "canonical": "bank-202608-salvage:q0147",
+   "members": [
+    "202503asiav2:ma2-q1",
+    "bank-202608-salvage:q0147",
+    "bank-202608-salvage:q0218"
+   ],
+   "exactClasses": [
+    [
+     "202503asiav2:ma2-q1"
+    ],
+    [
+     "bank-202608-salvage:q0147"
+    ],
+    [
+     "bank-202608-salvage:q0218"
     ]
    ]
   },
