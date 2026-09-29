@@ -540,5 +540,26 @@ window.TEST_MANIFEST = [
   ],
   "legacyIds": [],
   "pathway": "harder"
+ },
+ {
+  "testId": "202403intv2",
+  "testName": "2024 March International v2",
+  "testVersion": "2026-09-30-a",
+  "moduleCount": 4,
+  "questionCount": 98,
+  "sections": [
+   {
+    "section": "Reading and Writing",
+    "moduleCount": 2,
+    "questionCount": 54
+   },
+   {
+    "section": "Math",
+    "moduleCount": 2,
+    "questionCount": 44
+   }
+  ],
+  "legacyIds": [],
+  "pathway": "harder"
  }
 ];
