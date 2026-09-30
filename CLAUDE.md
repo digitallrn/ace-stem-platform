@@ -412,8 +412,9 @@ record-derived value.
   card patch would write a just-deleted card back, Assign set would stamp a
   pre-save name/count, a Save during an Assign would miss the new cards). A
   builder open on a set that a Delete removes becomes an unsaved NEW set (as
-  with a set gone elsewhere). Assign set empties its form afterwards, so a
-  second press can't duplicate cards that landed. Deliberately OUTSIDE the
+  with a set gone elsewhere). Assign set resets its form afterwards (codes
+  cleared; the set picker, limit and Hold go back to their defaults, as they
+  always have), so a second press can't duplicate cards that landed. Deliberately OUTSIDE the
   lock: Create assignment (test cards — no set card patch touches them),
   Save name only, and the Phase H upload. Create can still interleave with a
   Clear all on the same student (pre-existing): the table, reloaded after
