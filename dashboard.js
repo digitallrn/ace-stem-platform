@@ -3017,13 +3017,16 @@ window.Dashboard = (function(){
     render();
     return true;
   }
-  /* The tail of every "kept as a NEW set" message: a retired bank item can't
-     go into a new set, so when the kept questions include one the advice
-     says to remove it first — "press Save set" alone would be refused. */
+  /* The tail of every "kept as a NEW set" message. A new set's save refuses
+     every bank item that is retired or not in the bank index (nothing is
+     "already held"), so when the kept questions include one the advice says
+     to remove it first — "press Save set" alone would be refused. */
   function keptAsNewSetText(b){
-    const ret = retiredRefsOf(b ? b.refs : []);
-    return "Its questions are kept here as a NEW set" + (ret.length
-      ? ". A retired bank item can't go into a new set: remove " + ret.map(r => refText(refKey(r))).join(", ") +
+    const refs = (b && Array.isArray(b.refs)) ? b.refs : [];
+    const blocked = refs.filter(r => r && typeof r === "object" && r.type === "bank" && (!bankEntryOf(r) || isRetiredBankRef(r)));
+    return "Its questions are kept here as a NEW set" + (blocked.length
+      ? ". " + (blocked.every(isRetiredBankRef) ? "A retired bank item" : "A bank item that is retired or not in the bank index") +
+        " can't go into a new set: remove " + blocked.map(r => refText(refKey(r))).join(", ") +
         " first, then press Save set to save the rest under a new id, or Cancel to drop them."
       : ": press Save set to save them under a new id, or Cancel to drop them.");
   }

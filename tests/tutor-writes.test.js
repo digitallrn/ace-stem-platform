@@ -1753,6 +1753,21 @@ const noSync = t => !/sync/i.test(t);
     const m4 = d4.state().builder && d4.state().builder.msg; everyMessage.push(m4 || "");
     check(/^This set was just deleted\. Its questions are kept here as a NEW set\. A retired bank item can't go into a new set: remove bank-202608-salvage q0032 first, then press Save set to save the rest under a new id, or Cancel to drop them\.$/.test(m4 || ""),
       "…and when those questions include a retired item, the advice names it to remove first", m4);
+    /* a bank item missing from the index is refused by a new set's save just
+       the same, so the advice names it too */
+    const UNKNOWN = { type: "bank", bankId: "bank-202608-salvage", qid: "q9999" };
+    const withUnknown = { setId: "pset-U", name: "Odd", subject: "rw", refs: [ACTIVE, UNKNOWN], createdAt: "2026-09-01T00:00:00Z" };
+    const s5 = makeStore({}); const d5 = build(s5, { fetch: realFetch() }, { page: "origin" });
+    s5.seedBoth("pset:pset-U", withUnknown);
+    d5.seed({ sets: [JSON.parse(JSON.stringify(withUnknown))], assigns: [], builder: d5.fns.builderFromSet(withUnknown) });
+    await d5.fns.deleteSet("pset-U");
+    const m5 = d5.state().builder && d5.state().builder.msg; everyMessage.push(m5 || "");
+    check(/Its questions are kept here as a NEW set\. A bank item that is retired or not in the bank index can't go into a new set: remove bank-202608-salvage q9999 first, then press Save set/.test(m5 || ""),
+      "…and a bank item missing from the index is named the same way", m5);
+    d5.$("sbName").value = "Odd";
+    await d5.fns.saveSetFromBuilder();
+    check(/q9999 \(not in the bank index\)/.test(msgOf(d5)) && psetRows(s5).length === 0,
+      "control: the advice is true — that item really is refused by the new set's save", msgOf(d5));
   });
 
   await run(async () => {
