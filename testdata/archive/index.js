@@ -3,6 +3,7 @@
    (it is tiny); the archived builds themselves lazy-load exactly like
    current test files, only when a pinned attempt opens. */
 window.TEST_ARCHIVE_INDEX = {
+ "202403intv2": ["2026-09-30-a"],
  "202406intv1": ["2026-09-10-a"],
  "202408usv2": ["2026-09-08-a"],
  "202412asiav1": ["2026-09-10-a"],

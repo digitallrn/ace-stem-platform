@@ -17,6 +17,7 @@ and answered, not what the app knows about it later.
 
 | archived build | source commit | committed | commit subject |
 | --- | --- | --- | --- |
+| `202403intv2@2026-09-30-a.js` | `dada220b2a5e` | 2026-09-29 | Add 202403intv2 at testVersion 2026-09-30-a (pathway harder); manifest 26 -> 27; dedup-index.js |
 | `202406intv1@2026-09-10-a.js` | `eae066ca3559` | 2026-09-10 | Add 202412asiav1 (2024 December Asia v1) and 202406intv1 (2024 June International v1) at testVersion 2026-09-10-a; manifest 17 -> 19; dedup-index.js |
 | `202408usv2@2026-09-08-a.js` | `6e72808689de` | 2026-09-08 | Add 202408usv2 (2024 August US v2) and 202506usv1 (2025 June US v1) at testVersion 2026-09-08-a; manifest 15 -> 17; dedup-index.js |
 | `202412asiav1@2026-09-10-a.js` | `eae066ca3559` | 2026-09-10 | Add 202412asiav1 (2024 December Asia v1) and 202406intv1 (2024 June International v1) at testVersion 2026-09-10-a; manifest 17 -> 19; dedup-index.js |
