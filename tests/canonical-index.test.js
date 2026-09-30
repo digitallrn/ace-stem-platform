@@ -990,8 +990,9 @@ run("retired", () => {
   const lockAttr = '${setSaveInFlight > 0 ? "disabled" : ""}';
   check(delBtns(vaSrc).length === 1 && delBtns(vsaSrc).length === 1 && delBtns(src).length === 2 &&
         delBtns(src).every(t => t.indexOf(lockAttr) !== -1) &&
-        /id="saAssignBtn"[^\n]*\$\{setSaveInFlight > 0 \? "disabled" : ""\}>Assign set</.test(vsaSrc),
-    "every assignment Delete button (Assign tab and Sets tab) and Assign set render disabled while a set write is in flight",
+        /id="saAssignBtn"[^\n]*\$\{setSaveInFlight > 0 \? "disabled" : ""\}>Assign set</.test(vsaSrc) &&
+        /id="afResetBtn"[^\n]*\$\{setSaveInFlight > 0 \? "disabled" : ""\}>Clear all assignments</.test(vaSrc),
+    "every assignment Delete button (Assign tab and Sets tab), Clear all assignments and Assign set render disabled while a set write is in flight",
     JSON.stringify([delBtns(vaSrc).length, delBtns(vsaSrc).length, delBtns(src).length]));
 
   /* a replacement this page's picker can't offer (it exists only in a later

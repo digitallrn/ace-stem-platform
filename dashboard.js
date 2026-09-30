@@ -1608,7 +1608,7 @@ window.Dashboard = (function(){
             <p class="dash-hint">Removes every assignment for that student. Their home screen goes empty until something new is assigned; recorded attempts are untouched.</p>
             <div class="af-actions">
               <select id="afResetCode">${assignedCodes.map(c => `<option value="${escAttr(c)}">${esc(codeOptionLabel(c))}</option>`).join("")}</select>
-              <button class="pill ghost" id="afResetBtn" style="padding:9px 22px;">Clear all assignments</button>
+              <button class="pill ghost" id="afResetBtn" style="padding:9px 22px;" ${setSaveInFlight > 0 ? "disabled" : ""}>Clear all assignments</button>
             </div>
           </div>` : ""}
       </div>`;
@@ -1979,27 +1979,35 @@ window.Dashboard = (function(){
   }
 
   async function deleteAssignment(code, assignmentId){
-    /* a set save in flight may be patching this very row: its upsert, landing
-       after this delete, would bring the assignment back as a startable card */
-    if(setSaveInFlight > 0){ $("dashStatus").textContent = "A practice set is being saved — delete the assignment once that finishes."; return; }
-    const key = "assign:" + code + ":" + assignmentId;
-    const keys = (await AttemptStore.list("assign:" + code + ":")) || [];
-    const remaining = keys.filter(k => k !== key && k.slice(-7) !== ":__none");
-    // "assigned nothing" and "never configured" are the same thing now, so
-    // deleting the last assignment needs no sentinel to record the difference —
-    // it just leaves the student with an empty home screen, which is still
-    // worth confirming since it is easy to do by accident.
-    if(remaining.length === 0 &&
-       !confirm("This is " + code + "'s last assignment.\n\nDeleting it leaves them with NOTHING on their home screen until you assign something new.\n\nDelete anyway?")){
-      return;
+    /* a set write in flight may be patching this very row (its upsert, landing
+       after this delete, would bring the assignment back as a startable card),
+       and a set save started during this delete would patch from a list that
+       still holds it — so the delete refuses under the page lock AND takes it */
+    if(setSaveInFlight > 0){ $("dashStatus").textContent = "Another set or assignment change is still being saved — delete the assignment once it finishes."; return; }
+    setSaveInFlight++;
+    try{
+      renderKeepingInputs();
+      const key = "assign:" + code + ":" + assignmentId;
+      const keys = (await AttemptStore.list("assign:" + code + ":")) || [];
+      const remaining = keys.filter(k => k !== key && k.slice(-7) !== ":__none");
+      // "assigned nothing" and "never configured" are the same thing now, so
+      // deleting the last assignment needs no sentinel to record the difference —
+      // it just leaves the student with an empty home screen, which is still
+      // worth confirming since it is easy to do by accident.
+      if(remaining.length === 0 &&
+         !confirm("This is " + code + "'s last assignment.\n\nDeleting it leaves them with NOTHING on their home screen until you assign something new.\n\nDelete anyway?")){
+        return;
+      }
+      const res = await tutorDelete(key);
+      $("dashStatus").textContent = res.ok
+        ? "Deleted " + describeRow(key) + "." + (res.warning ? " " + res.warning : "")
+        : res.message;
+      if(!res.ok) return;                        // nothing changed anywhere
+      await loadAssignsAndBugs();
+    }finally{
+      setSaveInFlight = Math.max(0, setSaveInFlight - 1);
+      renderKeepingInputs();
     }
-    const res = await tutorDelete(key);
-    $("dashStatus").textContent = res.ok
-      ? "Deleted " + describeRow(key) + "." + (res.warning ? " " + res.warning : "")
-      : res.message;
-    if(!res.ok) return;                          // nothing changed anywhere
-    await loadAssignsAndBugs();
-    render();
   }
 
   /* Clears every assignment row for a student, including any legacy array and
@@ -2007,21 +2015,30 @@ window.Dashboard = (function(){
      the confirmation says plainly what the student will see. */
   async function clearAssignments(code){
     if(!code) return;
+    /* deletes assignment rows, so it races a set write exactly as one
+       assignment Delete does: refused under the page lock, and holds it */
+    if(setSaveInFlight > 0){ $("dashStatus").textContent = "Another set or assignment change is still being saved — clear the assignments once it finishes."; return; }
     if(!confirm("Clear all assignments for " + code + "?\n\nThey will see NOTHING on their home screen — both Your Tests and Practice and Prepare will be empty — until you assign something new.\n\nTheir recorded attempts are not affected.")) return;
-    const keys = (await AttemptStore.list("assign:" + code)) || [];   // rows + legacy array
-    let cleared = 0;
-    const problems = [];
-    for(const k of keys){
-      const res = await tutorDelete(k);
-      if(res.ok){ cleared++; if(res.warning) problems.push(res.warning); }
-      else problems.push(res.message);
+    setSaveInFlight++;
+    try{
+      renderKeepingInputs();
+      const keys = (await AttemptStore.list("assign:" + code)) || [];   // rows + legacy array
+      let cleared = 0;
+      const problems = [];
+      for(const k of keys){
+        const res = await tutorDelete(k);
+        if(res.ok){ cleared++; if(res.warning) problems.push(res.warning); }
+        else problems.push(res.message);
+      }
+      $("dashStatus").textContent = !problems.length
+        ? "Cleared every assignment for " + code + " — their home screen is now empty."
+        : (cleared ? "Cleared " + cleared + " of " + keys.length + " assignment row(s) for " + code + ". " : "") +
+          problems.join(" ");
+      await loadAssignsAndBugs();
+    }finally{
+      setSaveInFlight = Math.max(0, setSaveInFlight - 1);
+      renderKeepingInputs();
     }
-    $("dashStatus").textContent = !problems.length
-      ? "Cleared every assignment for " + code + " — their home screen is now empty."
-      : (cleared ? "Cleared " + cleared + " of " + keys.length + " assignment row(s) for " + code + ". " : "") +
-        problems.join(" ");
-    await loadAssignsAndBugs();
-    render();
   }
 
   /* ---------- Phase H §7: one-time migration ----------
@@ -2942,9 +2959,12 @@ window.Dashboard = (function(){
     }
   }
   async function assignSetFromForm(){
-    /* a set save in flight: `sets` still holds the pre-save name and count,
-       and its card patch has already listed the assignments it will update */
-    if(setSaveInFlight > 0){ saMsg = "A practice set is being saved — assign once that finishes."; renderKeepingInputs(); return; }
+    /* a set write in flight: `sets` may still hold the pre-save name and
+       count, and a save's card patch has already listed the cards it will
+       update. The other way round too: a Save or Delete of the set started
+       during this loop would patch (or delete) from a list without these
+       cards — so the loop below holds the page lock. */
+    if(setSaveInFlight > 0){ saMsg = "Another set or assignment change is still being saved — assign once it finishes."; renderKeepingInputs(); return; }
     const setId = $("saSet").value;
     const s = sets.find(x => x.setId === setId);
     if(!s){ $("saMsg").textContent = "Pick a set."; return; }
@@ -2959,37 +2979,44 @@ window.Dashboard = (function(){
     const limitRaw = parseInt($("saLimit").value, 10);
     const limit = (isFinite(limitRaw) && limitRaw > 0) ? Math.min(limitRaw, 180) : null;
     const expires = $("saExpires").value ? new Date($("saExpires").value + "T23:59:00").toISOString() : null;
+    const hold = $("saHold").checked === true;   // read before the lock's re-render
     /* Per-code outcome (server first via tutorPut): the server can accept
        some codes and reject the rest, and a blanket "try again" would
        duplicate the ones that landed. */
-    const assigned = [], notes = [];
-    for(const code of codes){
-      const a = {
-        assignmentId: "a-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6),
-        kind: "set", category: "practice",
-        setId: s.setId, setName: s.name,
-        questionCount: Array.isArray(s.refs) ? s.refs.length : 0,
-        timeLimitMinutes: limit,
-        holdRelease: $("saHold").checked === true,
-        windowOpens: null, expiresAt: expires,
-        assignedAt: new Date().toISOString(),
-        completedAttemptId: null
-      };
-      const key = "assign:" + code + ":" + a.assignmentId;
-      const res = await tutorPut(key, code, a);
-      if(!res.ok){ notes.push(res.message); continue; }
-      assigned.push(code);
-      if(res.warning) notes.push(res.warning);
+    setSaveInFlight++;
+    try{
+      renderKeepingInputs();                   // Save set, Edit, Delete, New set and this button go disabled
+      const assigned = [], notes = [];
+      for(const code of codes){
+        const a = {
+          assignmentId: "a-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6),
+          kind: "set", category: "practice",
+          setId: s.setId, setName: s.name,
+          questionCount: Array.isArray(s.refs) ? s.refs.length : 0,
+          timeLimitMinutes: limit,
+          holdRelease: hold,
+          windowOpens: null, expiresAt: expires,
+          assignedAt: new Date().toISOString(),
+          completedAttemptId: null
+        };
+        const key = "assign:" + code + ":" + a.assignmentId;
+        const res = await tutorPut(key, code, a);
+        if(!res.ok){ notes.push(res.message); continue; }
+        assigned.push(code);
+        if(res.warning) notes.push(res.warning);
+      }
+      /* into the module var, not the node: the re-render rebuilds #dashBody
+         and would wipe a textContent write together with the old node */
+      saMsg =
+        (assigned.length
+          ? "Assigned “" + s.name + "” to " + assigned.join(", ") + (AttemptStore.isRemote() ? " (on the server)." : ".")
+          : "") +
+        (notes.length ? (assigned.length ? " " : "") + notes.join(" ") : "");
+      await loadAssignsAndBugs();              // `assigns` holds the new cards before the lock comes off
+    }finally{
+      setSaveInFlight = Math.max(0, setSaveInFlight - 1);
+      renderKeepingInputs();
     }
-    /* into the module var, not the node: render() below rebuilds #dashBody
-       and would wipe a textContent write together with the old node */
-    saMsg =
-      (assigned.length
-        ? "Assigned “" + s.name + "” to " + assigned.join(", ") + (AttemptStore.isRemote() ? " (on the server)." : ".")
-        : "") +
-      (notes.length ? (assigned.length ? " " : "") + notes.join(" ") : "");
-    await loadAssignsAndBugs();
-    render();
   }
   function builderAddRef(ref){
     if(pushRef(ref)) render();             // builderHeldAs() is the one rule: no duplicate key, one entry per canonical item

@@ -404,13 +404,25 @@ record-derived value.
   included) is read-only while a save runs, the save writes the exact
   snapshot it checked, and a PAGE-wide lock (`setSaveInFlight`) keeps the
   Sets list's Edit / Delete / New set off until the save — and its reload
-  of `sets` — has settled, even if the tutor pressed Cancel. The same lock
-  holds off every write a set write races: Assign set (it would stamp the
-  pre-save name/count), each assignment Delete (the save's card patch would
-  write the row back), and the builder itself; a set Delete TAKES the lock,
-  and a builder open on the set it deleted becomes an unsaved NEW set (as
-  with a set gone elsewhere). Any new set- or assignment-writing control
-  must refuse while `setSaveInFlight > 0`, in its function AND its button.
+  of `sets` — has settled, even if the tutor pressed Cancel. The lock works
+  BOTH ways: every control that writes a `pset:` row or deletes/creates an
+  `assign:` row — Save set, set Delete, Assign set, Clear all assignments,
+  an assignment Delete — refuses while it is held AND takes it for its own
+  writes (and its reload of `sets`/`assigns`, before releasing), so none can
+  interleave with another (a save's card patch would write a just-deleted
+  card back, Assign set would stamp a pre-save name/count, a Save during an
+  Assign would miss the new cards). A builder open on a set that a Delete
+  removes becomes an unsaved NEW set (as with a set gone elsewhere). Any new
+  such control must do the same, in its function AND its button — the
+  tutor-writes suite runs the dashboard's REAL `loadSets`/
+  `loadAssignsAndBugs`, so these checks can't lean on hand-seeded state.
+  Not covered, a stated limit (pre-existing since sets shipped, and true of
+  EVERY tutor write, not only sets): a Refresh whose server snapshot was
+  taken before a write can land after it and put the old row back in this
+  browser's mirror (`pullAllForTutor` overwrites and never prunes) — until
+  the next Refresh the page can show, assign or re-save the pre-write copy.
+  Don't press Refresh while a save is running; the real fix is at the
+  mirror (skip keys this page wrote after the pull began), in attempts.js.
   Limits: a tab loaded BEFORE this code shipped runs the
   old picker (reload open dashboards after a deploy), and the server does not
   check set contents. A set that already holds a retired item — saved before

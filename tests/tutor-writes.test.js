@@ -206,11 +206,13 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   "renderKeepingInputs", "pushRef", "builderHeldAs", "canonRef", "splitRef", "manifestEntry",
   "builderAddModule", "builderRemoveRef", "builderMoveRef", "builderFromSet", "openSetInBuilder", "newSetInBuilder", "deleteSetFromList",
   // the kept-as-a-new-set advice (final check, 2026-09-30)
-  "keptAsNewSetText", "retiredRefsOf", "refText"];
+  "keptAsNewSetText", "retiredRefsOf", "refText",
+  // the REAL reloads (a counting stub let a check pass on state it seeded — final check, finding 7)
+  "loadSets", "loadAssignsAndBugs"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
-  "tutorTombstone", "deleteStudent", "freshestBankIndex", "refusedBankRefs", "storedSetRefKeys"]);
+  "tutorTombstone", "deleteStudent", "freshestBankIndex", "refusedBankRefs", "storedSetRefKeys", "loadSets", "loadAssignsAndBugs"]);
 function tryExtract(name){
   try{ return (ASYNC.has(name) ? "async " : "") + extractFn(src, name); }
   catch(e){ return "";  /* absent in this source — the path's check will fail */ }
@@ -297,9 +299,7 @@ function build(store, win, doc){
     let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {}, tab = "sets";
     let dedup = null;                      // canonical grouping is canonical-index.test.js's; here: exact keys only
     const testsById = {};
-    const loads = { assigns: 0, sets: 0, storage: 0, render: 0 };
-    async function loadAssignsAndBugs(){ loads.assigns++; }
-    async function loadSets(){ loads.sets++; }
+    const loads = { assigns: 0, sets: 0, storage: 0, render: 0, setsLock: [], assignsLock: [] };
     async function loadFromStorage(){ loads.storage++; }
     /* render paints what viewSetBuilder paints for the builder's outcome
        line and Save button (so a check can see a render happened, and what
@@ -323,6 +323,11 @@ function build(store, win, doc){
        createAssignment control case). */
     function overlapNotes(codes, testId){ return codes.map(c => "OVERLAP-NOTE " + c + " " + testId); }
     ${BODY}
+    /* loadSets / loadAssignsAndBugs are dashboard.js's own (they read the
+       fake store like the real one); wrapped only to count the calls and
+       record the page lock each ran under */
+    if(typeof loadSets === "function"){ const realLoadSets = loadSets; loadSets = async function(){ loads.sets++; loads.setsLock.push(inFlightNow()); return realLoadSets(); }; }
+    if(typeof loadAssignsAndBugs === "function"){ const realLoadAB = loadAssignsAndBugs; loadAssignsAndBugs = async function(){ loads.assigns++; loads.assignsLock.push(inFlightNow()); return realLoadAB(); }; }
     const fns = {};
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
     return {
@@ -343,7 +348,8 @@ function build(store, win, doc){
     };
   `);
   const windowStub = Object.assign({ confirm: () => true, BANK_INDEX: REAL_BANK_INDEX, location: { protocol: kind.protocol } }, win || {});
-  const d = factory(store.AS, $, StudentCode, () => true, windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub, consoleStub);
+  /* the bare confirm() the dashboard calls answers as win.confirm does (yes by default) */
+  const d = factory(store.AS, $, StudentCode, (...a) => windowStub.confirm(...a), windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub, consoleStub);
   d.warns = warns;
   d.els = els; d.$ = $;
   Object.defineProperty(d, "lastBlob", { get(){ return blobs[blobs.length - 1] || null; } });
@@ -1676,15 +1682,27 @@ const noSync = t => !/sync/i.test(t);
     await d.fns.assignSetFromForm();
     const saDuring = d.state().saMsg; everyMessage.push(saDuring);
     const assignsDuring = [...s.server.keys()].filter(k => k.indexOf("assign:" + C2 + ":") === 0).length;
+    await d.fns.clearAssignments(C1);
+    const clearMsg = status(d);
+    const clearsDuring = s.calls.filter(c => c[0] === "adminDelete").length;
     gate.open(); await p;
-    check(reached && deletesDuring === 0 && delMsg === "A practice set is being saved — delete the assignment once that finishes." &&
+    const LOCKED = "Another set or assignment change is still being saved — ";
+    check(reached && deletesDuring === 0 && delMsg === LOCKED + "delete the assignment once it finishes." &&
           s.server.has(ak) && s.server.get(ak).value.setName === "New name" && s.server.get(ak).value.questionCount === 2,
       "an assignment Delete while the set save is patching that card is refused (the patch would have written the row back as a startable card)",
       JSON.stringify({ reached, deletesDuring, delMsg }));
-    check(assignsDuring === 0 && saDuring === "A practice set is being saved — assign once that finishes.",
+    check(clearsDuring === 0 && clearMsg === LOCKED + "clear the assignments once it finishes." && s.server.has(ak) && s.mirror.has(ak),
+      "Clear all assignments while the save is patching is refused the same way (review round 5, finding 1)", clearMsg);
+    check(assignsDuring === 0 && saDuring === LOCKED + "assign once it finishes.",
       "Assign set while a set save runs is refused (it would stamp the pre-save name and count)", saDuring);
+    /* the save's OWN reload put the saved set into `sets`, before the lock
+       came off — nothing here seeds it (review round 5, finding 7) */
+    const sL = d.state().sets.find(x => x.setId === "pset-L");
+    check(!!sL && sL.name === "New name" && sL.refs.length === 2 && d.state().loads.setsLock.indexOf(1) !== -1 &&
+          d.state().loads.setsLock.every(v => v === 1),
+      "the edit save reloads `sets` itself, under the lock: the page holds the saved name and count before any other set write can start",
+      JSON.stringify({ sL: sL && [sL.name, sL.refs.length], setsLock: d.state().loads.setsLock }));
     /* once the save settles both go through, Assign set with the SAVED name and count */
-    d.seed({ sets: [Object.assign({}, stored, { name: "New name", refs: [ACTIVE, FORMREF] })] });
     await d.fns.assignSetFromForm();
     const c2 = [...s.server.keys()].filter(k => k.indexOf("assign:" + C2 + ":") === 0);
     check(d.state().setSaveInFlight === 0 && c2.length === 1 && s.server.get(c2[0]).value.setName === "New name" && s.server.get(c2[0]).value.questionCount === 2,
@@ -1768,6 +1786,125 @@ const noSync = t => !/sync/i.test(t);
     await d5.fns.saveSetFromBuilder();
     check(/q9999 \(not in the bank index\)/.test(msgOf(d5)) && psetRows(s5).length === 0,
       "control: the advice is true — that item really is refused by the new set's save", msgOf(d5));
+  });
+
+  await run(async () => {
+    /* review round 5, findings 3/5/8: the lock works BOTH ways — Assign set,
+       Clear all and an assignment Delete each TAKE it, so a Save or Delete of
+       a set pressed during their writes is refused (the save would patch, and
+       the delete would confirm, from a list without the cards being written) */
+    const stored = { setId: "pset-A", name: "Old name", subject: "rw", refs: [ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
+    const s = makeStore({}); const d = build(s, { fetch: realFetch() }, { page: "origin" });
+    s.seedBoth("pset:pset-A", stored);
+    const gate = gateOf(); let reached = false;
+    const up = s.AS.adminUpsert;
+    s.AS.adminUpsert = async function(k, owner, v){ const body = JSON.parse(JSON.stringify(v)); if(k.indexOf("assign:" + C2 + ":") === 0){ reached = true; await gate.p; } return up.call(this, k, owner, body); };
+    d.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [],
+             builder: d.fns.builderFromSet(Object.assign({}, stored, { refs: [ACTIVE, FORMREF] })) });
+    d.$("sbName").value = "New name";
+    d.$("saSet").value = "pset-A"; d.els.saCodes = { selectedOptions: [{ value: C1 }, { value: C2 }] };
+    d.$("saFree").value = ""; d.$("saLimit").value = ""; d.$("saExpires").value = ""; d.$("saHold").checked = true;
+    const pA = d.fns.assignSetFromForm();
+    for(let i = 0; i < 200 && !reached; i++) await new Promise(r => setTimeout(r, 5));
+    const lockDuring = d.state().setSaveInFlight;
+    const saveBtnDuring = d.$("sbSaveBtn").disabled, newBtnDuring = d.$("setNewBtn").disabled;
+    await d.fns.saveSetFromBuilder();
+    const setUpsertsDuring = s.calls.filter(c => c[0] === "adminUpsert" && c[1] === "pset:pset-A").length;
+    const delDuring = d.fns.deleteSetFromList("pset-A");
+    await d.fns.clearAssignments(C1);
+    const clearMsg = status(d);
+    const secondAssign = (await d.fns.assignSetFromForm(), d.state().saMsg);
+    gate.open(); await pA;
+    const cards = [...s.server.entries()].filter(([k]) => k.indexOf("assign:") === 0).map(([, r]) => r.value);
+    check(reached && lockDuring === 1 && saveBtnDuring === true && newBtnDuring === true && setUpsertsDuring === 0 && delDuring === false &&
+          s.server.has("pset:pset-A") && s.calls.filter(c => c[0] === "adminDelete").length === 0 &&
+          clearMsg === "Another set or assignment change is still being saved — clear the assignments once it finishes." &&
+          secondAssign === "Another set or assignment change is still being saved — assign once it finishes.",
+      "while Assign set is writing, it holds the page lock (painted): Save set, set Delete, Clear all and a second Assign are all refused",
+      JSON.stringify({ reached, lockDuring, saveBtnDuring, newBtnDuring, setUpsertsDuring, delDuring, clearMsg, secondAssign }));
+    check(cards.length === 2 && cards.every(a => a.setId === "pset-A" && a.setName === "Old name" && a.questionCount === 1 && a.holdRelease === true) &&
+          d.state().setSaveInFlight === 0 && /^Assigned “Old name” to AS-ABCDEFGH, AS-JKLMNPQR \(on the server\)\.$/.test(d.state().saMsg) &&
+          d.state().assigns.reduce((n, e) => n + e.list.length, 0) === 2 && d.state().loads.assignsLock.slice(-1)[0] === 1,
+      "…both cards land with the name and count the set had, `assigns` holds them BEFORE the lock comes off, then the lock is released",
+      JSON.stringify({ cards: cards.map(a => [a.setName, a.questionCount]), saMsg: d.state().saMsg, assignsLock: d.state().loads.assignsLock }));
+    /* now the Save goes through, and its card patch reaches BOTH new cards */
+    await d.fns.saveSetFromBuilder();
+    const after = [...s.server.entries()].filter(([k]) => k.indexOf("assign:") === 0).map(([, r]) => r.value);
+    check(s.server.get("pset:pset-A").value.name === "New name" && after.length === 2 && after.every(a => a.setName === "New name" && a.questionCount === 2),
+      "control: once Assign set settled, Save set goes through and patches every card it wrote", JSON.stringify(after.map(a => [a.setName, a.questionCount])));
+
+    /* the form is read ONCE, before the loop: a tab switch mid-loop takes the
+       form's nodes away (the old code read #saHold per card, and on a real
+       page a missing node throws) — every card keeps what was pressed */
+    const s5 = makeStore({}); const d5 = build(s5, { fetch: realFetch() }, { page: "origin" });
+    s5.seedBoth("pset:pset-A", stored);
+    const g5 = gateOf(); let r5 = false;
+    const up5 = s5.AS.adminUpsert;
+    s5.AS.adminUpsert = async function(k, owner, v){ const body = JSON.parse(JSON.stringify(v)); if(!r5 && k.indexOf("assign:") === 0){ r5 = true; await g5.p; } return up5.call(this, k, owner, body); };
+    d5.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [] });
+    d5.$("saSet").value = "pset-A"; d5.els.saCodes = { selectedOptions: [{ value: C1 }, { value: C2 }] };
+    d5.$("saFree").value = ""; d5.$("saLimit").value = "35"; d5.$("saExpires").value = ""; d5.$("saHold").checked = true;
+    const p5 = d5.fns.assignSetFromForm();
+    for(let i = 0; i < 200 && !r5; i++) await new Promise(r => setTimeout(r, 5));
+    d5.setTab("students"); ["saSet", "saHold", "saLimit", "saExpires", "saFree", "saCodes"].forEach(id => { delete d5.els[id]; });   // the Sets tab's form is gone
+    g5.open(); await p5;
+    const c5 = [...s5.server.entries()].filter(([k]) => k.indexOf("assign:") === 0).map(([, r]) => r.value);
+    check(r5 && c5.length === 2 && c5.every(a => a.holdRelease === true && a.timeLimitMinutes === 35 && a.setId === "pset-A"),
+      "Assign set reads the form once, before its loop: a tab switch mid-loop can't change (or break) the later cards",
+      JSON.stringify(c5.map(a => [a.holdRelease, a.timeLimitMinutes])));
+
+    /* Clear all and an assignment Delete hold the lock while they write */
+    const s2 = makeStore({}); const d2 = build(s2, { fetch: realFetch() }, { page: "origin" });
+    s2.seedBoth("pset:pset-A", stored);
+    s2.seedBoth("assign:" + C1 + ":a-1", { assignmentId: "a-1", kind: "set", setId: "pset-A", setName: "Old name", questionCount: 1 }, C1);
+    s2.seedBoth("assign:" + C1 + ":a-2", { assignmentId: "a-2", kind: "set", setId: "pset-A", setName: "Old name", questionCount: 1 }, C1);
+    const g2 = gateOf(); let r2 = false;
+    const del2 = s2.AS.adminDelete;
+    s2.AS.adminDelete = async function(){ if(!r2){ r2 = true; await g2.p; } return del2.apply(this, arguments); };
+    d2.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [],
+              builder: d2.fns.builderFromSet(Object.assign({}, stored, { refs: [ACTIVE, FORMREF] })) });
+    d2.$("sbName").value = "New name";
+    const pC = d2.fns.clearAssignments(C1);
+    for(let i = 0; i < 200 && !r2; i++) await new Promise(r => setTimeout(r, 5));
+    const lockC = d2.state().setSaveInFlight;
+    await d2.fns.saveSetFromBuilder();
+    const upsC = s2.calls.filter(c => c[0] === "adminUpsert").length;
+    g2.open(); await pC;
+    check(r2 && lockC === 1 && upsC === 0 && d2.state().setSaveInFlight === 0 && ![...s2.server.keys()].some(k => k.indexOf("assign:") === 0) &&
+          /^Cleared every assignment for AS-ABCDEFGH/.test(status(d2)),
+      "Clear all holds the page lock while it deletes: a Save pressed meanwhile is refused; the clear completes and releases it",
+      JSON.stringify({ r2, lockC, upsC }));
+    const s3 = makeStore({}); const d3 = build(s3, { fetch: realFetch() }, { page: "origin" });
+    s3.seedBoth("pset:pset-A", stored);
+    s3.seedBoth("assign:" + C1 + ":a-1", { assignmentId: "a-1", kind: "set", setId: "pset-A", setName: "Old name", questionCount: 1 }, C1);
+    s3.seedBoth("assign:" + C1 + ":a-2", { assignmentId: "a-2", kind: "set", setId: "pset-A", setName: "Old name", questionCount: 1 }, C1);
+    const g3 = gateOf(); let r3 = false;
+    const del3 = s3.AS.adminDelete;
+    s3.AS.adminDelete = async function(){ r3 = true; await g3.p; return del3.apply(this, arguments); };
+    d3.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [],
+              builder: d3.fns.builderFromSet(Object.assign({}, stored, { refs: [ACTIVE, FORMREF] })) });
+    d3.$("sbName").value = "New name";
+    const pD = d3.fns.deleteAssignment(C1, "a-1");
+    for(let i = 0; i < 200 && !r3; i++) await new Promise(r => setTimeout(r, 5));
+    const lockD = d3.state().setSaveInFlight;
+    await d3.fns.saveSetFromBuilder();
+    const upsD = s3.calls.filter(c => c[0] === "adminUpsert").length;
+    g3.open(); await pD;
+    check(r3 && lockD === 1 && upsD === 0 && d3.state().setSaveInFlight === 0 && !s3.server.has("assign:" + C1 + ":a-1") && s3.server.has("assign:" + C1 + ":a-2"),
+      "an assignment Delete holds the page lock while it writes: a Save pressed meanwhile is refused; the delete completes and releases it",
+      JSON.stringify({ r3, lockD, upsD }));
+
+    /* a cancelled confirm leaves no lock behind */
+    const s4 = makeStore({}); const d4 = build(s4, { confirm: () => false });
+    s4.seedBoth("assign:" + C1 + ":a-1", { assignmentId: "a-1", kind: "set", setId: "pset-A" }, C1);
+    s4.seedBoth("pset:pset-A", stored);
+    d4.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [] });
+    await d4.fns.deleteAssignment(C1, "a-1");               // its last assignment: the confirm is asked, and declined
+    await d4.fns.clearAssignments(C1);
+    await d4.fns.deleteSet("pset-A");
+    check(d4.state().setSaveInFlight === 0 && s4.server.has("assign:" + C1 + ":a-1") && s4.server.has("pset:pset-A") &&
+          !s4.calls.some(c => c[0] === "adminDelete") && d4.$("setNewBtn").disabled === false,
+      "a declined confirm (last-assignment Delete, Clear all, set Delete) deletes nothing and leaves the page unlocked");
   });
 
   await run(async () => {
