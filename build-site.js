@@ -185,19 +185,27 @@ archiveFiles.forEach(f => {
    dashboard names it in its own notice and degrades to "not indexed" /
    "may be stale" marks — but a deploy log that says so is the earlier,
    cheaper signal that `dedup_gate.py --library --emit-platform` was
-   skipped after an export or a testVersion bump. */
+   skipped after an export or a testVersion bump.
+   Every parse below FAILS LOUDLY: from 2026-09-07 to 2026-09-30 the bank
+   pattern had lost its backslashes (`window.BANK_MANIFESTs*=s*…`), matched
+   nothing, and a silent `bmm ? … : []` turned that into "no banks to
+   compare" — the bank half of this check never ran and nothing said so.
+   A pattern that stops matching is now a warning naming the file, and
+   tests/build-site-drift.test.js runs this script on a copy of the tree
+   with planted drift (and on the unmodified tree, which must stay quiet). */
 try{
-  const ix = fs.readFileSync(path.join(TESTDATA_DIR, "dedup-index.js"), "utf8");
-  const m = ix.match(/window\.DEDUP_INDEX\s*=\s*(\{[\s\S]*\});\s*$/);
-  const ref = m ? (JSON.parse(m[1]).reference || {}) : {};
+  const readAssigned = (file, re, what) => {
+    const m = fs.readFileSync(path.join(TESTDATA_DIR, file), "utf8").match(re);
+    if(!m) throw new Error(TESTDATA_DIR + "/" + file + " does not match the " + what + " pattern");
+    return JSON.parse(m[1]);
+  };
+  const ref = readAssigned("dedup-index.js", /window\.DEDUP_INDEX\s*=\s*(\{[\s\S]*\});\s*$/, "window.DEDUP_INDEX = {…};").reference || {};
   const forms = Array.isArray(ref.forms) ? ref.forms : [];
   const banks = Array.isArray(ref.banks) ? ref.banks : [];
-  const mfRaw = fs.readFileSync(path.join(TESTDATA_DIR, "manifest.js"), "utf8");
-  const mfm = mfRaw.match(/window\.TEST_MANIFEST\s*=\s*(\[[\s\S]*\]);\s*$/);
-  const manifest = mfm ? JSON.parse(mfm[1]) : [];
-  const bmRaw = fs.readFileSync(path.join(TESTDATA_DIR, "bank-manifest.js"), "utf8");
-  const bmm = bmRaw.match(/window.BANK_MANIFESTs*=s*([[sS]*]);s*$/);
-  const bankManifest = bmm ? JSON.parse(bmm[1]) : [];
+  const manifest = readAssigned("manifest.js", /window\.TEST_MANIFEST\s*=\s*(\[[\s\S]*\]);\s*$/, "window.TEST_MANIFEST = […];");
+  const bankManifest = readAssigned("bank-manifest.js", /window\.BANK_MANIFEST\s*=\s*(\[[\s\S]*\]);\s*$/, "window.BANK_MANIFEST = […];");
+  if(!Array.isArray(manifest) || !Array.isArray(bankManifest))
+    throw new Error("manifest.js / bank-manifest.js did not parse to a list");
   const drift = [];
   manifest.forEach(t => {
     const f = forms.find(x => x && x.testId === t.testId);
