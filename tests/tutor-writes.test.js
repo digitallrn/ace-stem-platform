@@ -72,7 +72,7 @@ function makeStore(opts){
   const AS = {
     isRemote: () => opts.remote !== false,
     hasAuthToken: () => true,
-    async setLocal(k, v){ calls.push(["setLocal", k]); ops.push(["mirror:set", k]); if(opts.localFail) return false; mirror.set(k, clone(v)); return true; },
+    async setLocal(k, v){ calls.push(["setLocal", k]); ops.push(["mirror:set", k]); if(opts.localThrow) throw new Error("storage exploded"); if(opts.localFail) return false; mirror.set(k, clone(v)); return true; },
     async remove(k){ calls.push(["remove", k]); ops.push(["mirror:remove", k]); if(opts.localFail) return false; mirror.delete(k); return true; },
     async get(k){ return mirror.has(k) ? clone(mirror.get(k)) : null; },
     /* attempts.js getResult: the three outcomes get() flattens to null */
@@ -200,7 +200,10 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   "tombstoneRejectedText", "assignmentsAtDeletion", "sameTest",
   // the set save's retired-item refusal (2026-09-30)
   "refKey", "bankEntryIn", "bankEntryOf", "isRetiredBankRef", "liveReplacement", "bankIndexReReadable",
-  "freshestBankIndex", "refusedBankRefs", "storedSetRefKeys"];
+  "freshestBankIndex", "refusedBankRefs", "storedSetRefKeys",
+  // the builder's own edits and the renderer the save uses (second review, 2026-09-30)
+  "renderKeepingInputs", "pushRef", "builderHeldAs", "canonRef", "splitRef", "manifestEntry",
+  "builderAddModule", "builderRemoveRef", "builderMoveRef"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
@@ -214,7 +217,38 @@ function tryExtract(name){
    range by its own check in §9f. */
 const REAL_TIMEOUT_SRC = (() => { try{ return extractConst(src, "BANK_INDEX_TIMEOUT_MS"); }catch(e){ return ""; } })();
 const URL_SRC = (() => { try{ return extractConst(src, "BANK_INDEX_URL"); }catch(e){ return ""; } })();
-const BODY = NAMES.map(tryExtract).join("\n") + "\n" + URL_SRC + "\nconst BANK_INDEX_TIMEOUT_MS = 60;\n";
+const KEPT_SRC = ["KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI"].map(n => { try{ return extractConst(src, n); }catch(e){ return ""; } }).join("\n");
+/* Module state the new code relies on is taken FROM dashboard.js, never
+   declared by this harness: a declaration missing from the page must fail
+   here, not only in the browser (second review, finding 21). */
+function decl(name){
+  const m = src.match(new RegExp("^[ \\t]*(?:let|const)[ \\t]+" + name + "[ \\t]*=[^;\\n]*;", "m"));
+  return m ? m[0] : "/* dashboard.js no longer declares " + name + " */";
+}
+const STATE_SRC = [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests")].join("\n");
+const BODY = NAMES.map(tryExtract).join("\n") + "\n" + URL_SRC + "\n" + KEPT_SRC + "\n" + STATE_SRC +
+  "\nconst BANK_INDEX_TIMEOUT_MS = 60;\n";
+/* The page kinds the re-read decision depends on, built from the REAL
+   markup (second review, findings 7/19/24): the split tree's index.html as
+   served over http(s) ("origin") and as a file:// copy ("file"), and the
+   single-file build ("inlined": assemble.py inlines every local <script src>
+   except config.js). document.querySelector here EVALUATES the selector it
+   is given against those tags — an unsupported selector throws, as a
+   browser's would for invalid CSS. */
+const INDEX_HTML = fs.readFileSync("index.html", "utf8");
+const SCRIPT_SRCS = [...INDEX_HTML.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/g)].map(m => m[1]);
+const INLINED_SRCS = SCRIPT_SRCS.filter(u => /^(https?:)?\/\//.test(u) || /(^|\/)config\.js$/.test(u));
+const PAGE_KINDS = { origin: { srcs: SCRIPT_SRCS, protocol: "https:" }, file: { srcs: SCRIPT_SRCS, protocol: "file:" },
+                     inlined: { srcs: INLINED_SRCS, protocol: "https:" } };
+function selectorQuery(srcs){
+  return sel => {
+    const m = /^script\[src(\$=|\^=|\*=|=)"([^"]*)"\]$/.exec(String(sel));
+    if(!m){ const e = new Error("unsupported selector in the harness: " + sel); e.name = "SyntaxError"; throw e; }
+    const op = m[1], v = m[2];
+    const hit = srcs.find(u => op === "$=" ? u.endsWith(v) : op === "^=" ? u.startsWith(v) : op === "*=" ? u.indexOf(v) !== -1 : u === v);
+    return hit ? { tagName: "SCRIPT", src: hit } : null;
+  };
+}
 const PRESENT = NAMES.filter(n => tryExtract(n) !== "");
 
 function build(store, win, doc){
@@ -225,21 +259,32 @@ function build(store, win, doc){
      any textContent written to a node INSIDE it (saMsg, sbMsg, afMsg) — model
      that, so a message delivered only to a soon-to-be-replaced node does not
      pass here while the page shows nothing. dashStatus lives outside. */
-  const wipeBody = () => { ["saMsg", "sbMsg", "afMsg"].forEach(id => { if(els[id]) els[id].textContent = ""; }); };
+  const wipeBody = () => {
+    ["saMsg", "sbMsg", "afMsg"].forEach(id => { if(els[id]) els[id].textContent = ""; });
+    /* …and every DOM-only form value in it: the two assign forms keep
+       theirs only in the DOM, which is what renderKeepingInputs exists for */
+    ["afFree", "afName", "afTest", "afCat", "afTiming", "afOpens", "afExpires", "afResetCode",
+     "saSet", "saFree", "saLimit", "saExpires"].forEach(id => { if(els[id]) els[id].value = ""; });
+    if(els.saHold) els.saHold.checked = false;
+    ["afCodes", "saCodes"].forEach(id => { const el = els[id]; if(el && el.options) el.options.forEach(o => { o.selected = false; }); });
+  };
   /* exportAll's download plumbing, stubbed: it only needs an anchor to click.
      The Blob RECORDS its parts so the payload can be asserted on. */
   const documentStub = { createElement: () => ({ href: "", download: "", click(){}, remove(){} }), body: { appendChild(){} } };
-  /* doc.reReadable: the page loaded testdata/bank-index.js from its origin
-     (<script src>), as index.html does; absent, it was inlined, as the
-     single-file build does */
-  if(doc && doc.reReadable) documentStub.querySelector = sel => /testdata\/bank-index\.js/.test(sel) ? { tagName: "SCRIPT" } : null;
-  else documentStub.querySelector = () => null;
+  /* doc.page: "origin" (index.html over http(s)), "file" (index.html as a
+     file:// copy) or "inlined" (the single-file build) — the default */
+  const kind = PAGE_KINDS[(doc && doc.page) || "inlined"];
+  documentStub.querySelector = selectorQuery(kind.srcs);
+  const warns = [];
+  const consoleStub = { log: (...a) => console.log(...a), error: (...a) => console.error(...a),
+    warn: (...a) => { warns.push(a.map(String).join(" ")); } };
   const URLStub = { createObjectURL: () => "blob:stub", revokeObjectURL(){} };
   const blobs = [];
   function BlobStub(parts){ this.text = (parts || []).join(""); blobs.push(this); }
-  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", `
+  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", "console", `
     let recs = [], assigns = [], bugs = [], lastStartCode = null, profiles = {}, source = "storage", lastExport = null;
-    let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {}, bankIndexFresh = null;
+    let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {}, tab = "sets";
+    let dedup = null;                      // canonical grouping is canonical-index.test.js's; here: exact keys only
     const testsById = {};
     const loads = { assigns: 0, sets: 0, storage: 0, render: 0 };
     async function loadAssignsAndBugs(){ loads.assigns++; }
@@ -259,6 +304,7 @@ function build(store, win, doc){
     return {
       fns,
       state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs }),
+      setTab: t => { tab = t; },
       seed: o => {
         if("recs" in o) recs = o.recs; if("assigns" in o) assigns = o.assigns; if("profiles" in o) profiles = o.profiles;
         if("lastExport" in o) lastExport = o.lastExport; if("sets" in o) sets = o.sets; if("builder" in o) builder = o.builder;
@@ -267,8 +313,9 @@ function build(store, win, doc){
       }
     };
   `);
-  const windowStub = Object.assign({ confirm: () => true, BANK_INDEX: REAL_BANK_INDEX }, win || {});
-  const d = factory(store.AS, $, StudentCode, () => true, windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub);
+  const windowStub = Object.assign({ confirm: () => true, BANK_INDEX: REAL_BANK_INDEX, location: { protocol: kind.protocol } }, win || {});
+  const d = factory(store.AS, $, StudentCode, () => true, windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub, consoleStub);
+  d.warns = warns;
   d.els = els; d.$ = $;
   Object.defineProperty(d, "lastBlob", { get(){ return blobs[blobs.length - 1] || null; } });
   return d;
@@ -1023,6 +1070,8 @@ const noSync = t => !/sync/i.test(t);
     check(s.snapshot() === before && s.server.size === 0 && d.state().builder !== null,
       "rejected new set: no pset: row anywhere, the builder stays open");
     check(/^Not saved — set pset-\S+: the tutor sign-in has expired/.test(m) && noSync(m), "rejected new set: message names the set row", m);
+    check(/^Not saved — set pset-\S+: the tutor sign-in has expired/.test((d.state().builder || {}).msg || "") && d.state().builder.saving === false,
+      "rejected new set: the reason is also BESIDE Save (builder.msg), and the builder is unlocked", (d.state().builder || {}).msg);
   });
   await run(async () => {
     const old = { setId: "pset-1", name: "Old name", subject: "math", refs: [REF], createdAt: "2026-09-01T00:00:00Z" };
@@ -1144,14 +1193,32 @@ const noSync = t => !/sync/i.test(t);
   const bodyFetch = (body, log) => async (url, o) => { if(log) log.push([url, o && o.cache, !!(o && o.signal)]);
     return { ok: true, status: 200, text: async () => body }; };
   const fetchOf = (idx, log) => bodyFetch("/* bank-index */\nwindow.BANK_INDEX = " + JSON.stringify(idx, null, 1) + ";\n", log);
+  const realFetch = log => bodyFetch(REAL_BANK_BYTES, log);
   const msgOf = d => (d.state().builder && d.state().builder.msg) || "";
   const psetRows = st => [...st.server.keys()].filter(k => k.indexOf("pset:") === 0);
+  const gateOf = () => { let open; const p = new Promise(r => { open = r; }); return { p, open }; };
   check(REAL_BANK_INDEX.entries.some(e => e.ref === "bank-202608-salvage:q0032" && e.retired === true && e.supersededBy === "q0202") &&
         REAL_BANK_INDEX.entries.some(e => e.ref === "bank-202608-salvage:q0049" && !e.retired),
     "fixture: the real bank index has q0032 retired (→ q0202) and q0049 active");
   const realTimeout = REAL_TIMEOUT_SRC ? new Function(REAL_TIMEOUT_SRC + "\nreturn BANK_INDEX_TIMEOUT_MS;")() : NaN;
   check(realTimeout >= 1000 && realTimeout <= 30000,
     "the real re-read deadline (BANK_INDEX_TIMEOUT_MS) is a bounded few seconds — this harness runs it at 60 ms", String(realTimeout));
+  check(/^\s*let bankIndexFresh = null;/m.test(src) && /^\s*let builderTestId = "";/m.test(src) && /^\s*const fullTests = \{\};/m.test(src),
+    "dashboard.js itself declares the module state this harness takes from it (bankIndexFresh, builderTestId, fullTests)");
+
+  /* which pages re-read the index — decided on the REAL markup */
+  await run(async () => {
+    check(SCRIPT_SRCS.indexOf("testdata/bank-index.js") !== -1 && INLINED_SRCS.indexOf("testdata/bank-index.js") === -1,
+      "index.html loads testdata/bank-index.js by <script src>; the single-file build inlines it", SCRIPT_SRCS.join(", "));
+    const kinds = {};
+    for(const page of ["origin", "file", "inlined"]) kinds[page] = build(makeStore({}), {}, { page: page }).fns.bankIndexReReadable();
+    check(kinds.origin === true && kinds.file === false && kinds.inlined === false,
+      "bankIndexReReadable: true for index.html over http(s), false for a file:// copy and for the single-file build", JSON.stringify(kinds));
+    if(fs.existsSync("dist/index-live.html")){
+      const distSrcs = [...fs.readFileSync("dist/index-live.html", "utf8").matchAll(/<script\b[^>]*\bsrc="([^"]*)"/g)].map(m => m[1]);
+      check(distSrcs.indexOf("testdata/bank-index.js") === -1, "the assembled dist/index-live.html carries no <script src> for the bank index", distSrcs.join(", "));
+    }
+  });
 
   await run(async () => {
     const s = makeStore({}); const d = build(s);
@@ -1163,17 +1230,27 @@ const noSync = t => !/sync/i.test(t);
     check(s.snapshot() === before && s.server.size === 0 && !s.calls.some(c => c[0] === "adminUpsert") && d.state().builder !== null && d.state().builder.saving === false,
       "new set with a retired item: nothing written anywhere, the builder stays open and unlocked");
     check(m === "Not saved — this bank item can't be added to a set: bank-202608-salvage:q0032 (retired — replaced by q0202). Remove it and save again." && noSync(m),
-      "…and the message names the item, says it is retired and names its replacement", m);
-    d.$("sbMsg").textContent = "";                         // an async settle re-renders: the DOM node is wiped…
-    check(msgOf(d) === m, "…and the refusal lives on the builder (b.msg, rendered by viewSetBuilder), so a re-render can't wipe it", msgOf(d));
+      "…and the outcome line (builder.msg, which viewSetBuilder renders — canonical-index §11) names the item, says retired, names the replacement", m);
   });
 
   await run(async () => {
-    /* a set that already holds q0032 AS STORED: edited and re-saved, it keeps
-       q0032 exactly where it was — reported elsewhere, never changed here */
+    /* the Assign-a-set form below the builder keeps its values only in the
+       DOM: a save's outcome re-render must not wipe it (finding 3) */
+    const s = makeStore({}); const d = build(s);
+    d.seed({ builder: { setId: null, name: "N", subject: "rw", refs: [RETIRED] }, sets: [], assigns: [] });
+    d.$("sbName").value = "N";
+    d.$("saFree").value = "AS-ABCDEFGH"; d.$("saLimit").value = "25"; d.$("saHold").checked = true;
+    await d.fns.saveSetFromBuilder();
+    check(/can't be added/.test(msgOf(d)) && d.$("saFree").value === "AS-ABCDEFGH" && d.$("saLimit").value === "25" && d.$("saHold").checked === true,
+      "a refused save re-renders keeping the Assign-a-set form (codes, limit, hold) the tutor was filling in",
+      JSON.stringify([d.$("saFree").value, d.$("saLimit").value, d.$("saHold").checked]));
+  });
+
+  await run(async () => {
+    /* a set whose STORED row holds q0032: edited and re-saved, it keeps it */
     const old = { setId: "pset-7", name: "Old", subject: "rw", refs: [RETIRED, ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
     const log = [];
-    const s = makeStore({}); const d = build(s, { fetch: fetchOf(REAL_BANK_INDEX, log) }, { reReadable: true });
+    const s = makeStore({}); const d = build(s, { fetch: realFetch(log) }, { page: "origin" });
     s.seedBoth("pset:pset-7", old);
     d.seed({ sets: [JSON.parse(JSON.stringify(old))], assigns: [],
       builder: { setId: "pset-7", name: "Renamed", subject: "rw", refs: JSON.parse(JSON.stringify(old.refs)), createdAt: old.createdAt } });
@@ -1187,13 +1264,11 @@ const noSync = t => !/sync/i.test(t);
   });
 
   await run(async () => {
-    /* the STALE `sets` (review finding 1): another tab removed q0032 from
-       the stored set; this page's copy still has it. Trusting the page copy
-       would write the retired ref back — the save reads the stored row. */
+    /* the STALE `sets` (first review, finding 1) */
     const stored = { setId: "pset-9", name: "S", subject: "rw", refs: [ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
     const stale = { setId: "pset-9", name: "S", subject: "rw", refs: [RETIRED, ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
     for(const remote of [true, false]){
-      const s = makeStore({ remote: remote }); const d = build(s, { fetch: fetchOf(REAL_BANK_INDEX) }, { reReadable: true });
+      const s = makeStore({ remote: remote }); const d = build(s, { fetch: realFetch() }, { page: "origin" });
       s.seedBoth("pset:pset-9", stored);
       d.seed({ sets: [JSON.parse(JSON.stringify(stale))], assigns: [],
         builder: { setId: "pset-9", name: "S (renamed)", subject: "rw", refs: JSON.parse(JSON.stringify(stale.refs)), createdAt: stale.createdAt } });
@@ -1201,184 +1276,259 @@ const noSync = t => !/sync/i.test(t);
       await d.fns.saveSetFromBuilder();
       const m = msgOf(d); everyMessage.push(m);
       const after = remote ? s.server.get("pset:pset-9").value : s.mirror.get("pset:pset-9");
-      check(JSON.stringify(after.refs) === JSON.stringify(stored.refs) && after.name === "S" && /q0032 \(retired — replaced by q0202\)/.test(m),
-        (remote ? "remote" : "local") + ": a page whose `sets` still holds a ref the STORED set no longer has cannot write that retired ref back", m + " | " + JSON.stringify(after.refs));
+      check(JSON.stringify(after.refs) === JSON.stringify(stored.refs) && after.name === "S" && /q0032 \(retired — replaced by q0202\)/.test(m) &&
+            JSON.stringify(d.state().builder.storedKeys) === JSON.stringify(["bank-202608-salvage:q0049"]),
+        (remote ? "remote" : "local") + ": a page whose `sets` still holds a ref the STORED set no longer has cannot write that retired ref back (and learns what the set holds)",
+        m + " | " + JSON.stringify(after.refs));
     }
-    const s2 = makeStore({ reject: (op, k) => op === "select" && k === "pset:pset-9" }); const d2 = build(s2, { fetch: fetchOf(REAL_BANK_INDEX) }, { reReadable: true });
-    s2.seedBoth("pset:pset-9", stored);
-    d2.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [],
-      builder: { setId: "pset-9", name: "S2", subject: "rw", refs: [ACTIVE], createdAt: stored.createdAt } });
-    d2.$("sbName").value = "S2";
-    await d2.fns.saveSetFromBuilder();
-    const m2 = msgOf(d2); everyMessage.push(m2);
-    check(s2.server.get("pset:pset-9").value.name === "S" && /^Not saved — couldn't read this set as it is stored now/.test(m2) && d2.state().builder.saving === false,
-      "the stored-row read fails (remote): refused, nothing written, never a fallback to this page's copy", m2);
-    const s3 = makeStore({ remote: false, localReadFail: true }); const d3 = build(s3, { fetch: fetchOf(REAL_BANK_INDEX) }, { reReadable: true });
-    s3.mirror.set("pset:pset-9", JSON.parse(JSON.stringify(stored)));
-    d3.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [],
-      builder: { setId: "pset-9", name: "S3", subject: "rw", refs: [ACTIVE], createdAt: stored.createdAt } });
-    d3.$("sbName").value = "S3";
-    await d3.fns.saveSetFromBuilder();
-    check(s3.mirror.get("pset:pset-9").name === "S" && /^Not saved — couldn't read this set as it is stored now/.test(msgOf(d3)),
-      "the stored-row read fails (local): refused the same way", msgOf(d3));
   });
 
   await run(async () => {
-    /* the STALE PAGE: this page's index (loaded before a deploy) says q0049
-       is active and still shows its Add button — the fresh read says retired */
+    /* the stored-row read fails: WHY decides the advice (second review, finding 2) */
+    const stored = { setId: "pset-9", name: "S", subject: "rw", refs: [ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
+    const cases = [
+      ["401", { reject: (op, k) => op === "select" && k === "pset:pset-9" }, /sign-in has expired — sign in again, then save/],
+      ["503", { reject: (op, k) => op === "select" && k === "pset:pset-9", errorStatus: 503 }, /HTTP 503\) — press Save set again, or Refresh/]];
+    for(const [why, opts, want] of cases){
+      const s = makeStore(opts); const d = build(s, { fetch: realFetch() }, { page: "origin" });
+      s.seedBoth("pset:pset-9", stored);
+      d.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [], builder: { setId: "pset-9", name: "S2", subject: "rw", refs: [ACTIVE], createdAt: stored.createdAt } });
+      d.$("sbName").value = "S2";
+      await d.fns.saveSetFromBuilder();
+      const m = msgOf(d); everyMessage.push(m);
+      check(s.server.get("pset:pset-9").value.name === "S" && /^Not saved — couldn't read set pset-9 as it is stored now/.test(m) && want.test(m) &&
+            (why !== "401" || m.indexOf("Press Save set again") === -1) && d.state().builder.saving === false,
+        "the stored-row read fails (" + why + "): refused, nothing written, and the advice fits the cause", m);
+    }
+    const s3 = makeStore({ remote: false, localReadFail: true }); const d3 = build(s3, { fetch: realFetch() }, { page: "origin" });
+    s3.mirror.set("pset:pset-9", JSON.parse(JSON.stringify(stored)));
+    d3.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [], builder: { setId: "pset-9", name: "S3", subject: "rw", refs: [ACTIVE], createdAt: stored.createdAt } });
+    d3.$("sbName").value = "S3";
+    await d3.fns.saveSetFromBuilder();
+    check(s3.mirror.get("pset:pset-9").name === "S" && /^Not saved — couldn't read set pset-9 as it is stored now.*the read failed/.test(msgOf(d3)),
+      "the stored-row read fails (local): refused the same way", msgOf(d3));
+    /* a real expired session rejects EVERY call, the read included */
+    const s4 = makeStore({ reject: true }); const d4 = build(s4, { fetch: realFetch() }, { page: "origin" });
+    s4.seedBoth("pset:pset-9", stored);
+    d4.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [], builder: { setId: "pset-9", name: "S4", subject: "rw", refs: [ACTIVE], createdAt: stored.createdAt } });
+    d4.$("sbName").value = "S4";
+    await d4.fns.saveSetFromBuilder();
+    check(/sign-in has expired/.test(msgOf(d4)) && !s4.calls.some(c => c[0] === "adminUpsert"),
+      "an expired session (every call 401) on an edit holding a bank item says to sign in again, and writes nothing", msgOf(d4));
+  });
+
+  await run(async () => {
+    /* deleted in another browser or tab (second review, finding 9): gone is
+       not "holds nothing" — the save must not recreate it */
+    const gone = { setId: "pset-X", name: "Deleted elsewhere", subject: "rw", refs: [RETIRED, ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
+    for(const remote of [true, false]){
+      const s = makeStore({ remote: remote }); const d = build(s, { fetch: realFetch() }, { page: "origin" });
+      d.seed({ sets: [JSON.parse(JSON.stringify(gone))], assigns: [],
+        builder: { setId: "pset-X", name: "Deleted elsewhere", subject: "rw", refs: [ACTIVE], createdAt: gone.createdAt } });
+      d.$("sbName").value = "Deleted elsewhere";
+      await d.fns.saveSetFromBuilder();
+      const m = msgOf(d); everyMessage.push(m);
+      check(!s.server.has("pset:pset-X") && !s.mirror.has("pset:pset-X") && !s.calls.some(c => (c[0] === "adminUpsert" || c[0] === "setLocal") && c[1] === "pset:pset-X") &&
+            /no longer exists \(deleted in another browser or tab\)/.test(m),
+        (remote ? "remote" : "local") + ": a set deleted elsewhere is not recreated by a save from a page that still lists it", m);
+    }
+  });
+
+  await run(async () => {
+    /* the STALE PAGE: this page's index says q0049 active; the fresh read says retired */
     const log = [];
-    const s = makeStore({}); const d = build(s, { fetch: fetchOf(idxWith("q0049", { retired: true, supersededBy: "q0202" }), log) }, { reReadable: true });
+    const s = makeStore({}); const d = build(s, { fetch: fetchOf(idxWith("q0049", { retired: true, supersededBy: "q0202" }), log) }, { page: "origin" });
     check(d.fns.isRetiredBankRef(ACTIVE) === false, "stale page: before any save, this page believes q0049 is active");
     d.seed({ builder: { setId: null, name: "Stale", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
     d.$("sbName").value = "Stale";
     await d.fns.saveSetFromBuilder();
     const m = msgOf(d); everyMessage.push(m);
     check(s.server.size === 0 && log.length === 1 && log[0][0] === "testdata/bank-index.js" && log[0][1] === "no-store" && log[0][2] === true,
-      "stale page: the save re-reads testdata/bank-index.js (cache bypassed, abortable), and writes nothing", JSON.stringify(log));
+      "stale page: the save re-reads testdata/bank-index.js (cache bypassed, with an abort signal), and writes nothing", JSON.stringify(log));
     check(/bank-202608-salvage:q0049 \(retired — replaced by q0202, since this page loaded — reload the dashboard\)/.test(m),
       "…says the item was retired since this page loaded, names the live replacement, and says to reload", m);
-    check(d.fns.isRetiredBankRef(ACTIVE) === true,
-      "…and the page now KNOWS: the re-read is kept, so the picker and pushRef treat q0049 as retired from here on");
+    check(d.fns.isRetiredBankRef(ACTIVE) === true && d.warns.length === 0,
+      "…the page now KNOWS (the re-read is kept for the picker and pushRef), and a successful read logs no warning");
   });
 
   await run(async () => {
-    /* the REAL bytes of testdata/bank-index.js go through the parser — no
-       test-built body — and a trailer the export might one day add is caught */
-    const s = makeStore({}); const d = build(s, { fetch: bodyFetch(REAL_BANK_BYTES) }, { reReadable: true });
+    /* the REAL bytes through the parser, and a planted trailer */
+    const d = build(makeStore({}), { fetch: realFetch() }, { page: "origin" });
     const got = await d.fns.freshestBankIndex();
     check(got.fresh === true && got.idx.entries.length === REAL_BANK_INDEX.entries.length,
       "the committed testdata/bank-index.js, byte for byte, parses as a fresh index (" + REAL_BANK_INDEX.entries.length + " entries)");
     const planted = REAL_BANK_BYTES.replace(/\s*$/, "") + "\n/* 246 entries */\n";
-    const d2 = build(makeStore({}), { fetch: bodyFetch(planted) }, { reReadable: true });
-    const got2 = await d2.fns.freshestBankIndex();
-    check(got2.fresh === false, "a planted trailer after the assignment does NOT parse (fresh:false) — a format change is noticed, not trusted");
-    const s3 = makeStore({}); const d3 = build(s3, { fetch: bodyFetch(planted) }, { reReadable: true });
+    const s3 = makeStore({}); const d3 = build(s3, { fetch: bodyFetch(planted) }, { page: "origin" });
     d3.seed({ builder: { setId: null, name: "T", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
     d3.$("sbName").value = "T";
     await d3.fns.saveSetFromBuilder();
-    check(s3.server.size === 0 && /couldn't be re-read to check bank-202608-salvage:q0049/.test(msgOf(d3)),
-      "…and on a page that loaded the index from its origin, that save is refused as unverified, not checked against the stale copy", msgOf(d3));
+    check(s3.server.size === 0 && /couldn't be re-read to check bank-202608-salvage:q0049/.test(msgOf(d3)) &&
+          d3.warns.some(w => /bank-index\.js was read but is not `window\.BANK_INDEX = \{…\};`/.test(w)),
+      "a planted trailer does not parse: the save is refused as unverified AND the console says why (the tutor is pointed there)", msgOf(d3) + " | " + d3.warns.join(" / "));
   });
 
   await run(async () => {
-    /* the re-read fails. Where the page loaded the index from its origin it
-       REFUSES (review finding 22: a stale copy must not decide); where it was
-       inlined (the single-file build) its own copy is the only truth. */
+    /* the re-read fails: refuse on an http(s) page that loaded the index;
+       its own copy decides on the single-file build and a file:// copy */
     const never = () => new Promise(() => {});
     const variants = [
-      ["fetch rejects", async () => { throw new TypeError("Failed to fetch"); }],
-      ["503", async () => ({ ok: false, status: 503, text: async () => "Service Unavailable" })],
-      ["unparseable body", async () => ({ ok: true, text: async () => "window.BANK_INDEX = {oops" })],
-      ["a read that never settles (deadline)", never],
-      ["no fetch at all", undefined]];
-    for(const [why, fetch] of variants){
-      for(const reReadable of [true, false]){
-        const s1 = makeStore({}); const d1 = build(s1, { fetch: fetch }, { reReadable: reReadable });
+      ["fetch rejects", async () => { throw new TypeError("Failed to fetch"); }, /couldn't re-read.*Failed to fetch/],
+      ["503", async () => ({ ok: false, status: 503, text: async () => "Service Unavailable" }), /couldn't re-read.*HTTP 503/],
+      ["unparseable body", async () => ({ ok: true, text: async () => "window.BANK_INDEX = {oops" }), /was read but is not/],
+      ["a read that never settles (deadline)", never, /couldn't re-read.*timed out/],
+      ["no fetch at all", undefined, /has no fetch/]];
+    for(const [why, fetch, warnRe] of variants){
+      for(const page of ["origin", "inlined", "file"]){
+        const s1 = makeStore({}); const d1 = build(s1, { fetch: fetch }, { page: page });
         d1.seed({ builder: { setId: null, name: "R", subject: "rw", refs: [RETIRED] }, sets: [], assigns: [] });
         d1.$("sbName").value = "R";
-        const s2 = makeStore({}); const d2 = build(s2, { fetch: fetch }, { reReadable: reReadable });
+        const s2 = makeStore({}); const d2 = build(s2, { fetch: fetch }, { page: page });
         d2.seed({ builder: { setId: null, name: "A", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
         d2.$("sbName").value = "A";
         let timedOut = false;
         const guard = new Promise(r => setTimeout(() => { timedOut = true; r(); }, 3000));
         await Promise.race([Promise.all([d1.fns.saveSetFromBuilder(), d2.fns.saveSetFromBuilder()]), guard]);
-        if(reReadable){
+        if(page === "origin"){
           check(!timedOut && s1.server.size === 0 && s2.server.size === 0 &&
                 /couldn't be re-read/.test(msgOf(d1)) && /couldn't be re-read/.test(msgOf(d2)) &&
-                d1.state().builder.saving === false && d2.state().builder.saving === false,
-            "re-read failed (" + why + ") on a page that loaded the index from its origin: both saves settle and are refused as unverified",
-            [timedOut, msgOf(d1), msgOf(d2)].join(" | "));
+                d1.state().builder.saving === false && d2.state().builder.saving === false && d2.warns.some(w => warnRe.test(w)),
+            "re-read failed (" + why + ") on index.html over http(s): both saves settle, are refused as unverified, and the console names the cause",
+            [timedOut, msgOf(d1), msgOf(d2), d2.warns.join(" / ")].join(" | "));
         } else {
-          check(!timedOut && s1.server.size === 0 && /q0032 \(retired — replaced by q0202\)/.test(msgOf(d1)) && psetRows(s2).length === 1,
-            "re-read failed (" + why + ") on the single-file build (index inlined): its own copy decides — retired refused, active saved",
-            [timedOut, msgOf(d1), psetRows(s2).join(",")].join(" | "));
+          check(!timedOut && s1.server.size === 0 && /q0032 \(retired — replaced by q0202\)/.test(msgOf(d1)) && psetRows(s2).length === 1 && d2.warns.length === 0,
+            "re-read failed (" + why + ") on the " + (page === "file" ? "file:// copy" : "single-file build") + ": no re-read is tried, its own copy decides — retired refused, active saved",
+            [timedOut, msgOf(d1), psetRows(s2).join(","), d2.warns.join(" / ")].join(" | "));
         }
       }
     }
+    /* the deadline really ABORTS the hung request, not just stops waiting */
+    let sig = null;
+    const hung = (url, o) => new Promise((_, reject) => { sig = o && o.signal;
+      if(sig) sig.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; reject(e); }); });
+    const dA = build(makeStore({}), { fetch: hung }, { page: "origin" });
+    const gotA = await dA.fns.freshestBankIndex();
+    check(gotA.fresh === false && !!sig && sig.aborted === true, "the deadline aborts the hung request (its signal fires), and the read reports not-fresh");
   });
 
   await run(async () => {
-    const s = makeStore({}); const d = build(s, { fetch: fetchOf(REAL_BANK_INDEX) }, { reReadable: true });
+    const s = makeStore({}); const d = build(s, { fetch: realFetch() }, { page: "origin" });
     d.seed({ builder: { setId: null, name: "U", subject: "rw", refs: [{ type: "bank", bankId: "bank-nowhere", qid: "q1" }, FORMREF] }, sets: [], assigns: [] });
     d.$("sbName").value = "U";
     await d.fns.saveSetFromBuilder();
     const m = msgOf(d); everyMessage.push(m);
     check(s.server.size === 0 && m.indexOf("bank-nowhere:q1 (not in the bank index)") !== -1,
       "a bank ref the index doesn't list can't be checked, so it is refused (a student's set would not resolve)", m);
-    const log = [];
-    const s2 = makeStore({}); const d2 = build(s2, { fetch: fetchOf(REAL_BANK_INDEX, log) }, { reReadable: true });
-    d2.seed({ builder: { setId: null, name: "F", subject: "rw", refs: [FORMREF] }, sets: [], assigns: [] });
-    d2.$("sbName").value = "F";
-    await d2.fns.saveSetFromBuilder();
-    check(log.length === 0 && s2.server.size === 1 && !s2.calls.some(c => c[0] === "adminSelectKey" || c[0] === "getResult"),
-      "a form-only set saves with no bank-index read and no stored-row read");
-    const chain = d2.fns.liveReplacement({ type: "bank", bankId: "bank-202608-salvage", qid: "q0098" });
+    /* a form-only EDIT does no stored-row read: a failing read can't refuse it (finding 25) */
+    for(const remote of [true, false]){
+      const log = [];
+      const f0 = { setId: "pset-f", name: "F", subject: "rw", refs: [FORMREF], createdAt: "2026-09-01T00:00:00Z" };
+      const s2 = makeStore({ remote: remote, reject: (op) => op === "select", localReadFail: true }); const d2 = build(s2, { fetch: realFetch(log) }, { page: "origin" });
+      s2.seedBoth("pset:pset-f", f0);
+      d2.seed({ sets: [JSON.parse(JSON.stringify(f0))], assigns: [], builder: { setId: "pset-f", name: "F2", subject: "rw", refs: [FORMREF], createdAt: f0.createdAt } });
+      d2.$("sbName").value = "F2";
+      await d2.fns.saveSetFromBuilder();
+      const saved = remote ? s2.server.get("pset:pset-f").value : s2.mirror.get("pset:pset-f");
+      check(log.length === 0 && saved.name === "F2" && !s2.calls.some(c => (c[0] === "adminSelectKey" || c[0] === "getResult") && c[1] === "pset:pset-f"),
+        (remote ? "remote" : "local") + ": a form-only EDIT saves with no stored-row read and no bank-index read (a failing read can't refuse it)");
+    }
+    const chain = d.fns.liveReplacement({ type: "bank", bankId: "bank-202608-salvage", qid: "q0098" });
     check(chain === "q0239", "a retired item whose replacement is itself retired names the LIVE end of the chain (q0098 → q0209 → q0239)", String(chain));
   });
 
   await run(async () => {
-    /* the check awaits reads: whatever happens to the builder meanwhile, the
-       checked snapshot is exactly what gets written, or nothing is */
-    let release;
-    const gate = new Promise(r => { release = r; });
-    const slow = async () => { await gate; return { ok: true, text: async () => "window.BANK_INDEX = " + JSON.stringify(REAL_BANK_INDEX) + ";" }; };
-    const s = makeStore({}); const d = build(s, { fetch: slow }, { reReadable: true });
-    d.seed({ builder: { setId: null, name: "Race", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
+    /* the file:// copy (second review, findings 6/8/24): no re-read is
+       possible, so its own copy decides — no permanent refusal */
+    const log = [];
+    const failing = async (url, o) => { log.push(url); throw new TypeError("Failed to fetch"); };
+    const s = makeStore({ remote: false }); const d = build(s, { fetch: failing }, { page: "file" });
+    d.seed({ builder: { setId: null, name: "Disk", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
+    d.$("sbName").value = "Disk";
+    await d.fns.saveSetFromBuilder();
+    const s2 = makeStore({ remote: false }); const d2 = build(s2, { fetch: failing }, { page: "file" });
+    d2.seed({ builder: { setId: null, name: "Disk2", subject: "rw", refs: [RETIRED] }, sets: [], assigns: [] });
+    d2.$("sbName").value = "Disk2";
+    await d2.fns.saveSetFromBuilder();
+    check([...s.mirror.keys()].filter(k => k.indexOf("pset:") === 0).length === 1 && s2.mirror.size === 0 && /q0032 \(retired/.test(msgOf(d2)) && log.length === 0,
+      "a file:// copy saves an active bank item and refuses a retired one against its own copy, without ever trying fetch()", [msgOf(d2), log.join(",")].join(" | "));
+  });
+
+  await run(async () => {
+    /* while a save runs the builder is read-only, and whatever happens to
+       the builder meanwhile, the checked snapshot is what's written or nothing is */
+    const g = gateOf();
+    const slow = async () => { await g.p; return { ok: true, text: async () => REAL_BANK_BYTES }; };
+    const s = makeStore({}); const d = build(s, { fetch: slow }, { page: "origin" });
+    d.seed({ builder: { setId: null, name: "Race", subject: "rw", refs: [ACTIVE, FORMREF] }, sets: [], assigns: [] });
     d.$("sbName").value = "Race";
     const p = d.fns.saveSetFromBuilder();
-    check(d.state().builder.saving === true && /Checking the bank items/.test(msgOf(d)),
-      "while the check runs the builder is locked (saving) and says so — the view disables Save, Add and the reorder buttons");
+    const locked = d.state().builder.saving === true && /Checking the bank items/.test(msgOf(d)) &&
+      d.fns.pushRef(RETIRED) === false && d.fns.builderRemoveRef(0) === false && d.fns.builderMoveRef(0, 1) === false &&
+      d.fns.builderAddModule("anything") === false && d.state().builder.refs.length === 2;
+    check(locked, "while the check runs the builder is locked: pushRef, remove, reorder and Add whole module all refuse, the refs are untouched, and it says 'Checking…'",
+      JSON.stringify(d.state().builder.refs.map(r => r.qid)));
     const second = d.fns.saveSetFromBuilder();          // a double click while the first is in flight
-    d.state().builder.refs.push(RETIRED);              // …and the refs change meanwhile (the case the re-check exists for)
-    d.$("sbName").value = "";                           // …and the tutor switched tab: the name input is gone
-    release(); await p; await second;
+    d.state().builder.refs.push(RETIRED);              // …and the refs change anyway (the case the re-check exists for)
+    g.open(); await p; await second;
     check(s.server.size === 0 && /changed while the set was being checked/.test(msgOf(d)) && d.state().builder !== null && d.state().builder.saving === false,
       "refs changed during the check: nothing saved, 'press Save set again', builder unlocked", msgOf(d));
-    let release2;
-    const gate2 = new Promise(r => { release2 = r; });
-    const s2 = makeStore({}); const d2 = build(s2, { fetch: async () => { await gate2; return { ok: false }; } }, { reReadable: true });
-    d2.seed({ builder: { setId: null, name: "Gone", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
-    d2.$("sbName").value = "Gone";
-    const p2 = d2.fns.saveSetFromBuilder();
-    d2.seed({ builder: null });                         // Cancel while the index is read
-    release2(); await p2;
-    check(s2.server.size === 0, "builder cancelled during the check: nothing saved");
-    let release3;
-    const gate3 = new Promise(r => { release3 = r; });
-    const s3 = makeStore({}); const d3 = build(s3, { fetch: async () => { await gate3; return { ok: true, text: async () => REAL_BANK_BYTES }; } }, { reReadable: true });
+    /* Cancel during the check: the re-read SUCCEEDS here, so only the cancel
+       guard can stop the write (finding 18) — control first */
+    for(const cancel of [false, true]){
+      const g2 = gateOf();
+      const s2 = makeStore({}); const d2 = build(s2, { fetch: async () => { await g2.p; return { ok: true, text: async () => REAL_BANK_BYTES }; } }, { page: "origin" });
+      d2.seed({ builder: { setId: null, name: "Gone", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
+      d2.$("sbName").value = "Gone";
+      const p2 = d2.fns.saveSetFromBuilder();
+      if(cancel) d2.seed({ builder: null });            // Cancel while the index is read
+      g2.open(); await p2;
+      check(cancel ? (s2.server.size === 0 && !s2.calls.some(c => c[0] === "adminUpsert")) : psetRows(s2).length === 1,
+        cancel ? "builder cancelled during the check (the re-read succeeds): nothing saved" : "control: the same save, not cancelled, writes the set");
+    }
+    const g3 = gateOf();
+    const s3 = makeStore({}); const d3 = build(s3, { fetch: async () => { await g3.p; return { ok: true, text: async () => REAL_BANK_BYTES }; } }, { page: "origin" });
     d3.seed({ builder: { setId: null, name: "Twice", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
     d3.$("sbName").value = "Twice";
     const a1 = d3.fns.saveSetFromBuilder(), a2 = d3.fns.saveSetFromBuilder();
     d3.$("sbName").value = "";                          // a tab switch after the click: the name was read at the click
-    release3(); await a1; await a2;
+    g3.open(); await a1; await a2;
     const rows3 = psetRows(s3);
     check(rows3.length === 1 && s3.server.get(rows3[0]).value.name === "Twice",
       "a double click on Save set creates ONE set, named as it was when clicked (the name is read before any await)", rows3.join(", "));
   });
 
   await run(async () => {
-    /* review finding 3: the server write awaits too. A ref that reaches the
-       builder's live array during it must not reach the mirror alone — the
-       save writes its checked SNAPSHOT to both */
-    const s = makeStore({}); const d = build(s, { fetch: fetchOf(REAL_BANK_INDEX) }, { reReadable: true });
-    let releasePut;
-    const putGate = new Promise(r => { releasePut = r; });
+    /* the WRITE awaits too: a ref pushed into the live array reaches neither
+       side, and a builder opened meanwhile survives the save (finding 1/13) */
+    const s = makeStore({}); const d = build(s, { fetch: realFetch() }, { page: "origin" });
+    const put = gateOf();
     const realUpsert = s.AS.adminUpsert;
-    s.AS.adminUpsert = async function(k, owner, v){
-      const body = JSON.parse(JSON.stringify(v));        // the real client serialises the body when it sends it
-      await putGate;
-      return realUpsert.call(this, k, owner, body);
-    };
+    s.AS.adminUpsert = async function(k, owner, v){ const body = JSON.parse(JSON.stringify(v)); await put.p; return realUpsert.call(this, k, owner, body); };
     d.seed({ builder: { setId: null, name: "Snap", subject: "rw", refs: [ACTIVE] }, sets: [], assigns: [] });
     d.$("sbName").value = "Snap";
     const p = d.fns.saveSetFromBuilder();
-    for(let i = 0; i < 20 && !s.calls.some(c => c[0] === "adminUpsert"); i++) await new Promise(r => setTimeout(r, 5));
-    d.state().builder.refs.push(RETIRED);             // lands in the live array mid-write
-    releasePut(); await p;
+    for(let i = 0; i < 40 && !s.calls.some(c => c[0] === "adminUpsert"); i++) await new Promise(r => setTimeout(r, 5));
+    check(msgOf(d) === "Saving…", "during the server write the builder says 'Saving…', not 'Checking…'", msgOf(d));
+    const first = d.state().builder;
+    first.refs.push(RETIRED);                           // lands in the live array mid-write
+    const other = { setId: null, name: "Opened meanwhile", subject: "math", refs: [] };
+    d.seed({ builder: other });                         // New set clicked while the first save writes
+    put.open(); await p;
     const k = psetRows(s)[0];
     check(!!k && JSON.stringify(s.server.get(k).value.refs) === JSON.stringify([ACTIVE]) && JSON.stringify(s.mirror.get(k).refs) === JSON.stringify([ACTIVE]),
       "a ref pushed into the live array during the server write reaches neither the server nor the mirror — both hold the checked snapshot",
       k ? JSON.stringify([s.server.get(k).value.refs, s.mirror.get(k).refs]) : "no row");
+    check(d.state().builder === other, "a builder opened while a save was writing is NOT closed when that save succeeds");
+  });
+
+  await run(async () => {
+    /* an exception after the lock must never leave the builder locked (finding 22) */
+    const s = makeStore({ remote: false, localThrow: true }); const d = build(s);
+    d.seed({ builder: { setId: null, name: "Boom", subject: "rw", refs: [FORMREF] }, sets: [], assigns: [] });
+    d.$("sbName").value = "Boom";
+    let threw = false;
+    try{ await d.fns.saveSetFromBuilder(); }catch(e){ threw = true; }
+    check(threw && d.state().builder !== null && d.state().builder.saving === false && /something went wrong/.test(msgOf(d)),
+      "a storage exception mid-save still unlocks the builder and says something went wrong", [threw, msgOf(d)].join(" | "));
   });
 
   /* =================== 9e. the upload button: mirror → server, never the other way =================== */

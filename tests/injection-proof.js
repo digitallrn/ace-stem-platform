@@ -754,6 +754,14 @@
         refs: [{ type: "bank", bankId: retiredQ.bankId, qid: retiredQ.qid }],
         createdAt: "2026-09-10T00:00:00.000Z", updatedAt: "2026-09-10T00:00:00.000Z"
       }));
+      /* …and one whose bank ref IS the payload: saved after its stored row
+         loses that ref, the save's refusal line (#sbMsg, rendered from
+         builder.msg by innerHTML) carries the ref key */
+      localStorage.setItem("as:pset:pset-xss4", JSON.stringify({
+        setId: "pset-xss4", name: "Hostile ref set", subject: "rw",
+        refs: [{ type: "bank", bankId: PAYLOAD, qid: PAYLOAD }],
+        createdAt: "2026-09-10T00:00:00.000Z", updatedAt: "2026-09-10T00:00:00.000Z"
+      }));
       const setRec = {
         recordVersion: 1, attemptId: "attempt:pset-xss1:1700000002:xss2",
         student: { code: PAYLOAD, key: "AS-XSSTEST2" },
@@ -1279,6 +1287,31 @@
       } else {
         results.push({ surface: "Set builder retired notice renders for the hostile set",
           pass: false, note: "no Edit button for the planted pset-xss3" });
+      }
+      /* the save's outcome line: open pset-xss4, drop its (hostile) ref from
+         the STORED row, press Save — the ref is now "added", unknown to the
+         index, and refused by a line that names it */
+      document.querySelector('#dashTabs [data-tab="sets"]').click();
+      await wait(300);
+      const edit4 = [...document.querySelectorAll("#dashBody .set-edit")].find(b => b.dataset.set === "pset-xss4");
+      if(edit4){
+        edit4.click();
+        await wait(300);
+        const row4 = JSON.parse(localStorage.getItem("as:pset:pset-xss4"));
+        row4.refs = [];
+        localStorage.setItem("as:pset:pset-xss4", JSON.stringify(row4));
+        $("sbSaveBtn").click();
+        await wait(1200);
+        const sb = $("sbMsg");
+        results.push({ surface: "Set save refusal line (#sbMsg) names a hostile stored ref as inert text",
+          pass: !!sb && sb.textContent.indexOf("PWN") !== -1 && /not in the bank index/.test(sb.textContent) &&
+                sb.querySelectorAll("img, [onerror], b").length === 0 && !window.__XSS_FIRED,
+          note: sb ? sb.textContent.slice(0, 180) : "no #sbMsg after Save" });
+        const cancel4 = $("sbCancelBtn"); if(cancel4) cancel4.click();
+        await wait(200);
+      } else {
+        results.push({ surface: "Set save refusal line (#sbMsg) names a hostile stored ref as inert text",
+          pass: false, note: "no Edit button for the planted pset-xss4" });
       }
     }
 

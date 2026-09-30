@@ -395,11 +395,13 @@ record-derived value.
   every bank ref against the set **as stored now** (re-read, never the page's
   `sets`) and the bank index **re-read** (cache bypassed, 8 s deadline). A
   retired or unknown ref the stored set doesn't hold is refused; if the
-  re-read fails on a page that loaded the index from its origin, the save is
-  refused too (only the single-file build, whose index is inlined, trusts its
-  own copy). A successful re-read is kept, so the picker then drops the Add.
-  The builder is read-only while a save runs, and the save writes the exact
-  snapshot it checked. Limits: a tab loaded BEFORE this code shipped runs the
+  re-read fails on a page that loaded the index over http(s), the save is
+  refused too (the single-file build, whose index is inlined, and a file://
+  copy, which can't fetch, trust their own copy — no re-read is tried). A
+  set deleted elsewhere is never recreated by such a save. A successful
+  re-read is kept, so the picker then drops the Add. The builder (name
+  included) is read-only while a save runs, the save writes the exact
+  snapshot it checked, and it closes only the builder it saved. Limits: a tab loaded BEFORE this code shipped runs the
   old picker (reload open dashboards after a deploy), and the server does not
   check set contents. A set that already holds a retired item — saved before
   the retirement, or built on the old picker — keeps it; the Sets tab reports

@@ -135,12 +135,20 @@ const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled"
   // retired bank items + the builder view itself (2026-09-30)
   "bankEntryIn", "isRetiredBankRef", "retiredRefsOf", "retiredRefText", "bankStatusBadge", "refLabel", "stripTokens",
   "qIndex", "ensureTestLoaded", "viewSetBuilder",
-  "bankEntryOf", "liveReplacement", "bankIndexReReadable", "retiredSetsNoticeHtml"];
+  "bankEntryOf", "liveReplacement", "bankIndexReReadable", "retiredSetsNoticeHtml",
+  "replacementNote", "builderAddModule", "builderRemoveRef", "builderMoveRef"];
 const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI", "qIndexes",
   "BANK_INDEX_URL", "BANK_INDEX_TIMEOUT_MS"];
 const extracted = NAMES.map(n => { try{ return [n, extractFn(src, n)]; }catch(e){ return [n, ""]; } });
+/* module state the new code relies on is taken FROM dashboard.js (a
+   declaration missing from the page must fail here too) */
+function decl(name){
+  const m = src.match(new RegExp("^[ \\t]*(?:let|const)[ \\t]+" + name + "[ \\t]*=[^;\\n]*;", "m"));
+  return m ? m[0] : "/* dashboard.js no longer declares " + name + " */";
+}
 const BODY = extracted.map(x => x[1]).join("\n") + "\n" +
-  CONSTS.map(n => { try{ return extractConst(src, n); }catch(e){ return ""; } }).join("\n");
+  CONSTS.map(n => { try{ return extractConst(src, n); }catch(e){ return ""; } }).join("\n") + "\n" +
+  [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests")].join("\n");
 const PRESENT = extracted.filter(x => x[1] !== "").map(x => x[0]);
 
 const StudentCode = {
@@ -184,8 +192,8 @@ function build(opts){
   const clearTimeoutStub = id => { if(timers[id - 1]) timers[id - 1].cleared = true; };
   const factory = new Function("window", "document", "$", "escapeHtml", "StudentCode", "setTimeout", "clearTimeout", "wipe", "BANK_INDEX", `
     let recs = [], profiles = {}, builder = null, tab = ${JSON.stringify(opts.tab || "sets")}, tombs = {}, sets = [];
-    let builderTestId = "", openAttemptId = null, bankIndexFresh = null;
-    const fullTests = {}, loadingTests = {};
+    let openAttemptId = null;
+    const loadingTests = {};
     const loads = { render: 0 };
     const testsById = {};
     (window.TEST_MANIFEST || []).forEach(t => { testsById[t.testId] = t; (t.legacyIds || []).forEach(old => { testsById[old] = t; }); });
@@ -203,6 +211,7 @@ function build(opts){
       seed: o => {
         if("recs" in o) recs = o.recs; if("builder" in o) builder = o.builder; if("tab" in o) tab = o.tab;
         if("sets" in o) sets = o.sets; if("bankIndexFresh" in o) bankIndexFresh = o.bankIndexFresh;
+        if("builderTestId" in o) builderTestId = o.builderTestId; if("fullTest" in o) fullTests[o.fullTest.testId] = o.fullTest;
         if("profiles" in o) profiles = o.profiles;
       }
     };
@@ -759,15 +768,15 @@ run("retired", () => {
   check(/>Add<\/button>/.test(own), "picker: an unrelated active row still reads Add", own);
   /* a set that already holds the retired item: reported, kept, never changed */
   const legacy = { setId: "pset-legacy", name: "Old warm-up", subject: "rw", refs: [bankRef(RETIRED), bankRef(BANK_TWIN)] };
-  d.seed({ builder: JSON.parse(JSON.stringify(legacy)) });
+  d.seed({ builder: Object.assign(JSON.parse(JSON.stringify(legacy)), { storedKeys: [RETIRED, BANK_TWIN] }) });   // as the Edit handler opens it
   const h3 = d.fns.viewSetBuilder();
   const notice3 = (h3.match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0];
-  check(notice3.indexOf("This set holds a retired bank item: bank-202608-salvage:q0032 → q0202. Students still get it as the set was saved.") !== -1 &&
+  check(notice3.indexOf("This set holds a retired bank item: bank-202608-salvage:q0032 → q0202 (its replacement q0202 can be added once this one is removed). Students still get it as the set was saved") !== -1 &&
         rowOf(h3, RETIRED).indexOf("In set · retired") !== -1 && JSON.stringify(d.state().builder.refs) === JSON.stringify(legacy.refs),
     "builder: a set holding q0032 says so (no claim about when it got there), shows it 'In set · retired', and keeps it untouched", notice3);
-  d.seed({ builder: { setId: "pset-legacy", name: "", subject: "rw", refs: [bankRef(RETIRED), bankRef("bank-202608-salvage:q0098")] } });
+  d.seed({ builder: { setId: "pset-legacy", name: "", subject: "rw", refs: [bankRef(RETIRED), bankRef("bank-202608-salvage:q0098")], storedKeys: [RETIRED, "bank-202608-salvage:q0098"] } });
   const notice4 = (d.fns.viewSetBuilder().match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0];
-  check(notice4.indexOf("holds 2 retired bank items") !== -1 && notice4.indexOf("q0098 → q0239") !== -1 && notice4.indexOf("Remove them") !== -1,
+  check(notice4.indexOf("holds 2 retired bank items") !== -1 && notice4.indexOf("q0098 → q0239") !== -1 && notice4.indexOf("remove them") !== -1,
     "builder: two retired items read in the plural and each names its live replacement", notice4);
   check(d.fns.retiredRefsOf(legacy.refs).length === 1 && d.fns.retiredRefsOf([null, "junk", 7, bankRef(BANK_TWIN)]).length === 0,
     "retiredRefsOf finds exactly the retired refs and skips malformed ones");
@@ -781,7 +790,7 @@ run("retired", () => {
     null, "junk"];
   const before = JSON.stringify(setsList);
   const rep = d.fns.retiredSetsNoticeHtml(setsList);
-  check(rep.indexOf("2 sets hold a retired bank item: <b>Old warm-up</b> (bank-202608-salvage:q0032 → q0202); <b>Chained</b> (bank-202608-salvage:q0098 → q0239).") !== -1 &&
+  check(rep.indexOf("2 sets hold retired bank items: <b>Old warm-up</b> (bank-202608-salvage:q0032 → q0202); <b>Chained</b> (bank-202608-salvage:q0098 → q0239).") !== -1 &&
         rep.indexOf("Clean") === -1 && rep.indexOf("Nothing was changed") !== -1 && JSON.stringify(setsList) === before,
     "Sets-list report: counts the sets holding a retired item, names each with its items and live replacements, skips the clean one and malformed rows, changes nothing", rep);
   check(d.fns.retiredSetsNoticeHtml([setsList[1]]) === "" && d.fns.retiredSetsNoticeHtml([]) === "" && d.fns.retiredSetsNoticeHtml(null) === "",
@@ -828,6 +837,99 @@ run("retired", () => {
   dS.seed({ builder: { setId: null, name: "", subject: "rw", refs: [{ type: "form", testId: PAY, moduleId: "m", qid: PAY }] } });
   const sRow = dS.fns.viewSetBuilder().split('<div class="setpick-row').slice(1).find(r => r.indexOf("<b>" + BANK_TWIN + "</b>") !== -1) || "";
   check(inert(sRow) && sRow.indexOf("In set as &quot;&gt;&lt;img") !== -1, "a bank row 'In set as <hostile ref>' escapes the ref", sRow);
+
+  /* ---- second review (2026-09-30) ---- */
+  const noteOf = html => (html.match(/<p class="retired-notice[^]*?<\/p>/g) || []).join(" ");
+  /* the builder's outcome line is RENDERED from builder.msg, and escaped
+     (finding 20: an innerHTML sink carrying stored-set refs) */
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [], msg: "Not saved — X" } });
+  check(/<span class="dash-hint" id="sbMsg">Not saved — X<\/span>/.test(d.fns.viewSetBuilder()), "viewSetBuilder renders builder.msg in #sbMsg");
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [], msg: "Not saved — " + PAY + ":" + PAY + " (not in the bank index)" } });
+  const msgSpan = (d.fns.viewSetBuilder().match(/<span class="dash-hint" id="sbMsg">[^]*?<\/span>/) || [""])[0];
+  check(inert(msgSpan), "…and escapes it (a stored set's hostile ref inside a refusal renders as text)", msgSpan);
+
+  /* saved vs unsaved retired refs (findings 11/12): "students still get it"
+     only for what the SAVED set holds */
+  const staleRetired = JSON.parse(JSON.stringify(BANK_INDEX, (k, v) =>
+    (v && typeof v === "object" && v.ref === BANK_TWIN) ? Object.assign({}, v, { retired: true, supersededBy: REMINT.split(":")[1] }) : v));
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [bankRef(BANK_TWIN)] }, bankIndexFresh: staleRetired });
+  const nNew = noteOf(d.fns.viewSetBuilder());
+  check(nNew.indexOf("not in the saved set and can't be saved") !== -1 && nNew.indexOf("Students still get") === -1,
+    "a NEW set holding an item a save just found retired: 'not in the saved set and can't be saved', never 'students still get it'", nNew);
+  d.seed({ builder: { setId: "pset-e", name: "", subject: "rw", refs: [bankRef(BANK_TWIN)], storedKeys: [] } });
+  const nEdit = noteOf(d.fns.viewSetBuilder());
+  check(nEdit.indexOf("not in the saved set") !== -1 && nEdit.indexOf("Students still get") === -1,
+    "an EDITED set whose stored row doesn't hold that item says the same", nEdit);
+  d.seed({ builder: { setId: "pset-e", name: "", subject: "rw", refs: [bankRef(BANK_TWIN)], storedKeys: [BANK_TWIN] } });
+  check(noteOf(d.fns.viewSetBuilder()).indexOf("Students still get it as the set was saved") !== -1,
+    "control: when the stored set DOES hold it, the notice says students still get it");
+  d.seed({ bankIndexFresh: null });
+
+  /* the replacement note is true per item (finding 14) and the picker says
+     who holds the replacement's place (finding 15) — each fact PINNED first */
+  const E = ref => BANK_INDEX.entries.find(x => x.ref === ref) || {};
+  const IT = ref => REAL_INDEX.items[ref] || {};
+  const S = q => "bank-202608-salvage:" + q;
+  check(E(S("q0086")).retired && E(S("q0086")).supersededBy === "q0214" && !E(S("q0214")).retired && IT(S("q0086")).canonical !== IT(S("q0214")).canonical,
+    "PIN: q0086 is retired → q0214, an active reskin in ANOTHER canonical class");
+  check(E(S("q0186")).retired && !E(S("q0186")).supersededBy, "PIN: q0186 is retired with no replacement");
+  const math = (refs) => ({ setId: "pset-n", name: "", subject: E(S("q0086")).subject, refs: refs.map(q => bankRef(S(q))), storedKeys: refs.map(S) });
+  d.seed({ builder: math(["q0086"]) });
+  check(d.fns.replacementNote(bankRef(S("q0086"))) === "its replacement q0214 can be added now",
+    "a reskin replacement in another class: 'can be added now' (removing the retired one isn't needed)", d.fns.replacementNote(bankRef(S("q0086"))));
+  d.seed({ builder: math(["q0086", "q0214"]) });
+  const n86 = noteOf(d.fns.viewSetBuilder());
+  check(d.fns.replacementNote(bankRef(S("q0086"))) === "its replacement q0214 is already in the set" && n86.indexOf("already in the set") !== -1 && n86.indexOf("can then be added") === -1,
+    "…already in the set: the notice says so, and promises no replacement 'can then be added'", n86);
+  d.seed({ builder: { setId: "pset-n", name: "", subject: "rw", refs: [bankRef(RETIRED)], storedKeys: [RETIRED] } });
+  check(d.fns.replacementNote(bankRef(RETIRED)) === "its replacement q0202 can be added once this one is removed",
+    "same canonical class (q0032 / q0202): 'can be added once this one is removed'", d.fns.replacementNote(bankRef(RETIRED)));
+  d.seed({ builder: { setId: "pset-n", name: "", subject: E(S("q0186")).subject, refs: [bankRef(S("q0186"))], storedKeys: [S("q0186")] } });
+  check(d.fns.replacementNote(bankRef(S("q0186"))) === "no replacement is listed" && noteOf(d.fns.viewSetBuilder()).indexOf("no replacement is listed") !== -1,
+    "no replacement at all: says so, never promises one");
+  /* a class-mate (possibly another retired copy) holds the replacement's place */
+  const retiredByLive = BANK_INDEX.entries.filter(e => e.retired && e.supersededBy);
+  const pair = retiredByLive.map(e => {
+    const live = e.supersededBy, liveCanon = IT(S(live)).canonical;
+    const mate = liveCanon && Object.keys(REAL_INDEX.items).find(k => k !== S(live) && k !== e.ref && IT(k).canonical === liveCanon && E(k).retired);
+    return mate && !E(S(live)).retired && E(mate).subject === e.subject ? { r: e.ref, live: live, mate: mate } : null;
+  }).find(Boolean);
+  check(!!pair, "PIN: the index has a retired item whose live replacement shares its class with ANOTHER retired item (the finding-15 shape)", JSON.stringify(pair));
+  if(pair){
+    d.seed({ builder: { setId: "pset-n", name: "", subject: E(pair.r).subject, refs: [bankRef(pair.mate)], storedKeys: [pair.mate] } });
+    const rowR = rowOf(d.fns.viewSetBuilder(), pair.r);
+    check(rowR.indexOf("its replacement " + pair.live + " is in the set") === -1 && rowR.indexOf("is held by " + d.fns.refText(pair.mate)) !== -1,
+      "picker: when a class-mate holds the replacement's place, the row names it instead of claiming the replacement is in the set", rowR);
+    d.seed({ builder: { setId: "pset-n", name: "", subject: E(pair.r).subject, refs: [bankRef(S(pair.live))], storedKeys: [S(pair.live)] } });
+    check(rowOf(d.fns.viewSetBuilder(), pair.r).indexOf("its replacement " + pair.live + " is in the set") !== -1,
+      "control: with the replacement itself in the set, the row says it is in the set");
+  }
+  /* the badge names the live end of a chain too (finding 16) */
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] } });
+  const r98 = rowOf(d.fns.viewSetBuilder(), S("q0098"));
+  check(r98.indexOf("→ q0239") !== -1 && r98.indexOf("→ q0209") === -1 && r98.indexOf("use q0209") === -1,
+    "chain q0098 → q0209 → q0239: the whole row (badge AND action) names only the live end", r98);
+  check(d.fns.bankStatusBadge(E(S("q0098"))).indexOf("→ q0239") !== -1, "the Question Bank tab's badge (bankStatusBadge) names the live end as well");
+
+  /* the busy view locks every control, the name included (findings 5/22) */
+  const w = loadScript("testdata/202412usv2.js").window.__TESTDATA__["202412usv2"];
+  const rwMod = w.modules.find(m => m.section === "Reading and Writing");
+  d.seed({ fullTest: w, builderTestId: "202412usv2",
+           builder: { setId: null, name: "Busy", subject: "rw", refs: [bankRef(REMINT), bankRef(BANK_TWIN), { type: "form", testId: "202412usv2", moduleId: rwMod.moduleId, qid: rwMod.questions[0].id }], saving: true } });
+  const busy = d.fns.viewSetBuilder().replace(/\s+/g, " ");
+  const tags = (re) => (busy.match(re) || []);
+  const allDisabled = list => list.length > 0 && list.every(t => /\sdisabled/.test(t));
+  check(allDisabled(tags(/<button class="dash-rel ref-(?:up|down|rm)"[^>]*>/g)) && allDisabled(tags(/<button class="dash-rel pick-(?:bank|form|module)"[^>]*>/g)) &&
+        /<input id="sbName"[^>]*\sdisabled/.test(busy) && /id="sbSaveBtn"[^>]*disabled/.test(busy),
+    "while a save runs, EVERY ↑ ↓ ✕, bank Add, form Add and Add-whole-module button, the name input and Save are disabled",
+    tags(/<button class="dash-rel (?:ref|pick)-[a-z]+"[^>]*>/g).filter(t => !/\sdisabled/.test(t)).slice(0, 3).join(" "));
+  check(d.fns.builderRemoveRef(0) === false && d.fns.builderMoveRef(0, 1) === false && d.fns.builderAddModule(rwMod.moduleId) === false &&
+        d.state().builder.refs.length === 3,
+    "…and the edit functions behind them refuse while it runs");
+  d.seed({ builder: { setId: null, name: "Idle", subject: "rw", refs: [bankRef(REMINT), bankRef(BANK_TWIN)] } });
+  check(d.fns.builderMoveRef(0, 1) === true && d.state().builder.refs[0].qid === BANK_TWIN.split(":")[1] && d.fns.builderRemoveRef(1) === true && d.state().builder.refs.length === 1,
+    "control: idle, the same edit functions reorder and remove");
+
 });
 
 
