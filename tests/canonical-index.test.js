@@ -54,10 +54,15 @@
      9. a retake counts each form item once per source attempt;
     10. bank items are SEEN exactly as form items are: a form sitting marks
         its bank twin, a set sitting's bank item marks its form twin, and
-        the picker row carries the mark and the provenance;
-    11. a RETIRED bank item never enters a set: no Add in the picker,
-        pushRef refuses it (whatever button was clicked), and a set that
-        already held one is reported and left as saved.
+        the RENDERED picker row and the set's own ref row carry the mark and
+        the provenance;
+    11. a RETIRED bank item never enters a set: no Add in the picker (nor
+        while a save is in flight), pushRef refuses one this page knows is
+        retired — including after a save's re-read revealed it — the named
+        replacement is the LIVE end of the supersededBy chain, the Sets-list
+        report says how many sets hold one and which, and every new string
+        on those surfaces is escaped. (The save-time refusal itself is
+        tests/tutor-writes.test.js §9f.)
 
    To watch this fail on the pre-feature dashboard:
      git show 8915e95:dashboard.js > <scratch>/dashboard-pre.js
@@ -129,8 +134,10 @@ const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled"
   "tombFor", "isDeletedStudent", "isTombstoned", "deletedAttemptsOf",
   // retired bank items + the builder view itself (2026-09-30)
   "bankEntryIn", "isRetiredBankRef", "retiredRefsOf", "retiredRefText", "bankStatusBadge", "refLabel", "stripTokens",
-  "qIndex", "ensureTestLoaded", "viewSetBuilder"];
-const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI", "qIndexes"];
+  "qIndex", "ensureTestLoaded", "viewSetBuilder",
+  "bankEntryOf", "liveReplacement", "bankIndexReReadable", "retiredSetsNoticeHtml"];
+const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI", "qIndexes",
+  "BANK_INDEX_URL", "BANK_INDEX_TIMEOUT_MS"];
 const extracted = NAMES.map(n => { try{ return [n, extractFn(src, n)]; }catch(e){ return [n, ""]; } });
 const BODY = extracted.map(x => x[1]).join("\n") + "\n" +
   CONSTS.map(n => { try{ return extractConst(src, n); }catch(e){ return ""; } }).join("\n");
@@ -177,7 +184,7 @@ function build(opts){
   const clearTimeoutStub = id => { if(timers[id - 1]) timers[id - 1].cleared = true; };
   const factory = new Function("window", "document", "$", "escapeHtml", "StudentCode", "setTimeout", "clearTimeout", "wipe", "BANK_INDEX", `
     let recs = [], profiles = {}, builder = null, tab = ${JSON.stringify(opts.tab || "sets")}, tombs = {}, sets = [];
-    let builderTestId = "", openAttemptId = null;
+    let builderTestId = "", openAttemptId = null, bankIndexFresh = null;
     const fullTests = {}, loadingTests = {};
     const loads = { render: 0 };
     const testsById = {};
@@ -195,7 +202,7 @@ function build(opts){
       state: () => ({ dedup, dedupState, dedupNote, dedupTransient, recs, builder, tab }),
       seed: o => {
         if("recs" in o) recs = o.recs; if("builder" in o) builder = o.builder; if("tab" in o) tab = o.tab;
-        if("sets" in o) sets = o.sets;
+        if("sets" in o) sets = o.sets; if("bankIndexFresh" in o) bankIndexFresh = o.bankIndexFresh;
         if("profiles" in o) profiles = o.profiles;
       }
     };
@@ -667,6 +674,23 @@ run("bank-seen", () => {
   check(d.fns.provHtml(FORM_TWIN) === '<span class="canon-prov">also in bank-202608-salvage q0049</span>',
     "provHtml on the form ref: 'also in bank-202608-salvage q0049'", d.fns.provHtml(FORM_TWIN));
   function formTwin(){ return { type: "form", testId: FORM_TWIN.split(":")[0], moduleId: "m", qid: FORM_TWIN.split(":")[1] }; }
+  /* RENDERED, not just derived: with the student chosen in the Student
+     filter, the bank picker row and the set's own ref row carry the mark and
+     the provenance (review finding 19: both could be dropped with every
+     derivation check still green) */
+  d.seed({ recs: [formRec(FORM_TWIN.split(":")[0])], builder: { setId: null, name: "", subject: "rw", refs: [] } });
+  d.$("dashFilterStudent").value = CODE;
+  const pickRow = (html, ref) => html.split('<div class="setpick-row').slice(1).find(r => r.indexOf("<b>" + ref + "</b>") !== -1) || "";
+  const hA = d.fns.viewSetBuilder();
+  check(/class="dstatus to canon-mark seen"/.test(pickRow(hA, BANK_TWIN)),
+    "rendered: the bank picker row for q0049 carries the SEEN mark for a student who sat 2024 December US v2", pickRow(hA, BANK_TWIN).slice(0, 400));
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [bankRef(BANK_TWIN)] } });
+  const hB = d.fns.viewSetBuilder();
+  const ownRow = (hB.split('<div class="setref-row">')[1] || "").split("setref-btns")[0];
+  check(ownRow.indexOf("<b>" + BANK_TWIN + "</b>") !== -1 && /canon-mark seen/.test(ownRow) &&
+        ownRow.indexOf("also in " + nameOf(FORM_TWIN.split(":")[0]) + " re2-q25") !== -1,
+    "rendered: the set's own row for bank q0049 carries its provenance ('also in 2024 December US v2 re2-q25') and the SEEN mark", ownRow);
+  d.$("dashFilterStudent").value = "";
 });
 
 console.log("--- 11. a retired bank item never enters a set ---");
@@ -680,9 +704,29 @@ run("retired", () => {
   d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] } });
   d.fns.builderAddRef(bankRef(RETIRED));
   check(d.fns.pushRef(bankRef(RETIRED)) === false && d.state().builder.refs.length === 0 && d.loads.render === 0,
-    "pushRef/builderAddRef refuse a retired bank item — a click on a stale Add button changes nothing");
+    "pushRef/builderAddRef refuse a bank item THIS PAGE'S index marks retired (defense in depth: the picker renders no Add for it). " +
+    "A page older than a retirement does add it until a save re-reads the index — see the next check and tutor-writes §9f");
+  /* a save's successful re-read is kept (bankIndexFresh): an item retired
+     since this page loaded is refused from then on, and the picker drops its Add */
+  const freshIdx = JSON.parse(JSON.stringify(BANK_INDEX, (k, v) =>
+    (v && typeof v === "object" && v.ref === BANK_TWIN) ? Object.assign({}, v, { retired: true, supersededBy: REMINT.split(":")[1] }) : v));
+  check(d.fns.pushRef(bankRef(BANK_TWIN)) === true, "control: before any re-read, this page adds q0049 (its index says active)");
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] }, bankIndexFresh: freshIdx });
   const rows = html => html.split('<div class="setpick-row').slice(1);
   const rowOf = (html, ref) => rows(html).find(r => r.indexOf("<b>" + ref + "</b>") !== -1) || "";
+  check(d.fns.isRetiredBankRef(bankRef(BANK_TWIN)) === true && d.fns.pushRef(bankRef(BANK_TWIN)) === false && d.state().builder.refs.length === 0 &&
+        !/pick-bank/.test(rowOf(d.fns.viewSetBuilder(), BANK_TWIN)),
+    "after a save's re-read showed q0049 retired, pushRef refuses it and its picker row loses the Add button");
+  d.seed({ bankIndexFresh: null });
+  /* a save in flight locks the builder: pushRef refuses anything, the view
+     disables Save and every Add */
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [], saving: true } });
+  const busyHtml = d.fns.viewSetBuilder();
+  check(d.fns.pushRef(bankRef(REMINT)) === false && d.state().builder.refs.length === 0 &&
+        /id="sbSaveBtn"[^>]*disabled/.test(busyHtml) &&
+        rows(busyHtml).filter(r => /class="dash-rel pick-bank"/.test(r)).every(r => /pick-bank"[^>]*\sdisabled/.test(r.replace(/\s+/g, " "))),
+    "while a save is in flight pushRef refuses everything and the view disables Save and every Add");
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] } });
   const h1 = d.fns.viewSetBuilder();
   const rwEntries = BANK_INDEX.entries.filter(e => e.subject === "rw");
   const retiredRw = rwEntries.filter(e => e.retired), activeRw = rwEntries.filter(e => !e.retired);
@@ -693,6 +737,18 @@ run("retired", () => {
   check(activeWithButton.length === activeRw.length, "picker: every one of the " + activeRw.length + " active RW rows still does");
   check(rowOf(h1, RETIRED).indexOf("Retired — can’t be added; use q0202") !== -1 && /is-retired/.test(rowOf(h1, RETIRED)),
     "picker: q0032's row says it is retired and names its replacement", rowOf(h1, RETIRED));
+  /* the chain: the named replacement is the LIVE end, never a retired middle */
+  const CHAIN = [["bank-202608-salvage:q0098", "q0209", "q0239"], ["bank-202608-salvage:q0126", "q0210", "q0240"]];
+  CHAIN.forEach(([ref, mid, end]) => {
+    const e = BANK_INDEX.entries.find(x => x.ref === ref), m = BANK_INDEX.entries.find(x => x.ref === "bank-202608-salvage:" + mid);
+    check(!!e && e.retired && e.supersededBy === mid && !!m && m.retired && m.supersededBy === end,
+      "PIN: the index chains " + ref + " → " + mid + " (itself retired) → " + end);
+    check(d.fns.liveReplacement(bankRef(ref)) === end && rowOf(h1, ref).indexOf("use " + end) !== -1 && rowOf(h1, ref).indexOf("use " + mid) === -1 &&
+          d.fns.retiredRefText(bankRef(ref)) === ref + " → " + end,
+      "chain: " + ref + " names " + end + " (the live end), never the retired " + mid, rowOf(h1, ref));
+  });
+  check(d.fns.liveReplacement(bankRef(REMINT)) === null && d.fns.liveReplacement(bankRef("bank-nowhere:q1")) === null,
+    "liveReplacement is null for an active item and for an unknown one");
   d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [formTwin] } });
   const h2 = d.fns.viewSetBuilder();
   const twinRow = rowOf(h2, BANK_TWIN);
@@ -701,16 +757,79 @@ run("retired", () => {
     "picker: with its form twin in the set, q0049 reads 'In set as 2024 December US v2 re2-q25' (disabled) and carries the provenance", twinRow);
   const own = rowOf(h2, REMINT);
   check(/>Add<\/button>/.test(own), "picker: an unrelated active row still reads Add", own);
-  /* a set that already held the retired item: reported, kept, never changed */
+  /* a set that already holds the retired item: reported, kept, never changed */
   const legacy = { setId: "pset-legacy", name: "Old warm-up", subject: "rw", refs: [bankRef(RETIRED), bankRef(BANK_TWIN)] };
   d.seed({ builder: JSON.parse(JSON.stringify(legacy)) });
   const h3 = d.fns.viewSetBuilder();
-  check(/class="retired-notice rv-notice warn">This set holds a retired bank item, kept as saved: bank-202608-salvage:q0032 → q0202\./.test(h3) &&
+  const notice3 = (h3.match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0];
+  check(notice3.indexOf("This set holds a retired bank item: bank-202608-salvage:q0032 → q0202. Students still get it as the set was saved.") !== -1 &&
         rowOf(h3, RETIRED).indexOf("In set · retired") !== -1 && JSON.stringify(d.state().builder.refs) === JSON.stringify(legacy.refs),
-    "builder: a set that held q0032 before it was retired says so, shows it 'In set · retired', and keeps it untouched", (h3.match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0]);
+    "builder: a set holding q0032 says so (no claim about when it got there), shows it 'In set · retired', and keeps it untouched", notice3);
+  d.seed({ builder: { setId: "pset-legacy", name: "", subject: "rw", refs: [bankRef(RETIRED), bankRef("bank-202608-salvage:q0098")] } });
+  const notice4 = (d.fns.viewSetBuilder().match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0];
+  check(notice4.indexOf("holds 2 retired bank items") !== -1 && notice4.indexOf("q0098 → q0239") !== -1 && notice4.indexOf("Remove them") !== -1,
+    "builder: two retired items read in the plural and each names its live replacement", notice4);
   check(d.fns.retiredRefsOf(legacy.refs).length === 1 && d.fns.retiredRefsOf([null, "junk", 7, bankRef(BANK_TWIN)]).length === 0,
     "retiredRefsOf finds exactly the retired refs and skips malformed ones");
+
+  /* the Sets-list REPORT (item 1: "how many and which") — the only place
+     the tutor learns which stored sets serve a retired item */
+  const setsList = [
+    { setId: "pset-a", name: "Old warm-up", subject: "rw", refs: [bankRef(RETIRED), bankRef(BANK_TWIN)] },
+    { setId: "pset-b", name: "Clean", subject: "rw", refs: [bankRef(BANK_TWIN), bankRef(REMINT)] },
+    { setId: "pset-c", name: "Chained", subject: "rw", refs: [bankRef("bank-202608-salvage:q0098")] },
+    null, "junk"];
+  const before = JSON.stringify(setsList);
+  const rep = d.fns.retiredSetsNoticeHtml(setsList);
+  check(rep.indexOf("2 sets hold a retired bank item: <b>Old warm-up</b> (bank-202608-salvage:q0032 → q0202); <b>Chained</b> (bank-202608-salvage:q0098 → q0239).") !== -1 &&
+        rep.indexOf("Clean") === -1 && rep.indexOf("Nothing was changed") !== -1 && JSON.stringify(setsList) === before,
+    "Sets-list report: counts the sets holding a retired item, names each with its items and live replacements, skips the clean one and malformed rows, changes nothing", rep);
+  check(d.fns.retiredSetsNoticeHtml([setsList[1]]) === "" && d.fns.retiredSetsNoticeHtml([]) === "" && d.fns.retiredSetsNoticeHtml(null) === "",
+    "Sets-list report: nothing at all when no set holds a retired item");
+  check(d.fns.retiredSetsNoticeHtml([setsList[0]]).indexOf("1 set holds a retired bank item") !== -1 &&
+        d.fns.retiredSetsNoticeHtml([setsList[0]]).indexOf("students assigned this set") !== -1,
+    "Sets-list report: singular for one set");
+
+  /* escaping on the new surfaces (review findings 8/26): a hostile set name
+     in the report, a hostile replacement qid in the picker and the builder
+     notice, a hostile ref behind "In set as" */
+  const PAY = '"><img src=x onerror="window.__X=1"><b>PWN</b>';
+  const inert = h => h.indexOf("<img") === -1 && h.indexOf("<b>PWN") === -1 && h.indexOf("&lt;img") !== -1;
+  check(inert(d.fns.retiredSetsNoticeHtml([{ setId: "pset-x", name: PAY, refs: [bankRef(RETIRED)] }])),
+    "the Sets-list report escapes a hostile set name", d.fns.retiredSetsNoticeHtml([{ setId: "pset-x", name: PAY, refs: [bankRef(RETIRED)] }]));
+  const hostileIdx = JSON.parse(JSON.stringify(BANK_INDEX, (k, v) =>
+    (v && typeof v === "object" && v.ref === RETIRED) ? Object.assign({}, v, { supersededBy: PAY }) : v));
+  hostileIdx.entries.push({ ref: "bank-202608-salvage:" + PAY, containerType: "bank", bankId: "bank-202608-salvage", qid: PAY,
+    subject: "rw", skill: PAY, tags: [], keyType: "mcq", retired: false, supersededBy: null, stemPreview: PAY });
+  const dH = build({ inlined: REAL_INDEX, bankIndex: hostileIdx });
+  dH.fns.ensureDedupLoaded();
+  dH.seed({ builder: { setId: "pset-x", name: "", subject: "rw", refs: [bankRef(RETIRED)] } });
+  const hH = dH.fns.viewSetBuilder();
+  const hRow = hH.split('<div class="setpick-row').slice(1).find(r => r.indexOf("bank-202608-salvage:q0032</b>") !== -1) || "";
+  const hNotice = (hH.match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0];
+  check(inert(hNotice) && hNotice.indexOf("→ &quot;&gt;&lt;img") !== -1,
+    "the builder's retired notice escapes a hostile replacement qid", hNotice);
+  dH.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] } });
+  const hRow2 = dH.fns.viewSetBuilder().split('<div class="setpick-row').slice(1).find(r => r.indexOf("bank-202608-salvage:q0032</b>") !== -1) || "";
+  check(inert(hRow2) && hRow2.indexOf("use &quot;&gt;&lt;img") !== -1, "the picker's 'use <replacement>' escapes a hostile qid", hRow2);
+  check(hRow.indexOf("In set · retired") !== -1 && hRow.indexOf("<img") === -1 && hRow.indexOf("<b>PWN") === -1,
+    "the retired row of a set holding it reads 'In set · retired' and renders no hostile markup", hRow);
+  const hRep = dH.fns.retiredSetsNoticeHtml([{ setId: "pset-y", name: "Plain", refs: [bankRef(RETIRED)] }]);
+  check(inert(hRep) && hRep.indexOf("q0032 → &quot;&gt;&lt;img") !== -1, "the Sets-list report escapes a hostile replacement qid in its item list", hRep);
+  /* the report reaches the Sets tab: viewSets renders exactly this helper
+     over the loaded sets (viewSets itself needs the whole tab's state; the
+     browser proof, tests/injection-proof.js, renders it end to end) */
+  const viewSetsSrc = (() => { try{ return extractFn(src, "viewSets"); }catch(e){ return ""; } })();
+  check(/const retiredHtml = retiredSetsNoticeHtml\(sets\);/.test(viewSetsSrc) && /\$\{retiredHtml\}/.test(viewSetsSrc),
+    "viewSets renders retiredSetsNoticeHtml(sets) into the Sets card");
+  const synth = { items: { [BANK_TWIN]: { canonical: BANK_TWIN }, [PAY + ":" + PAY]: { canonical: BANK_TWIN } }, reference: { forms: [], banks: [] } };
+  const dS = build({ inlined: synth });
+  dS.fns.ensureDedupLoaded();
+  dS.seed({ builder: { setId: null, name: "", subject: "rw", refs: [{ type: "form", testId: PAY, moduleId: "m", qid: PAY }] } });
+  const sRow = dS.fns.viewSetBuilder().split('<div class="setpick-row').slice(1).find(r => r.indexOf("<b>" + BANK_TWIN + "</b>") !== -1) || "";
+  check(inert(sRow) && sRow.indexOf("In set as &quot;&gt;&lt;img") !== -1, "a bank row 'In set as <hostile ref>' escapes the ref", sRow);
 });
+
 
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);
 if(failures.length){ console.log("Failures:"); failures.forEach(f => console.log("  - " + f)); }

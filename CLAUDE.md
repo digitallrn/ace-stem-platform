@@ -286,9 +286,13 @@ Three rules:
 `tests/injection-proof.js` is a paste-into-the-console regression proof —
 run it against `dist/index-live.html` after touching any render surface.
 `tests/keep-classes.test.js` is its annotation-allowlist gate in node: every
-class render.js can emit, and every class fmt() emits over the shipped RW
-library, must survive the sanitizer's KEEP_CLASSES (fmt-credit was missing
-until 2026-09-30, so a resumed highlight lost the credit line's styling).
+fmt-* class named anywhere in render.js (exactly eight, pinned), and every
+class fmt() emits over the shipped RW library, must survive the sanitizer's
+KEEP_CLASSES; math in an RW field is allowed only in the pinned
+202608intv1 re2-q10. fmt-credit was missing until 2026-09-30, so the credit
+line lost its styling on every re-render of a highlighted passage — resume,
+revisit, flag — and highlights SAVED before that deploy can hold the passage
+without the class for good: the fix is not retroactive.
 `tests/local-mode.test.js` (`node tests/local-mode.test.js`) covers the
 storage-adapter mode resolution; the preview pane strips query strings, so
 the `?devstorage=1` cases can only be checked there.
@@ -384,13 +388,22 @@ record-derived value.
 - **Bank questions group by canonical id exactly as form questions do** —
   one entry per canonical item across forms AND banks (`builderHeldAs`),
   with provenance and seen marks on bank rows. The 2026-09-07 exclusion was
-  v1 scope only, not a reason.
+  v1 scope only, not a reason; its one real constraint (9f84669: the outcome
+  must not depend on click order) holds because the rule is symmetric.
 - **A retired bank item never enters a set**: no Add in the picker, `pushRef`
-  refuses it, and `saveSetFromBuilder` re-reads `testdata/bank-index.js`
-  (cache bypassed) and refuses any bank ref the set did not already hold
-  that is retired or unknown — so a page left open across a retiring deploy
-  can't add one. A set saved before the retirement keeps the item, and the
-  Sets tab reports it by name; nothing changes it.
+  refuses one the page knows is retired, and `saveSetFromBuilder` judges
+  every bank ref against the set **as stored now** (re-read, never the page's
+  `sets`) and the bank index **re-read** (cache bypassed, 8 s deadline). A
+  retired or unknown ref the stored set doesn't hold is refused; if the
+  re-read fails on a page that loaded the index from its origin, the save is
+  refused too (only the single-file build, whose index is inlined, trusts its
+  own copy). A successful re-read is kept, so the picker then drops the Add.
+  The builder is read-only while a save runs, and the save writes the exact
+  snapshot it checked. Limits: a tab loaded BEFORE this code shipped runs the
+  old picker (reload open dashboards after a deploy), and the server does not
+  check set contents. A set that already holds a retired item — saved before
+  the retirement, or built on the old picker — keeps it; the Sets tab reports
+  how many and which, and nothing changes it.
 - `tests/canonical-index.test.js` pins canonical pairs BY HAND on purpose:
   re-pin (and say which export) when an export legitimately moves one.
   `DEDUP_INDEX_SRC=<file>` runs it against a planted index.

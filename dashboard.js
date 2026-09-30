@@ -36,6 +36,7 @@ window.Dashboard = (function(){
   let sets = [];                 // loaded pset:<setId> rows
   let builder = null;            // {setId|null, name, subject, refs:[]} while editing
   let bankFilter = { q: "", subject: "", retired: true };   // Question Bank tab
+  let bankIndexFresh = null;     // the last successful save-time re-read of bank-index.js (retired items)
   let builderTestId = "";        // which form's questions the builder shows
   let setsMsg = "";              // one-line status inside the Sets tab
   let saMsg = "";                // outcome line under the set-assign form — a
@@ -582,13 +583,20 @@ window.Dashboard = (function(){
     });
     return hit ? canonRef(refKey(hit)) : null;
   }
-  /* The one door into builder.refs: a ref the set already holds (by key or
-     by canonical class) or a RETIRED bank item never gets in, whichever
-     adder asks — a picker button, Add whole module, or a button rendered
-     before the page knew the item was retired. */
+  /* The one door into builder.refs, whichever adder asks (a picker button,
+     Add whole module): a ref the set already holds (by key or canonical
+     class) never gets in; nor does a bank item this page knows is retired
+     — defense in depth behind the picker, which renders no Add for one.
+     That knowledge is the startup index plus the last save-time re-read
+     (bankIndexFresh): a button on a page older than a retirement DOES add
+     the item until a save re-reads the index, and the save is what refuses
+     it. Nothing gets in while a save is in flight — the save writes a
+     snapshot, and a late click must not leave this builder disagreeing
+     with what was written. */
   function pushRef(ref){
-    if(!builder || builderHeldAs(ref) || isRetiredBankRef(ref)) return false;
+    if(!builder || builder.saving || builderHeldAs(ref) || isRetiredBankRef(ref)) return false;
     builder.refs.push(ref);
+    builder.msg = "";
     return true;
   }
   /* Refs the builder holds twice by canonical id, form or bank — added while
@@ -2151,73 +2159,169 @@ window.Dashboard = (function(){
   /* ---- retired bank items (2026-09-30) ----
      A retired bank item stays in its bank file, so the sets and attempts
      that already hold it keep resolving — but it must never ENTER a set
-     again. Three layers enforce that one rule: the picker renders no Add on
-     a retired row, pushRef() refuses one, and saveSetFromBuilder() refuses
-     to save any bank ref the set did not already hold unless the FRESHEST
-     bank index it can read lists that ref as active. The save-time read is
-     what makes the rule hold on a stale page: this page's BANK_INDEX is only
-     as new as the page, and a dashboard left open across the deploy that
-     retires an item still shows that item's Add button. A set that held an
-     item before it was retired is left exactly as saved — the Sets list
-     reports it; nothing here changes it. */
+     again. The layers:
+       - the picker renders no Add on a row this page knows is retired;
+       - pushRef() refuses one — defense in depth behind the picker, and,
+         once a save has re-read the index, for items retired since this
+         page loaded too (bankIndexFresh);
+       - saveSetFromBuilder() refuses every bank ref the set AS STORED NOW
+         (read fresh at save time, never this page's `sets`) does not
+         already hold, unless the freshest bank index lists it as active.
+         That re-read is what holds the rule on a stale page: this page's
+         BANK_INDEX is only as new as the page, so a dashboard left open
+         across a deploy that retires an item still shows its Add button
+         until a save re-reads. A re-read that FAILS on a page that loaded
+         the index from its origin refuses the save rather than trusting
+         the stale copy.
+     Limits, said out loud: a tab still running code from before 2026-09-30
+     is reached by none of this (reload open dashboards after a deploy), and
+     the server does not check set contents. A set that already holds a
+     retired item — saved before the retirement, or built on the old picker,
+     which offered Add on retired rows — is reported in the Sets list and
+     left exactly as saved. */
+  const BANK_INDEX_URL = "testdata/bank-index.js";
+  const BANK_INDEX_TIMEOUT_MS = 8000;      // as attempts.js REST_TIMEOUT_MS: a dead connection hangs rather than errors
   function bankEntryIn(idx, ref){
     const list = (idx && Array.isArray(idx.entries)) ? idx.entries : [];
     return list.find(e => e && e.bankId === ref.bankId && e.qid === ref.qid) || null;
   }
+  /* The newest entry this page has seen for a bank ref: the last successful
+     re-read first, then the copy loaded at startup. */
+  function bankEntryOf(ref){
+    return bankEntryIn(bankIndexFresh, ref) || bankEntryIn(window.BANK_INDEX, ref);
+  }
   function isRetiredBankRef(ref){
     if(!ref || ref.type !== "bank") return false;
-    const e = bankEntryIn(window.BANK_INDEX, ref);
+    const e = bankEntryOf(ref);
     return !!(e && e.retired);
   }
-  /* testdata/bank-index.js re-read with the HTTP cache bypassed and parsed
-     as DATA (JSON.parse — the file is never executed a second time), or —
-     when there is no origin to read from (the single-file build, a file://
-     copy) or the read fails — the copy this page loaded at startup.
-     Returns {idx, fresh}. */
-  async function freshestBankIndex(){
-    if(typeof window.fetch === "function"){
-      try{
-        const res = await window.fetch("testdata/bank-index.js", { cache: "no-store" });
-        if(res && res.ok){
-          const m = String(await res.text()).match(/window\.BANK_INDEX\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
-          const idx = m ? JSON.parse(m[1]) : null;
-          if(idx && Array.isArray(idx.entries)) return { idx: idx, fresh: true };
-        }
-      }catch(e){ /* no origin, offline, or unparseable: fall back below */ }
+  /* The first ACTIVE item down a retired item's supersededBy chain, or
+     null. The direct replacement can itself be retired (q0098 → q0209 →
+     q0239), so naming supersededBy as-is would send the tutor to an item
+     with no Add button. Cycle-safe. */
+  function liveReplacement(ref){
+    const start = bankEntryOf(ref);
+    if(!start || !start.retired) return null;
+    const seen = Object.create(null);
+    let e = start;
+    while(e && e.retired && e.supersededBy && !seen[e.supersededBy]){
+      seen[e.supersededBy] = true;
+      e = bankEntryOf({ type: "bank", bankId: e.bankId, qid: e.supersededBy });
     }
-    return { idx: window.BANK_INDEX || null, fresh: false };
+    return (e && !e.retired) ? e.qid : null;
   }
-  /* The bank refs a save would ADD (not in the set as this browser last
-     loaded it) that the freshest index lists as retired — or does not list
-     at all, since a ref the bank index doesn't know can't be checked and
-     would leave the student's set unresolvable. Refs the set already held
-     are never re-judged: a set saved before an item was retired keeps it. */
+  /* Did this page load the bank index from its origin (a <script src>)?
+     Then it can be re-read, and a failed re-read must never be mistaken for
+     "this page's copy is current". The single-file build inlines the index:
+     there is no origin, and its own copy is the only truth that page has. */
+  function bankIndexReReadable(){
+    return !!(typeof document.querySelector === "function" &&
+              document.querySelector('script[src$="' + BANK_INDEX_URL + '"]'));
+  }
+  /* testdata/bank-index.js re-read with the HTTP cache bypassed, parsed as
+     DATA (JSON.parse — never executed a second time), under a deadline.
+     Returns {idx, fresh, reReadable}. On any failure — no fetch, an HTTP
+     error, the deadline, a body that no longer matches — the startup copy
+     with fresh:false, and a console warning, so an export format change
+     cannot silently switch the re-read off. A successful read is kept in
+     bankIndexFresh, so a retirement it reveals reaches the picker and
+     pushRef for the rest of the session. */
+  async function freshestBankIndex(){
+    const page = { idx: window.BANK_INDEX || null, fresh: false, reReadable: bankIndexReReadable() };
+    if(typeof window.fetch !== "function") return page;
+    const ctl = typeof AbortController === "function" ? new AbortController() : null;
+    let timer = null;
+    const read = (async () => {
+      const res = await window.fetch(BANK_INDEX_URL, { cache: "no-store", signal: ctl ? ctl.signal : undefined });
+      if(!res || !res.ok) throw new Error("HTTP " + (res ? res.status : "no response"));
+      return String(await res.text());
+    })();
+    read.catch(() => {});                  // settled by the race below; never an unhandled rejection
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => { if(ctl) ctl.abort(); reject(new Error("timed out")); }, BANK_INDEX_TIMEOUT_MS);
+    });
+    try{
+      const text = await Promise.race([read, deadline]);
+      const m = text.match(/window\.BANK_INDEX\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
+      let idx = null;
+      try{ idx = m ? JSON.parse(m[1]) : null; }catch(e){ idx = null; }
+      if(idx && Array.isArray(idx.entries)){
+        bankIndexFresh = idx;
+        return { idx: idx, fresh: true, reReadable: page.reReadable };
+      }
+      console.warn("dashboard: " + BANK_INDEX_URL + " was read but is not `window.BANK_INDEX = {…};` — the set save can't check against it");
+    }catch(e){
+      console.warn("dashboard: couldn't re-read " + BANK_INDEX_URL + " (" + (e && e.message || e) + ")");
+    }finally{
+      clearTimeout(timer);
+    }
+    return page;
+  }
+  /* The bank refs a save would ADD — not in heldKeys, the set as STORED
+     NOW — judged against the freshest index: `refused` lists the ones it
+     marks retired (naming the live replacement) or doesn't list at all (a
+     ref the index doesn't know can't be checked, and would leave the
+     student's set unresolvable); `unverified` lists every added ref when the
+     index could not be re-read on a page that loaded it from its origin.
+     Refs the set already holds are never re-judged. */
   async function refusedBankRefs(refs, heldKeys){
     const added = refs.filter(r => r && r.type === "bank" && heldKeys.indexOf(refKey(r)) === -1);
-    if(!added.length) return [];
+    if(!added.length) return { refused: [], unverified: [] };
     const got = await freshestBankIndex();
-    const out = [];
+    if(!got.fresh && got.reReadable) return { refused: [], unverified: added.map(refKey) };
+    const refused = [];
     added.forEach(r => {
       const e = bankEntryIn(got.idx, r);
-      if(!e) out.push(refKey(r) + " (not in the bank index)");
-      else if(e.retired) out.push(refKey(r) + " (retired" + (e.supersededBy ? " — replaced by " + e.supersededBy : "") +
-        (isRetiredBankRef(r) ? "" : ", since this page loaded — reload the dashboard") + ")");
+      if(!e){ refused.push(refKey(r) + " (not in the bank index)"); return; }
+      if(!e.retired) return;
+      const live = liveReplacement(r), pageE = bankEntryIn(window.BANK_INDEX, r);
+      refused.push(refKey(r) + " (retired" + (live ? " — replaced by " + live : "") +
+        (pageE && !pageE.retired ? ", since this page loaded — reload the dashboard" : "") + ")");
     });
-    return out;
+    return { refused: refused, unverified: [] };
   }
-  /* Bank refs a stored set holds that the loaded index lists as retired —
-     reported (Sets list, builder), never changed. */
+  /* The bank refs of the stored set row, read fresh — the server's copy in
+     remote mode (this browser's mirror can hold refs removed elsewhere), the
+     storage copy otherwise. [] for a set that no longer exists. Throws when
+     the read fails, so the caller refuses rather than guessing. */
+  async function storedSetRefKeys(setId){
+    let row = null;
+    if(AttemptStore.isRemote()){
+      const rows = await AttemptStore.adminSelectKey("pset:" + setId);
+      row = (Array.isArray(rows) && rows[0]) ? rows[0].value : null;
+    } else {
+      const r = await AttemptStore.getResult("pset:" + setId);
+      if(!r || r.status === "error") throw new Error("storage read failed");
+      row = r.value;
+    }
+    return (row && Array.isArray(row.refs) ? row.refs : []).filter(x => x && typeof x === "object").map(refKey);
+  }
+  /* Bank refs a set holds that are retired — reported (Sets list, builder),
+     never changed. */
   function retiredRefsOf(refs){
     return (Array.isArray(refs) ? refs : []).filter(r => r && typeof r === "object" && isRetiredBankRef(r));
   }
   function retiredRefText(r){
-    const e = bankEntryIn(window.BANK_INDEX, r);
-    return refKey(r) + (e && e.supersededBy ? " → " + e.supersededBy : "");
+    const live = liveReplacement(r);
+    return refKey(r) + (live ? " → " + live : "");
+  }
+  /* The Sets-list report: how many stored sets hold a retired bank item,
+     and which items. No claim about WHEN (the index carries no retirement
+     date, and the old picker let retired items in after retirement). */
+  function retiredSetsNoticeHtml(list){
+    const held = (Array.isArray(list) ? list : []).filter(s => s && typeof s === "object")
+      .map(s => ({ s: s, refs: retiredRefsOf(s.refs) })).filter(x => x.refs.length);
+    if(!held.length) return "";
+    return '<p class="retired-notice rv-notice warn">' + held.length + (held.length === 1 ? " set holds" : " sets hold") +
+      " a retired bank item: " +
+      held.map(x => "<b>" + esc(x.s.name) + "</b> (" + x.refs.map(r => esc(retiredRefText(r))).join(", ") + ")").join("; ") +
+      ". Nothing was changed — students assigned " + (held.length === 1 ? "this set" : "these sets") +
+      " still get the item as saved. Edit the set to remove it.</p>";
   }
   function refLabel(ref){
     if(ref.type === "bank"){
       const e = (window.BANK_INDEX && BANK_INDEX.entries || []).find(x => x.bankId === ref.bankId && x.qid === ref.qid);
-      return { title: ref.bankId + ":" + ref.qid, sub: e ? (e.skill || "") + (e.retired ? " · RETIRED" : "") : "", stem: e ? e.stemPreview : "" };
+      return { title: ref.bankId + ":" + ref.qid, sub: e ? (e.skill || "") + (isRetiredBankRef(ref) ? " · RETIRED" : "") : "", stem: e ? e.stemPreview : "" };
     }
     const t = testsById[ref.testId];
     const ix = qIndex(ref.testId);
@@ -2266,16 +2370,10 @@ window.Dashboard = (function(){
       }).join("") + "</tbody></table>"
       : '<p class="dash-empty">No practice sets yet — build one below.</p>';
 
-    /* sets saved before one of their bank items was retired: reported by
-       name and ref, never changed — students assigned them keep getting the
-       item exactly as the set was saved */
-    const retiredHeld = sets.map(s => ({ s: s, refs: retiredRefsOf(s.refs) })).filter(x => x.refs.length);
-    const retiredHtml = retiredHeld.length
-      ? '<p class="retired-notice rv-notice warn">' + retiredHeld.length + (retiredHeld.length === 1 ? " set holds" : " sets hold") +
-        " a bank item retired after the set was saved: " +
-        retiredHeld.map(x => "<b>" + esc(x.s.name) + "</b> (" + x.refs.map(r => esc(retiredRefText(r))).join(", ") + ")").join("; ") +
-        ". Nothing was changed — students assigned these sets still get the item as saved. Edit the set to remove it.</p>"
-      : "";
+    /* sets that already hold a retired bank item: reported by name and
+       ref, never changed — students assigned them keep getting the item
+       exactly as the set was saved */
+    const retiredHtml = retiredSetsNoticeHtml(sets);
 
     /* attempts per set (records audit stays in the Attempts tab; this is the
        per-set slice the contract asks for) */
@@ -2322,6 +2420,7 @@ window.Dashboard = (function(){
     const student = selectedStudent();
     const seen = student ? seenSetFor(student) : null;
     const mark = k => seen ? markHtml(markFor(k, seen)) : "";
+    const busy = builder.saving === true;  // a save is in flight: the builder is read-only until it settles
     const refsHtml = refs.length ? refs.map((ref, i) => {
       const lbl = refLabel(ref);
       const k = refKey(ref);
@@ -2330,9 +2429,9 @@ window.Dashboard = (function(){
         <span class="setref-main"><b>${esc(lbl.title)}</b>${lbl.sub ? ' <span class="dcode">' + esc(lbl.sub) + "</span>" : ""} ${provHtml(k)}${mark(k)}
           <span class="bank-stem">${esc(lbl.stem)}</span></span>
         <span class="setref-btns">
-          <button class="dash-rel ref-up" data-i="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
-          <button class="dash-rel ref-down" data-i="${i}" ${i === refs.length - 1 ? "disabled" : ""}>↓</button>
-          <button class="dash-rel ref-rm" data-i="${i}">✕</button>
+          <button class="dash-rel ref-up" data-i="${i}" ${busy || i === 0 ? "disabled" : ""}>↑</button>
+          <button class="dash-rel ref-down" data-i="${i}" ${busy || i === refs.length - 1 ? "disabled" : ""}>↓</button>
+          <button class="dash-rel ref-rm" data-i="${i}" ${busy ? "disabled" : ""}>✕</button>
         </span>
       </div>`;
     }).join("") : '<p class="dash-empty">No questions yet — add from the bank or a test below.</p>';
@@ -2349,31 +2448,44 @@ window.Dashboard = (function(){
         dupGroups.map(g => esc(g.map(refText).join(" = "))).join("; ") +
         ". Remove the extra copies above; nothing is removed for you.</p>"
       : "";
-    /* retired items this set already held when it was loaded: kept as saved,
-       said out loud (a retired item can't be ADDED — pushRef and the save
-       both refuse one) */
+    /* retired items this set holds (stored before the item was retired, or
+       added through the old picker): said out loud, never removed for the
+       tutor. Each names its LIVE replacement — the end of the supersededBy
+       chain — which becomes addable once the retired one is removed (the
+       two are usually one canonical item, so the set holds one or the
+       other). */
     const heldRetired = retiredRefsOf(refs);
     const retiredHtml = heldRetired.length
       ? '<p class="retired-notice rv-notice warn">This set holds ' + (heldRetired.length === 1 ? "a retired bank item" : heldRetired.length + " retired bank items") +
-        ", kept as saved: " + heldRetired.map(r => esc(retiredRefText(r))).join(", ") +
-        ". Remove it to stop serving it; a retired item can't be added back.</p>"
+        ": " + heldRetired.map(r => esc(retiredRefText(r))).join(", ") +
+        ". Students still get " + (heldRetired.length === 1 ? "it" : "them") + " as the set was saved. Remove " +
+        (heldRetired.length === 1 ? "it" : "them") + " to stop serving " + (heldRetired.length === 1 ? "it" : "them") +
+        " — a replacement can then be added in its place; a retired item can't be added back.</p>"
       : "";
 
-    /* bank picker: subject-matched, retired flagged and never addable (no
-       button at all — the one adder, pushRef, refuses one too) */
+    /* bank picker: subject-matched; a retired row is flagged and gets no
+       button at all (pushRef refuses one too). "Retired" here is this
+       page's newest knowledge — the startup index plus the last save-time
+       re-read — and the replacement named is the live end of the chain. */
     const bankEntries = (window.BANK_INDEX && BANK_INDEX.entries || [])
       .filter(e => e.subject === builder.subject);
     const bankPickHtml = bankEntries.length ? bankEntries.map(e => {
+      const ref = { type: "bank", bankId: e.bankId, qid: e.qid };
       const k = e.bankId + ":" + e.qid;
-      const held = builderHeldAs({ type: "bank", bankId: e.bankId, qid: e.qid });
+      const cur = bankEntryOf(ref) || e;
+      const retired = isRetiredBankRef(ref);
+      const held = builderHeldAs(ref);
       const own = held === canonRef(k);
-      const action = e.retired
-        ? `<span class="setpick-retired">${own ? "In set · retired" : "Retired — can’t be added" + (e.supersededBy ? "; use " + esc(e.supersededBy) : "")}</span>`
+      const live = retired ? liveReplacement(ref) : null;
+      const liveHeld = live ? builderHeldAs({ type: "bank", bankId: e.bankId, qid: live }) : null;
+      const action = retired
+        ? `<span class="setpick-retired">${own ? "In set · retired"
+            : "Retired — can’t be added" + (live ? (liveHeld ? "; its replacement " + esc(live) + " is in the set" : "; use " + esc(live)) : "")}</span>`
         : `<button class="dash-rel pick-bank" data-bank="${escAttr(e.bankId)}" data-qid="${escAttr(e.qid)}"
-          ${held ? "disabled" : ""}>${esc(own ? "Added" : held ? "In set as " + refText(held) : "Add")}</button>`;
+          ${held || busy ? "disabled" : ""}>${esc(own ? "Added" : held ? "In set as " + refText(held) : "Add")}</button>`;
       return `
-      <div class="setpick-row${e.retired ? " is-retired" : ""}${held && !own ? " is-held" : ""}">
-        <span class="setpick-main"><b>${esc(e.ref)}</b> ${bankStatusBadge(e)}
+      <div class="setpick-row${retired ? " is-retired" : ""}${held && !own ? " is-held" : ""}">
+        <span class="setpick-main"><b>${esc(e.ref)}</b> ${bankStatusBadge(cur)}
           <span class="dcode">${esc(e.skill || "")}</span> ${provHtml(k)}${mark(k)}
           <span class="bank-stem">${esc(e.stemPreview || "")}</span></span>
         ${action}
@@ -2397,7 +2509,7 @@ window.Dashboard = (function(){
           const allIn = m.questions.every(q => !!heldOf(q));
           return `<div class="setpick-mod">
             <div class="setpick-modhead"><b>${esc(m.section)} · ${esc(m.moduleLabel)}</b>
-              <button class="dash-rel pick-module" data-mod="${escAttr(m.moduleId)}" ${allIn ? "disabled" : ""}>
+              <button class="dash-rel pick-module" data-mod="${escAttr(m.moduleId)}" ${allIn || busy ? "disabled" : ""}>
                 ${allIn ? "All added" : "Add whole module"}</button></div>` +
             m.questions.map((q, qi) => {
               const k = builderTestId + ":" + q.id;
@@ -2410,7 +2522,7 @@ window.Dashboard = (function(){
                   ${q.skill ? '<span class="dcode">' + esc(q.skill) + "</span>" : ""} ${provHtml(k)}${mark(k)}
                   <span class="bank-stem">${esc(stripTokens(q.questionText))}</span></span>
                 <button class="dash-rel pick-form" data-mod="${escAttr(m.moduleId)}" data-qid="${escAttr(q.id)}"
-                  ${held ? "disabled" : ""}>${esc(btn)}</button>
+                  ${held || busy ? "disabled" : ""}>${esc(btn)}</button>
               </div>`;
             }).join("") + "</div>";
         }).join("") || '<p class="dash-empty">That test has no ' + esc(wantSection) + ' modules.</p>';
@@ -2448,9 +2560,9 @@ window.Dashboard = (function(){
           </div>
         </div>
         <div class="af-actions">
-          <button class="pill" id="sbSaveBtn" style="padding:9px 26px;">Save set</button>
+          <button class="pill" id="sbSaveBtn" style="padding:9px 26px;" ${busy ? "disabled" : ""}>Save set</button>
           <button class="pill ghost" id="sbCancelBtn" style="padding:9px 20px;">Cancel</button>
-          <span class="dash-hint" id="sbMsg"></span>
+          <span class="dash-hint" id="sbMsg">${esc(builder.msg || "")}</span>
         </div>
       </div>`;
   }
@@ -2516,40 +2628,63 @@ window.Dashboard = (function(){
   }
   async function saveSetFromBuilder(){
     const b = builder;
-    if(!b || b.saving) return;           // one save at a time: a second click while this one is in flight is dropped
-    if(!$("sbName").value.trim()){ $("sbMsg").textContent = "Give the set a name."; return; }
-    if(!b.refs.length){ $("sbMsg").textContent = "Add at least one question."; return; }
+    if(!b || b.saving) return;           // one save at a time: the builder is read-only while it runs
+    /* Every outcome line lives on the builder (b.msg) and is rendered by
+       viewSetBuilder: a textContent write into #sbMsg is wiped by the next
+       re-render, and async settles re-render at any moment (the saMsg
+       lesson). The name is read BEFORE any await — a tab switch mid-save
+       takes the input away. */
+    const say = msg => { b.msg = msg; if(builder === b) render(); };
+    const nameEl = $("sbName");
+    const name = String(nameEl ? nameEl.value : (b.name || "")).trim().slice(0, 80);
+    if(!name){ say("Give the set a name."); return; }
+    if(!b.refs.length){ say("Add at least one question."); return; }
+    b.name = name;
+    /* What is written is THIS snapshot — the refs checked below — never the
+       live array: the server body and the mirror row must be the same set. */
+    const snap = JSON.parse(JSON.stringify(b.refs));
+    const keysOf = refs => JSON.stringify(refs.map(r => (r && typeof r === "object") ? refKey(r) : String(r)));
+    const hasBank = snap.some(r => r && r.type === "bank");
     b.saving = true;
+    say(hasBank ? "Checking the bank items…" : "Saving…");
     try{
-      /* A retired bank item never ENTERS a set (see freshestBankIndex): every
-         bank ref the set did not already hold, as this browser last loaded
-         it, is checked against the freshest bank index before anything is
-         written. The check awaits a network read, so the builder is
-         re-verified afterwards — a set cancelled, replaced or edited in the
-         meantime is never saved from the snapshot that was checked. */
-      const keysOf = refs => JSON.stringify(refs.map(r => (r && typeof r === "object") ? refKey(r) : String(r)));
-      const prior = b.setId ? sets.find(x => x && x.setId === b.setId) : null;
-      const heldKeys = (prior && Array.isArray(prior.refs) ? prior.refs : []).filter(r => r && typeof r === "object").map(refKey);
-      const checked = keysOf(b.refs);
-      const refused = await refusedBankRefs(b.refs.slice(), heldKeys);
-      if(builder !== b) return;          // cancelled or replaced while the index was read
-      if(keysOf(b.refs) !== checked){ $("sbMsg").textContent = "The questions changed while the set was being checked — press Save set again."; return; }
-      if(refused.length){
-        $("sbMsg").textContent = "Not saved — " + (refused.length === 1 ? "this bank item" : "these bank items") + " can't be added to a set: " +
-          refused.join(", ") + ". Remove " + (refused.length === 1 ? "it" : "them") + " and save again.";
+      /* A retired bank item never ENTERS a set (see freshestBankIndex).
+         "Already in the set" is judged against the set as STORED NOW —
+         re-read from the server (remote) or storage (local) — never this
+         page's `sets`, which can still hold a ref another tab or browser has
+         since removed; trusting it would write that retired ref back. */
+      let held = [];
+      if(b.setId && hasBank){
+        try{ held = await storedSetRefKeys(b.setId); }
+        catch(e){
+          b.saving = false;
+          say("Not saved — couldn't read this set as it is stored now, to check its bank items. Press Save set again, or Refresh.");
+          return;
+        }
+      }
+      const chk = await refusedBankRefs(snap, held);
+      if(builder !== b) return;          // cancelled or replaced meanwhile: that click wins
+      if(keysOf(b.refs) !== keysOf(snap)){ b.saving = false; say("The questions changed while the set was being checked — press Save set again."); return; }
+      if(chk.unverified.length){
+        b.saving = false;
+        say("Not saved — the bank index couldn't be re-read to check " + chk.unverified.join(", ") +
+            " (see the browser console). Press Save set again, or reload the dashboard.");
         return;
       }
-      const name = $("sbName").value.trim().slice(0, 80);
-      if(!name){ $("sbMsg").textContent = "Give the set a name."; return; }
-      builder.name = name;
+      if(chk.refused.length){
+        b.saving = false;
+        say("Not saved — " + (chk.refused.length === 1 ? "this bank item" : "these bank items") + " can't be added to a set: " +
+            chk.refused.join(", ") + ". Remove " + (chk.refused.length === 1 ? "it" : "them") + " and save again.");
+        return;
+      }
       const now = new Date().toISOString();
-      const isNew = !builder.setId;
+      const isNew = !b.setId;
       const set = {
-        setId: builder.setId || newSetId(),
+        setId: b.setId || newSetId(),
         name: name,
-        subject: builder.subject,
-        refs: builder.refs,
-        createdAt: builder.createdAt || now,
+        subject: b.subject,
+        refs: snap,
+        createdAt: b.createdAt || now,
         updatedAt: now
       };
       const key = "pset:" + set.setId;
@@ -2599,9 +2734,15 @@ window.Dashboard = (function(){
                    (patchNotes.length ? " " + patchNotes.join(" ") : "")) +
           (res.warning ? " " + res.warning : "")
         : res.message;
+      b.saving = false;
+      b.msg = "";                        // the outcome is the Sets line (setsMsg); a rejected save leaves the builder open
       if(ok){ builder = null; if(isNew) await loadSets(); else await loadAssignsAndBugs(); }
       render();
-    }finally{ b.saving = false; }
+    }finally{
+      /* an exception on the way (a throwing storage or render) must never
+         leave the builder locked read-only */
+      if(b.saving){ b.saving = false; b.msg = ""; if(builder === b) render(); }
+    }
   }
   /* The freshest copy of one assignment row, or null if it no longer exists:
      the SERVER's in remote mode (this browser's mirror can hold rows deleted
@@ -2724,21 +2865,28 @@ window.Dashboard = (function(){
              "module m1 of X" */
           const full = fullTests[builderTestId];
           const m = full && full.modules.find(x => x.moduleId === btn.dataset.mod);
-          if(!m) return;
+          if(!m || builder.saving) return;
           m.questions.forEach(q => pushRef({ type: "form", testId: builderTestId, moduleId: m.moduleId, qid: q.id }));
           render();
         }));
+      /* reorder/remove: never while a save is in flight (it writes a
+         snapshot of these refs), and a change clears the last outcome line */
       document.querySelectorAll("#dashBody .ref-rm").forEach(btn =>
-        btn.addEventListener("click", ()=>{ builder.refs.splice(parseInt(btn.dataset.i, 10), 1); render(); }));
+        btn.addEventListener("click", ()=>{
+          if(builder.saving) return;
+          builder.refs.splice(parseInt(btn.dataset.i, 10), 1); builder.msg = ""; render();
+        }));
       document.querySelectorAll("#dashBody .ref-up").forEach(btn =>
         btn.addEventListener("click", ()=>{
           const i = parseInt(btn.dataset.i, 10);
-          if(i > 0){ const t = builder.refs[i - 1]; builder.refs[i - 1] = builder.refs[i]; builder.refs[i] = t; render(); }
+          if(builder.saving) return;
+          if(i > 0){ const t = builder.refs[i - 1]; builder.refs[i - 1] = builder.refs[i]; builder.refs[i] = t; builder.msg = ""; render(); }
         }));
       document.querySelectorAll("#dashBody .ref-down").forEach(btn =>
         btn.addEventListener("click", ()=>{
           const i = parseInt(btn.dataset.i, 10);
-          if(i < builder.refs.length - 1){ const t = builder.refs[i + 1]; builder.refs[i + 1] = builder.refs[i]; builder.refs[i] = t; render(); }
+          if(builder.saving) return;
+          if(i < builder.refs.length - 1){ const t = builder.refs[i + 1]; builder.refs[i + 1] = builder.refs[i]; builder.refs[i] = t; builder.msg = ""; render(); }
         }));
     }
     const sa = $("saAssignBtn");

@@ -211,12 +211,17 @@
      202510usv1, 202609usv1 — "©2016 by A. Hope Jahren" on 202609usv1
      re1-q8), was missing here, and a highlighted-then-resumed passage lost
      its credit line's right alignment (2026-09-30).
-     tests/keep-classes.test.js now pins this list against render.js's
-     emitters AND against fmt() over every shipped RW field, in node.
+     It was stripped on every re-render of a highlighted passage, not only on
+     resume, so a highlight saved before the fix can hold the passage without
+     the class for good; the fix is not retroactive.
+     tests/keep-classes.test.js now pins this list against every fmt-* class
+     render.js names AND against fmt() over every shipped RW field, in node.
      If a future test bank ever puts math in an RW field, restored math would
      lose its styling. That is a visible degradation, not a hole, and it fails
-     LOUDLY: tests/injection-proof.js asserts that fmt() over the whole library
-     emits no RW class outside this list. */
+     LOUDLY: tests/keep-classes.test.js (node) fails on math in any RW field
+     but the one pinned there (202608intv1 re2-q10), and tests/injection-
+     proof.js asserts that fmt() over the whole library emits no RW class
+     outside this list. */
   const KEEP_CLASSES = new RegExp("^(?:" + [
     // the highlighter's own output — these MUST survive or annotations vanish
     "hl", "c-(?:yellow|blue|pink|none)", "u-(?:solid|dashed|dotted)",

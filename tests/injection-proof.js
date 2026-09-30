@@ -526,7 +526,7 @@
                         "rlap", "llap", "clap", "inner", "halfarrow-left", "brace-left"];
         const mustStay = ["hl", "c-yellow", "c-blue", "c-pink", "c-none",
                           "u-solid", "u-dashed", "u-dotted",
-                          "fmt-blank", "fmt-bullets", "fmt-caption",
+                          "fmt-blank", "fmt-bullets", "fmt-caption", "fmt-credit",
                           "fmt-passage-label", "fmt-quote", "fmt-table", "fmt-tnote"];
         if(!S){ classBad.push("AppSanitize.html not exposed"); }
         else {
@@ -543,6 +543,15 @@
             const el = d.querySelector("span");
             const got = el ? (el.getAttribute("class") || "") : "";
             if(got.split(/\s+/).indexOf(c) === -1) classBad.push(`legit class "${c}" was DROPPED`);
+          });
+          /* the fmt-* containers are emitted on a <div> (render.js), so test
+             them where they occur, not only on a <span> */
+          mustStay.filter(c => c.indexOf("fmt-") === 0).forEach(c => {
+            const d = document.createElement("div");
+            d.innerHTML = S('<div class="' + c + '">x</div>');
+            const el = d.querySelector("div");
+            const got = el ? (el.getAttribute("class") || "") : "";
+            if(got.split(/\s+/).indexOf(c) === -1) classBad.push(`legit class "${c}" was DROPPED from a <div>`);
           });
           /* and the whole-payload form: a fixed overlay must not survive in any
              attribute, so nothing it renders can win hit-testing */
@@ -598,12 +607,13 @@
             : "both review overlays render static, un-inflated and zero-sized" });
       }
 
-      /* DRIFT GATE. The allowlist is justified by a measurement: no Reading and
-         Writing field in the library contains math, so fmt() emits only the
-         seven fmt-* containers there. If a future test bank breaks that,
-         restored annotations would silently lose their styling — so this fails
-         loudly instead. It is the reason the allowlist can safely be this
-         small. */
+      /* DRIFT GATE. The allowlist is justified by a measurement: fmt() emits
+         only its own fmt-* block containers in Reading and Writing fields
+         (math in RW is the known, pinned exception — 202608intv1 re2-q10 —
+         whose KaTeX classes are dropped by design). If a future test bank
+         breaks that, restored annotations would silently lose their styling
+         — so this fails loudly instead. tests/keep-classes.test.js is the
+         same gate in node, with the math exception pinned by name. */
       {
         const S = window.AppSanitize && window.AppSanitize.html;
         const probe = document.createElement("div");
@@ -733,6 +743,16 @@
         refs: [{ type: "bank", bankId: bankId, qid: goodQid },
                { type: "bank", bankId: PAYLOAD, qid: PAYLOAD }],
         createdAt: "2026-08-31T00:00:00.000Z", updatedAt: "2026-08-31T00:00:00.000Z"
+      }));
+      /* 2026-09-30: a hostile set that HOLDS A RETIRED bank item (picked at run
+         time from the index), so its name reaches the Sets-list retired report
+         and the builder's retired notice — surfaces pset-xss1 never renders,
+         because both of its refs are active or unknown */
+      const retiredQ = (window.BANK_INDEX && (BANK_INDEX.entries || []).find(e => e && e.retired)) || null;
+      if(retiredQ) localStorage.setItem("as:pset:pset-xss3", JSON.stringify({
+        setId: "pset-xss3", name: PAYLOAD, subject: retiredQ.subject === "math" ? "math" : "rw",
+        refs: [{ type: "bank", bankId: retiredQ.bankId, qid: retiredQ.qid }],
+        createdAt: "2026-09-10T00:00:00.000Z", updatedAt: "2026-09-10T00:00:00.000Z"
       }));
       const setRec = {
         recordVersion: 1, attemptId: "attempt:pset-xss1:1700000002:xss2",
@@ -1232,6 +1252,34 @@
     } else {
       results.push({ surface: "Dashboard set builder (hostile name + refs)",
         pass: false, note: "no Edit button for the seeded hostile set" });
+    }
+
+    /* Retired-item surfaces (2026-09-30): the Sets-list report names every
+       set holding a retired bank item, and the builder names what it holds —
+       the planted pset-xss3 carries the payload as its name. A POSITIVE check
+       first (the report must actually render — an absent notice would also
+       "pass" an inertness audit), then the inertness audit. */
+    document.querySelector('#dashTabs [data-tab="sets"]').click();
+    await wait(300);
+    {
+      const rn = document.querySelector("#dashBody .retired-notice");
+      results.push({ surface: "Sets-list retired report renders and names the hostile set as inert text",
+        pass: !!rn && rn.textContent.indexOf("PWN") !== -1 && rn.querySelectorAll("img, [onerror]").length === 0 &&
+              /sets? holds? a retired bank item/.test(rn.textContent) && !window.__XSS_FIRED,
+        note: rn ? rn.textContent.slice(0, 160) : "NO retired report rendered for the planted set that holds a retired item" });
+      const edit3 = [...document.querySelectorAll("#dashBody .set-edit")].find(b => b.dataset.set === "pset-xss3");
+      if(edit3){
+        edit3.click();
+        await wait(300);
+        const bn = document.querySelector("#dashBody .set-builder .retired-notice");
+        results.push({ surface: "Set builder retired notice renders for the hostile set",
+          pass: !!bn && bn.querySelectorAll("img, [onerror]").length === 0 && !window.__XSS_FIRED,
+          note: bn ? bn.textContent.slice(0, 160) : "no retired notice in the builder" });
+        results.push(audit("Set builder on a hostile set holding a retired item (notice + retired picker rows)", $("dashBody")));
+      } else {
+        results.push({ surface: "Set builder retired notice renders for the hostile set",
+          pass: false, note: "no Edit button for the planted pset-xss3" });
+      }
     }
 
     /* Canonical-id surfaces in the builder (2026-09-07): open a NEW set on

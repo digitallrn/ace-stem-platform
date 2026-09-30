@@ -40,26 +40,45 @@ function check(ok, label, detail){
          console.log("FAIL | " + label + (detail ? " — " + detail : "")); }
 }
 
+/* A mistyped BUILD_SITE_SRC must fail before ~40 MB is copied anywhere. */
+if(!fs.existsSync(BUILD_SRC)){
+  console.log("FAIL | BUILD_SITE_SRC not found: " + BUILD_SRC + " — nothing was copied");
+  process.exit(1);
+}
 /* ---- a throwaway checkout: every top-level file plus testdata/, never
-   config.js (gen-config.js writes it, as on Netlify) ---- */
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "build-site-drift-"));
-fs.readdirSync(REPO).forEach(f => {
-  const full = path.join(REPO, f);
-  if(f === "config.js" || !fs.statSync(full).isFile()) return;
-  fs.copyFileSync(full, path.join(tmp, f));
-});
-fs.cpSync(path.join(REPO, "testdata"), path.join(tmp, "testdata"), { recursive: true });
-fs.copyFileSync(BUILD_SRC, path.join(tmp, "build-site.js"));
+   config.js (gen-config.js writes it, as on Netlify). Created and filled
+   INSIDE the try below, whose finally removes it — a setup that throws
+   halfway must not leave a copy of testdata/ in %TEMP%; Ctrl-C too. ---- */
+let tmp = null;
+const cleanup = () => { if(tmp){ try{ fs.rmSync(tmp, { recursive: true, force: true }); }catch(e){} tmp = null; } };
+process.on("SIGINT", () => { cleanup(); process.exit(130); });
 
+let BANKS, TESTS, INDEX;
+function setup(){
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "build-site-drift-"));
+  fs.readdirSync(REPO).forEach(f => {
+    const full = path.join(REPO, f);
+    if(f === "config.js" || !fs.statSync(full).isFile()) return;
+    fs.copyFileSync(full, path.join(tmp, f));
+  });
+  fs.cpSync(path.join(REPO, "testdata"), path.join(tmp, "testdata"), { recursive: true });
+  fs.copyFileSync(BUILD_SRC, path.join(tmp, "build-site.js"));
+  BANKS = load("bank-manifest.js", "BANK_MANIFEST");
+  TESTS = load("manifest.js", "TEST_MANIFEST");
+  INDEX = load("dedup-index.js", "DEDUP_INDEX");
+}
 function load(file, global){
   const c = { window: {} };
   vm.createContext(c);
   vm.runInContext(fs.readFileSync(path.join(tmp, "testdata", file), "utf8"), c);
   return c.window[global];
 }
-const BANKS = load("bank-manifest.js", "BANK_MANIFEST");
-const TESTS = load("manifest.js", "TEST_MANIFEST");
-const INDEX = load("dedup-index.js", "DEDUP_INDEX");
+/* A failure says what was MISSING — in the regression this exists for, no
+   WARNING line is printed at all — and shows the build's tail as context. */
+function why(r){
+  return "exit " + r.status + "; " + (r.warn ? "WARNING lines:\n" + r.warn : "NO drift WARNING line was printed") +
+    (r.status !== 0 || !r.warn ? "\n--- build output tail ---\n" + r.out.slice(-400) : "");
+}
 
 const ENV = Object.assign({}, process.env, {
   SUPABASE_URL: "https://drifttestproject.supabase.co",
@@ -86,6 +105,7 @@ function run(label, fn){
 }
 
 try{
+  setup();
   run("clean", () => {
     check(Array.isArray(BANKS) && BANKS.length >= 1 && Array.isArray(TESTS) && TESTS.length >= 1 && INDEX && INDEX.reference,
       "the copy holds both manifests and the index (" + TESTS.length + " tests, " + BANKS.length + " banks)");
@@ -100,14 +120,14 @@ try{
       new RegExp('("bankId"\\s*:\\s*"' + b.bankId + '"[\\s\\S]*?"bankVersion"\\s*:\\s*")[^"]+(")'), "$1sha-planted0000$2"));
     const want = b.bankId + " (index " + INDEX.reference.banks.find(x => x.bankId === b.bankId).bankVersion + ", bank manifest sha-planted0000)";
     check(r.status === 0 && r.warn.indexOf("dedup-index.js is behind the manifest") !== -1 && r.warn.indexOf(want) !== -1,
-      "a planted bank-version drift is named: " + want, r.warn || r.out.slice(-400));
+      "a planted bank-version drift is named: " + want, why(r));
   });
 
   run("bank-missing", () => {
     const b = BANKS[0];
     const r = planted("dedup-index.js", s => s.replace(new RegExp('"bankId"\\s*:\\s*"' + b.bankId + '"'), '"bankId": "bank-not-this-one"'));
     check(r.status === 0 && r.warn.indexOf(b.bankId + " (bank not in the index)") !== -1,
-      "a bank the index doesn't list is named: " + b.bankId + " (bank not in the index)", r.warn || r.out.slice(-400));
+      "a bank the index doesn't list is named: " + b.bankId + " (bank not in the index)", why(r));
   });
 
   run("form-version", () => {
@@ -115,16 +135,16 @@ try{
     const r = planted("manifest.js", s => s.replace(
       new RegExp('("testId"\\s*:\\s*"' + t.testId + '"[\\s\\S]*?"testVersion"\\s*:\\s*")[^"]+(")'), "$12099-01-01-z$2"));
     check(r.status === 0 && r.warn.indexOf(t.testId + " (index ") !== -1 && r.warn.indexOf(", manifest 2099-01-01-z)") !== -1,
-      "a planted form-version drift is still named (" + t.testId + ")", r.warn || r.out.slice(-400));
+      "a planted form-version drift is still named (" + t.testId + ")", why(r));
   });
 
   run("unparseable", () => {
     const r = planted("bank-manifest.js", s => s.replace(/window\.BANK_MANIFEST\s*=/, "window.BANK_MANIFEST_RENAMED ="));
     check(r.status === 0 && /could not compare testdata\/dedup-index\.js/.test(r.warn) && /bank-manifest\.js does not match/.test(r.warn),
-      "a bank manifest the check can't parse is a WARNING naming the file, not a silent 'no banks'", r.warn || r.out.slice(-400));
+      "a bank manifest the check can't parse is a WARNING naming the file, not a silent 'no banks'", why(r));
   });
 }finally{
-  fs.rmSync(tmp, { recursive: true, force: true });
+  cleanup();
 }
 
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);

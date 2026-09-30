@@ -11,20 +11,32 @@
    Jahren" under 202609usv1 re1-q8 (also credits on 202403intv2 and
    202510usv1) came back as a plain left-aligned line after a resume.
 
+   Not only on resume: before the fix the class was stripped on EVERY
+   in-sitting re-render of the passage (a flag, a cross-out, a revisit),
+   and a highlight saved after one stores the passage WITHOUT the class —
+   so blobs written before 2026-09-30 can stay unstyled for good. The fix
+   holds from the deploy on; it does not repair old blobs.
+
    tests/injection-proof.js has a gate for this ("Allowlist covers every
    class fmt() emits in a Reading and Writing field"), but it is a manual
-   browser-console script, so nothing ran it. This is the same gate in node,
+   browser-console script, so nothing ran it. This is that gate in node,
    plus a static one that does not depend on which tokens today's library
    happens to use:
 
-     1. STATIC — every class="fmt-…" literal in render.js is kept.
+     1. STATIC — every fmt-* class NAMED ANYWHERE in render.js (whatever the
+        quoting: "…", '…', a lookup table, className) is kept, render.js
+        builds no fmt-* class by concatenation (a "fmt-" + name emitter would
+        hide its names from this scan), and the set is exactly the eight
+        pinned below, so a new or renamed class is looked at, not waved
+        through.
      2. LIBRARY — fmt() over every Reading-and-Writing passage, stem and
         choice of every manifest test and every RW bank question: every
         fmt-* token emitted is kept. Math inside an RW field is the one
         documented exception (KaTeX classes are excluded from KEEP_CLASSES by
         design — they carry positioning and size multipliers; see the
-        comment above KEEP_CLASSES) — those fields are LISTED below, never
-        silently skipped, and a non-fmt class from a field WITHOUT math fails.
+        comment above KEEP_CLASSES): those fields are PINNED by name, so math
+        in a NEW RW field fails here instead of degrading quietly; a non-fmt
+        class from a field WITHOUT math fails too.
      3. THE REPORTED CASE — 202609usv1 re1-q8's passage emits fmt-credit and
         the list keeps it.
      4. The list tested here is the one the sanitizer actually applies.
@@ -57,14 +69,16 @@ const sanitizeOnce = extractFn(appSrc, "sanitizeOnce");
 check(/KEEP_CLASSES\.test\(c\)/.test(sanitizeOnce) && /if\(n === "class"\)/.test(sanitizeOnce),
   "sanitizeOnce filters every class token through KEEP_CLASSES.test (the list tested here is the one applied)");
 
-/* 1. static: every fmt-* class render.js can emit */
-const emitted = new Set();
-(renderSrc.match(/class=\\?"[^"\\]+/g) || []).forEach(m => m.replace(/^class=\\?"/, "").split(/\s+/).forEach(t => t && emitted.add(t)));
-const fmtClasses = [...emitted].filter(t => /^fmt-/.test(t)).sort();
-check(fmtClasses.length >= 8 && fmtClasses.indexOf("fmt-credit") !== -1,
-  "render.js's class literals were found (" + fmtClasses.length + " fmt-* classes, fmt-credit among them)", fmtClasses.join(", "));
+/* 1. static: every fmt-* class NAMED anywhere in render.js, however quoted */
+const FMT_PINNED = ["fmt-blank", "fmt-bullets", "fmt-caption", "fmt-credit", "fmt-passage-label", "fmt-quote", "fmt-table", "fmt-tnote"];
+const fmtClasses = [...new Set(renderSrc.match(/fmt-[a-z][a-z-]*/g) || [])].sort();
+check(JSON.stringify(fmtClasses) === JSON.stringify(FMT_PINNED),
+  "render.js names exactly the 8 pinned fmt-* classes (a new or renamed one must be looked at — and added to KEEP_CLASSES)", fmtClasses.join(", "));
+const dynamic = (renderSrc.match(/fmt-(?![a-z])/g) || []).length;
+check(dynamic === 0, "render.js builds no fmt-* class by concatenation (\"fmt-\" + name would hide its names from this scan)",
+  dynamic + " bare 'fmt-' occurrence(s)");
 const staticDropped = fmtClasses.filter(t => !KEEP.test(t));
-check(staticDropped.length === 0, "STATIC: every fmt-* class render.js can emit is in KEEP_CLASSES",
+check(staticDropped.length === 0, "STATIC: every fmt-* class named in render.js is in KEEP_CLASSES",
   "dropped: " + staticDropped.join(", "));
 
 /* 2. library: fmt() over every RW field of every shipped test and RW bank question */
@@ -120,8 +134,16 @@ check(libDropped.length === 0, "LIBRARY: every fmt-* class the shipped RW fields
   libDropped.map(t => t + " (" + perToken.get(t).length + " fields, e.g. " + perToken.get(t).slice(0, 3).join(", ") + ")").join("; "));
 check(strayFields.length === 0, "LIBRARY: no field WITHOUT math emits a class the list drops", strayFields.slice(0, 10).join(", "));
 console.log("  fmt-* tokens in the RW library: " + [...perToken.keys()].sort().map(t => t + "×" + perToken.get(t).length).join(", "));
-console.log("  RW fields with math (KaTeX classes dropped BY DESIGN — a visible degradation, not a hole): " +
-  (mathFields.length ? mathFields.join(", ") : "none"));
+/* Math in an RW field is excluded by design (a visible degradation on
+   resume, not a hole) — but only for the fields PINNED here, each one known
+   and accepted. Math in any other RW field fails, so the next one is a
+   decision, not a log line. */
+const KNOWN_MATH_RW = ["202608intv1:re2-q10"];     // isotope notation in the passage table and choices B/C (2026-08-27)
+const newMath = mathFields.filter(f => KNOWN_MATH_RW.indexOf(f) === -1);
+check(newMath.length === 0, "LIBRARY: math appears only in the pinned RW fields (" + KNOWN_MATH_RW.join(", ") +
+  ") — anywhere else its KaTeX classes would be stripped on resume", "new: " + newMath.join(", "));
+const gone = KNOWN_MATH_RW.filter(f => mathFields.indexOf(f) === -1);
+check(gone.length === 0, "LIBRARY: every pinned math-in-RW field still has math (a stale pin is removed, not kept)", "no longer math: " + gone.join(", "));
 
 /* 3. the reported case */
 const usv1 = loadData("testdata/202609usv1.js").__TESTDATA__["202609usv1"];
