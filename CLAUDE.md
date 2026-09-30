@@ -285,6 +285,10 @@ Three rules:
 
 `tests/injection-proof.js` is a paste-into-the-console regression proof —
 run it against `dist/index-live.html` after touching any render surface.
+`tests/keep-classes.test.js` is its annotation-allowlist gate in node: every
+class render.js can emit, and every class fmt() emits over the shipped RW
+library, must survive the sanitizer's KEEP_CLASSES (fmt-credit was missing
+until 2026-09-30, so a resumed highlight lost the credit line's styling).
 `tests/local-mode.test.js` (`node tests/local-mode.test.js`) covers the
 storage-adapter mode resolution; the preview pane strips query strings, so
 the `?devstorage=1` cases can only be checked there.
@@ -375,6 +379,23 @@ record-derived value.
   blocklist rule is therefore bypassable by changing capitalisation, and an
   n-character path has 2^n variants. Deny-by-default is the only mechanism
   that actually holds.
+
+## Set builder rules (2026-09-30)
+- **Bank questions group by canonical id exactly as form questions do** —
+  one entry per canonical item across forms AND banks (`builderHeldAs`),
+  with provenance and seen marks on bank rows. The 2026-09-07 exclusion was
+  v1 scope only, not a reason.
+- **A retired bank item never enters a set**: no Add in the picker, `pushRef`
+  refuses it, and `saveSetFromBuilder` re-reads `testdata/bank-index.js`
+  (cache bypassed) and refuses any bank ref the set did not already hold
+  that is retired or unknown — so a page left open across a retiring deploy
+  can't add one. A set saved before the retirement keeps the item, and the
+  Sets tab reports it by name; nothing changes it.
+- `tests/canonical-index.test.js` pins canonical pairs BY HAND on purpose:
+  re-pin (and say which export) when an export legitimately moves one.
+  `DEDUP_INDEX_SRC=<file>` runs it against a planted index.
+  `tests/build-site-drift.test.js` runs the real build on a copy of the tree
+  to prove the index-drift warning fires (and stays quiet when clean).
 
 ## Known open items
 - ✅ 2026-07-23: Attempt recording + tutor dashboard implemented per

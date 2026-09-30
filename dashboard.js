@@ -555,42 +555,52 @@ window.Dashboard = (function(){
   }
 
   /* ---- the builder's ONE rule for what it already holds ----
-     Exact key first (after legacy-id resolution). Then, for a FORM
-     candidate only, any FORM ref in the same exact class (same canonical
-     id): the set holds one entry per canonical item. Bank refs neither
-     hold nor are held by a class — "bank rows are unaffected by the
-     grouping" — so the outcome never depends on the order the tutor
-     clicked. Returns the key the set holds, or null. Used by the view (its
-     button label), by builderAddRef and by Add whole module. */
+     Exact key first (after legacy-id resolution). Then any ref — form OR
+     bank — in the same exact class (same canonical id): the set holds one
+     entry per canonical item. Bank questions take part exactly as form
+     questions do (2026-09-30): the index carries every bank item with its
+     canonical id, and a bank twin of a form question (bank-202608-salvage
+     q0049 = 2024 December US v2 re2-q25) is the same item to a student.
+     The v1 brief (2026-09-07) had left banks out as scope only — "Bank
+     questions unaffected", written when the index held one bank item and
+     no bank/form class. The rule is symmetric by construction, so the
+     outcome never depends on the order the tutor clicked. Returns the key
+     the set holds, or null. Used by the view (its button labels), by
+     builderAddRef and by Add whole module. */
   function builderHeldAs(ref){
     if(!builder || !ref) return null;
     const k = canonRef(refKey(ref));
     const exact = builder.refs.find(r => r && canonRef(refKey(r)) === k);
     if(exact) return k;
-    if(ref.type !== "form" || !dedup) return null;
+    if(!dedup) return null;
     const it = dedup.items[k];
     if(!it) return null;
     const hit = builder.refs.find(r => {
-      if(!r || r.type !== "form") return false;
+      if(!r || typeof r !== "object") return false;
       const o = dedup.items[canonRef(refKey(r))];
       return !!(o && o.canonical === it.canonical);
     });
     return hit ? canonRef(refKey(hit)) : null;
   }
+  /* The one door into builder.refs: a ref the set already holds (by key or
+     by canonical class) or a RETIRED bank item never gets in, whichever
+     adder asks — a picker button, Add whole module, or a button rendered
+     before the page knew the item was retired. */
   function pushRef(ref){
-    if(!builder || builderHeldAs(ref)) return false;
+    if(!builder || builderHeldAs(ref) || isRetiredBankRef(ref)) return false;
     builder.refs.push(ref);
     return true;
   }
-  /* Form refs the builder holds twice by canonical id — refs added while the
-     index was still loading or failed, or a set saved before grouping
-     existed. Shown as a notice so the tutor can remove the extras; nothing
-     is removed for them. */
+  /* Refs the builder holds twice by canonical id, form or bank — added while
+     the index was still loading or failed, or saved before grouping existed
+     (a set saved before 2026-09-30 can pair a bank item with its form twin).
+     Shown as a notice so the tutor can remove the extras; nothing is removed
+     for them. */
   function builderDuplicateGroups(){
     if(!dedup || !builder) return [];
     const byCanon = Object.create(null);
     builder.refs.forEach(r => {
-      if(!r || r.type !== "form") return;
+      if(!r || typeof r !== "object") return;
       const k = canonRef(refKey(r));
       const it = dedup.items[k];
       if(!it) return;
@@ -2138,6 +2148,72 @@ window.Dashboard = (function(){
   function refKey(ref){
     return ref.type === "bank" ? (ref.bankId + ":" + ref.qid) : (ref.testId + ":" + ref.qid);
   }
+  /* ---- retired bank items (2026-09-30) ----
+     A retired bank item stays in its bank file, so the sets and attempts
+     that already hold it keep resolving — but it must never ENTER a set
+     again. Three layers enforce that one rule: the picker renders no Add on
+     a retired row, pushRef() refuses one, and saveSetFromBuilder() refuses
+     to save any bank ref the set did not already hold unless the FRESHEST
+     bank index it can read lists that ref as active. The save-time read is
+     what makes the rule hold on a stale page: this page's BANK_INDEX is only
+     as new as the page, and a dashboard left open across the deploy that
+     retires an item still shows that item's Add button. A set that held an
+     item before it was retired is left exactly as saved — the Sets list
+     reports it; nothing here changes it. */
+  function bankEntryIn(idx, ref){
+    const list = (idx && Array.isArray(idx.entries)) ? idx.entries : [];
+    return list.find(e => e && e.bankId === ref.bankId && e.qid === ref.qid) || null;
+  }
+  function isRetiredBankRef(ref){
+    if(!ref || ref.type !== "bank") return false;
+    const e = bankEntryIn(window.BANK_INDEX, ref);
+    return !!(e && e.retired);
+  }
+  /* testdata/bank-index.js re-read with the HTTP cache bypassed and parsed
+     as DATA (JSON.parse — the file is never executed a second time), or —
+     when there is no origin to read from (the single-file build, a file://
+     copy) or the read fails — the copy this page loaded at startup.
+     Returns {idx, fresh}. */
+  async function freshestBankIndex(){
+    if(typeof window.fetch === "function"){
+      try{
+        const res = await window.fetch("testdata/bank-index.js", { cache: "no-store" });
+        if(res && res.ok){
+          const m = String(await res.text()).match(/window\.BANK_INDEX\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
+          const idx = m ? JSON.parse(m[1]) : null;
+          if(idx && Array.isArray(idx.entries)) return { idx: idx, fresh: true };
+        }
+      }catch(e){ /* no origin, offline, or unparseable: fall back below */ }
+    }
+    return { idx: window.BANK_INDEX || null, fresh: false };
+  }
+  /* The bank refs a save would ADD (not in the set as this browser last
+     loaded it) that the freshest index lists as retired — or does not list
+     at all, since a ref the bank index doesn't know can't be checked and
+     would leave the student's set unresolvable. Refs the set already held
+     are never re-judged: a set saved before an item was retired keeps it. */
+  async function refusedBankRefs(refs, heldKeys){
+    const added = refs.filter(r => r && r.type === "bank" && heldKeys.indexOf(refKey(r)) === -1);
+    if(!added.length) return [];
+    const got = await freshestBankIndex();
+    const out = [];
+    added.forEach(r => {
+      const e = bankEntryIn(got.idx, r);
+      if(!e) out.push(refKey(r) + " (not in the bank index)");
+      else if(e.retired) out.push(refKey(r) + " (retired" + (e.supersededBy ? " — replaced by " + e.supersededBy : "") +
+        (isRetiredBankRef(r) ? "" : ", since this page loaded — reload the dashboard") + ")");
+    });
+    return out;
+  }
+  /* Bank refs a stored set holds that the loaded index lists as retired —
+     reported (Sets list, builder), never changed. */
+  function retiredRefsOf(refs){
+    return (Array.isArray(refs) ? refs : []).filter(r => r && typeof r === "object" && isRetiredBankRef(r));
+  }
+  function retiredRefText(r){
+    const e = bankEntryIn(window.BANK_INDEX, r);
+    return refKey(r) + (e && e.supersededBy ? " → " + e.supersededBy : "");
+  }
   function refLabel(ref){
     if(ref.type === "bank"){
       const e = (window.BANK_INDEX && BANK_INDEX.entries || []).find(x => x.bankId === ref.bankId && x.qid === ref.qid);
@@ -2190,6 +2266,17 @@ window.Dashboard = (function(){
       }).join("") + "</tbody></table>"
       : '<p class="dash-empty">No practice sets yet — build one below.</p>';
 
+    /* sets saved before one of their bank items was retired: reported by
+       name and ref, never changed — students assigned them keep getting the
+       item exactly as the set was saved */
+    const retiredHeld = sets.map(s => ({ s: s, refs: retiredRefsOf(s.refs) })).filter(x => x.refs.length);
+    const retiredHtml = retiredHeld.length
+      ? '<p class="retired-notice rv-notice warn">' + retiredHeld.length + (retiredHeld.length === 1 ? " set holds" : " sets hold") +
+        " a bank item retired after the set was saved: " +
+        retiredHeld.map(x => "<b>" + esc(x.s.name) + "</b> (" + x.refs.map(r => esc(retiredRefText(r))).join(", ") + ")").join("; ") +
+        ". Nothing was changed — students assigned these sets still get the item as saved. Edit the set to remove it.</p>"
+      : "";
+
     /* attempts per set (records audit stays in the Attempts tab; this is the
        per-set slice the contract asks for) */
     const attemptsHtml = sets.map(s => {
@@ -2219,6 +2306,7 @@ window.Dashboard = (function(){
         ${dedupNoticeHtml()}
         ${marksHint}
         ${listHtml}
+        ${retiredHtml}
         <div class="af-actions">
           <button class="pill" id="setNewBtn" style="padding:9px 22px;">New set</button>
           <span class="dash-hint" id="setsMsg">${esc(setsMsg)}</span>
@@ -2239,7 +2327,7 @@ window.Dashboard = (function(){
       const k = refKey(ref);
       return `<div class="setref-row">
         <span class="setref-n">${i + 1}</span>
-        <span class="setref-main"><b>${esc(lbl.title)}</b>${lbl.sub ? ' <span class="dcode">' + esc(lbl.sub) + "</span>" : ""}${ref.type === "form" ? " " + provHtml(k) : ""}${mark(k)}
+        <span class="setref-main"><b>${esc(lbl.title)}</b>${lbl.sub ? ' <span class="dcode">' + esc(lbl.sub) + "</span>" : ""} ${provHtml(k)}${mark(k)}
           <span class="bank-stem">${esc(lbl.stem)}</span></span>
         <span class="setref-btns">
           <button class="dash-rel ref-up" data-i="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
@@ -2249,31 +2337,46 @@ window.Dashboard = (function(){
       </div>`;
     }).join("") : '<p class="dash-empty">No questions yet — add from the bank or a test below.</p>';
 
-    /* Grouping by canonical id — builderHeldAs() is the one rule: a form
-       question whose exact duplicate (same canonical id, on this or another
-       form) is already in the set reads "In set as <that ref>" and cannot be
-       added again; bank rows are held only by their own key. Refs that got
-       in twice anyway (index not loaded at the time, or a pre-grouping set)
-       are called out so the tutor can remove them. */
+    /* Grouping by canonical id — builderHeldAs() is the one rule: a form OR
+       bank question whose exact duplicate (same canonical id, on any form or
+       in any bank) is already in the set reads "In set as <that ref>" and
+       cannot be added again. Refs that got in twice anyway (index not loaded
+       at the time, or a set saved before grouping covered them) are called
+       out so the tutor can remove them. */
     const dupGroups = builderDuplicateGroups();
     const dupHtml = dupGroups.length
       ? '<p class="canon-notice rv-notice warn">This set holds the same item more than once — ' +
         dupGroups.map(g => esc(g.map(refText).join(" = "))).join("; ") +
         ". Remove the extra copies above; nothing is removed for you.</p>"
       : "";
+    /* retired items this set already held when it was loaded: kept as saved,
+       said out loud (a retired item can't be ADDED — pushRef and the save
+       both refuse one) */
+    const heldRetired = retiredRefsOf(refs);
+    const retiredHtml = heldRetired.length
+      ? '<p class="retired-notice rv-notice warn">This set holds ' + (heldRetired.length === 1 ? "a retired bank item" : heldRetired.length + " retired bank items") +
+        ", kept as saved: " + heldRetired.map(r => esc(retiredRefText(r))).join(", ") +
+        ". Remove it to stop serving it; a retired item can't be added back.</p>"
+      : "";
 
-    /* bank picker: subject-matched, active first, retired flagged */
+    /* bank picker: subject-matched, retired flagged and never addable (no
+       button at all — the one adder, pushRef, refuses one too) */
     const bankEntries = (window.BANK_INDEX && BANK_INDEX.entries || [])
       .filter(e => e.subject === builder.subject);
     const bankPickHtml = bankEntries.length ? bankEntries.map(e => {
+      const k = e.bankId + ":" + e.qid;
       const held = builderHeldAs({ type: "bank", bankId: e.bankId, qid: e.qid });
+      const own = held === canonRef(k);
+      const action = e.retired
+        ? `<span class="setpick-retired">${own ? "In set · retired" : "Retired — can’t be added" + (e.supersededBy ? "; use " + esc(e.supersededBy) : "")}</span>`
+        : `<button class="dash-rel pick-bank" data-bank="${escAttr(e.bankId)}" data-qid="${escAttr(e.qid)}"
+          ${held ? "disabled" : ""}>${esc(own ? "Added" : held ? "In set as " + refText(held) : "Add")}</button>`;
       return `
-      <div class="setpick-row${e.retired ? " is-retired" : ""}">
+      <div class="setpick-row${e.retired ? " is-retired" : ""}${held && !own ? " is-held" : ""}">
         <span class="setpick-main"><b>${esc(e.ref)}</b> ${bankStatusBadge(e)}
-          <span class="dcode">${esc(e.skill || "")}</span>${mark(e.bankId + ":" + e.qid)}
+          <span class="dcode">${esc(e.skill || "")}</span> ${provHtml(k)}${mark(k)}
           <span class="bank-stem">${esc(e.stemPreview || "")}</span></span>
-        <button class="dash-rel pick-bank" data-bank="${escAttr(e.bankId)}" data-qid="${escAttr(e.qid)}"
-          ${held ? "disabled" : ""}>${held ? "Added" : "Add"}</button>
+        ${action}
       </div>`;
     }).join("")
       : '<p class="dash-empty">The bank has no ' + esc(builder.subject === "math" ? "Math" : "R&W") + ' questions yet.</p>';
@@ -2331,6 +2434,7 @@ window.Dashboard = (function(){
         </div>
         <h4>Questions — in the order students see them</h4>
         ${dupHtml}
+        ${retiredHtml}
         <div class="setref-list">${refsHtml}</div>
         <div class="setpick-cols">
           <div>
@@ -2411,69 +2515,93 @@ window.Dashboard = (function(){
     return "pset-" + Math.floor(Date.now() / 1000) + "-" + Math.random().toString(16).slice(2, 6);
   }
   async function saveSetFromBuilder(){
-    const name = $("sbName").value.trim().slice(0, 80);
-    if(!name){ $("sbMsg").textContent = "Give the set a name."; return; }
-    if(!builder.refs.length){ $("sbMsg").textContent = "Add at least one question."; return; }
-    builder.name = name;
-    const now = new Date().toISOString();
-    const isNew = !builder.setId;
-    const set = {
-      setId: builder.setId || newSetId(),
-      name: name,
-      subject: builder.subject,
-      refs: builder.refs,
-      createdAt: builder.createdAt || now,
-      updatedAt: now
-    };
-    const key = "pset:" + set.setId;
-    /* Server first (tutorPut): a set the server never accepted must not show
-       in this browser's list — it could be ASSIGNED from here, and the
-       student would get "set unavailable", since fn_get_set reads the server. */
-    const res = await tutorPut(key, null, set);
-    const ok = res.ok;
-    /* A live assignment carries a name/count snapshot for the student's card
-       (assignSetFromForm). Refresh it on edit so the card doesn't advertise
-       the old count. Each row is RE-READ FRESH right before it is patched
-       and only the two fields are changed on that fresh copy — never the
-       in-memory `assigns` snapshot written back wholesale. The snapshot is
-       this browser's mirror, which never drops a row deleted from another
-       browser (writing it back would resurrect a deleted assignment as a
-       startable card), and in local/artifact mode the student's
-       completeAssignment may have stamped completedAttemptId on the stored
-       row since the dashboard opened (writing the snapshot back would erase
-       it, and the assignment would reopen if the attempt were later
-       deleted). A row that is gone is dropped from the mirror, not patched.
-       Completed attempts are untouched either way: they froze their own
-       question list at begin. */
-    let patched = 0, patchFailed = 0;
-    const patchNotes = [];
-    if(ok && !isNew){
-      for(const x of assignmentsForSet(set.setId)){
-        const ak = "assign:" + x.code + ":" + x.a.assignmentId;
-        let live;
-        try{ live = await freshAssignmentRow(ak); }
-        catch(e){ patchFailed++; patchNotes.push("Couldn't read " + describeRow(ak) + " from the server."); continue; }
-        if(!live){
-          try{ await AttemptStore.remove(ak); }catch(e){}   // heal the stale mirror (server never had it)
-          continue;
-        }
-        if(live.setName === set.name && live.questionCount === set.refs.length) continue;
-        const next = Object.assign({}, live, { setName: set.name, questionCount: set.refs.length });
-        const p = await tutorPut(ak, x.code, next);   // server first; the mirror keeps `live` on rejection
-        if(p.ok){ patched++; if(p.warning) patchNotes.push(p.warning); }
-        else { patchFailed++; patchNotes.push(p.message); }
+    const b = builder;
+    if(!b || b.saving) return;           // one save at a time: a second click while this one is in flight is dropped
+    if(!$("sbName").value.trim()){ $("sbMsg").textContent = "Give the set a name."; return; }
+    if(!b.refs.length){ $("sbMsg").textContent = "Add at least one question."; return; }
+    b.saving = true;
+    try{
+      /* A retired bank item never ENTERS a set (see freshestBankIndex): every
+         bank ref the set did not already hold, as this browser last loaded
+         it, is checked against the freshest bank index before anything is
+         written. The check awaits a network read, so the builder is
+         re-verified afterwards — a set cancelled, replaced or edited in the
+         meantime is never saved from the snapshot that was checked. */
+      const keysOf = refs => JSON.stringify(refs.map(r => (r && typeof r === "object") ? refKey(r) : String(r)));
+      const prior = b.setId ? sets.find(x => x && x.setId === b.setId) : null;
+      const heldKeys = (prior && Array.isArray(prior.refs) ? prior.refs : []).filter(r => r && typeof r === "object").map(refKey);
+      const checked = keysOf(b.refs);
+      const refused = await refusedBankRefs(b.refs.slice(), heldKeys);
+      if(builder !== b) return;          // cancelled or replaced while the index was read
+      if(keysOf(b.refs) !== checked){ $("sbMsg").textContent = "The questions changed while the set was being checked — press Save set again."; return; }
+      if(refused.length){
+        $("sbMsg").textContent = "Not saved — " + (refused.length === 1 ? "this bank item" : "these bank items") + " can't be added to a set: " +
+          refused.join(", ") + ". Remove " + (refused.length === 1 ? "it" : "them") + " and save again.";
+        return;
       }
-    }
-    setsMsg = ok
-      ? (isNew ? "Created “" + set.name + "” — assign it below."
-               : "Saved “" + set.name + "”. Existing assignments use the updated set from the next sitting on; completed attempts keep their own snapshot." +
-                 (patched ? " Updated " + patched + " assignment card" + (patched === 1 ? "" : "s") + "." : "") +
-                 (patchFailed ? " " + patchFailed + " assignment card" + (patchFailed === 1 ? "" : "s") + " couldn't be updated — the question count shown to that student may be stale." : "") +
-                 (patchNotes.length ? " " + patchNotes.join(" ") : "")) +
-        (res.warning ? " " + res.warning : "")
-      : res.message;
-    if(ok){ builder = null; if(isNew) await loadSets(); else await loadAssignsAndBugs(); }
-    render();
+      const name = $("sbName").value.trim().slice(0, 80);
+      if(!name){ $("sbMsg").textContent = "Give the set a name."; return; }
+      builder.name = name;
+      const now = new Date().toISOString();
+      const isNew = !builder.setId;
+      const set = {
+        setId: builder.setId || newSetId(),
+        name: name,
+        subject: builder.subject,
+        refs: builder.refs,
+        createdAt: builder.createdAt || now,
+        updatedAt: now
+      };
+      const key = "pset:" + set.setId;
+      /* Server first (tutorPut): a set the server never accepted must not show
+         in this browser's list — it could be ASSIGNED from here, and the
+         student would get "set unavailable", since fn_get_set reads the server. */
+      const res = await tutorPut(key, null, set);
+      const ok = res.ok;
+      /* A live assignment carries a name/count snapshot for the student's card
+         (assignSetFromForm). Refresh it on edit so the card doesn't advertise
+         the old count. Each row is RE-READ FRESH right before it is patched
+         and only the two fields are changed on that fresh copy — never the
+         in-memory `assigns` snapshot written back wholesale. The snapshot is
+         this browser's mirror, which never drops a row deleted from another
+         browser (writing it back would resurrect a deleted assignment as a
+         startable card), and in local/artifact mode the student's
+         completeAssignment may have stamped completedAttemptId on the stored
+         row since the dashboard opened (writing the snapshot back would erase
+         it, and the assignment would reopen if the attempt were later
+         deleted). A row that is gone is dropped from the mirror, not patched.
+         Completed attempts are untouched either way: they froze their own
+         question list at begin. */
+      let patched = 0, patchFailed = 0;
+      const patchNotes = [];
+      if(ok && !isNew){
+        for(const x of assignmentsForSet(set.setId)){
+          const ak = "assign:" + x.code + ":" + x.a.assignmentId;
+          let live;
+          try{ live = await freshAssignmentRow(ak); }
+          catch(e){ patchFailed++; patchNotes.push("Couldn't read " + describeRow(ak) + " from the server."); continue; }
+          if(!live){
+            try{ await AttemptStore.remove(ak); }catch(e){}   // heal the stale mirror (server never had it)
+            continue;
+          }
+          if(live.setName === set.name && live.questionCount === set.refs.length) continue;
+          const next = Object.assign({}, live, { setName: set.name, questionCount: set.refs.length });
+          const p = await tutorPut(ak, x.code, next);   // server first; the mirror keeps `live` on rejection
+          if(p.ok){ patched++; if(p.warning) patchNotes.push(p.warning); }
+          else { patchFailed++; patchNotes.push(p.message); }
+        }
+      }
+      setsMsg = ok
+        ? (isNew ? "Created “" + set.name + "” — assign it below."
+                 : "Saved “" + set.name + "”. Existing assignments use the updated set from the next sitting on; completed attempts keep their own snapshot." +
+                   (patched ? " Updated " + patched + " assignment card" + (patched === 1 ? "" : "s") + "." : "") +
+                   (patchFailed ? " " + patchFailed + " assignment card" + (patchFailed === 1 ? "" : "s") + " couldn't be updated — the question count shown to that student may be stale." : "") +
+                   (patchNotes.length ? " " + patchNotes.join(" ") : "")) +
+          (res.warning ? " " + res.warning : "")
+        : res.message;
+      if(ok){ builder = null; if(isNew) await loadSets(); else await loadAssignsAndBugs(); }
+      render();
+    }finally{ b.saving = false; }
   }
   /* The freshest copy of one assignment row, or null if it no longer exists:
      the SERVER's in remote mode (this browser's mirror can hold rows deleted

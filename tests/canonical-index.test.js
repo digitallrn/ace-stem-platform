@@ -9,8 +9,22 @@
 
      a student who sat 2025 June Asia v2 (202506asiav2), then is offered
      2025 June Asia v4 (202506asiav4): every RW2 overlap the index carries
-     is derived — 15 identical items (same canonical id) and 10 reskins
+     is derived — 16 identical items (same canonical id) and 9 reskins
      (family siblings), pinned pair by pair below, none in RW1 or Math.
+
+   THE PINS ARE THE POINT. The expected pairs below are written out by hand
+   from the committed index, not derived from it, so a canonical id that
+   moves under a pinned item fails this file. Re-pin deliberately, from the
+   index, when an export legitimately changes them — and say which export.
+   History: 5b41a30 (2026-09-07) pinned 15 + 10; 28d192d (2026-09-08)
+   bumped 202506asiav2 and fixed its re2-q8 choice B OCR join "acritical"
+   -> "a critical", which made v4 re2-q7 = v2 re2-q8 EXACT (16 + 9, the
+   pair David had called identical all along); 8d45238 (2026-09-24) linked
+   202503usv1 re2-q1 to v2 re2-q4 as a reskin, so the "clean form" control
+   moved to 202511asiav1. Nobody re-pinned, and the file failed 20 checks
+   until 2026-09-30.
+   To watch a pin catch a move, point the harness at a planted index:
+     DEDUP_INDEX_SRC=<scratch>/dedup-index-planted.js node tests/canonical-index.test.js
 
    Then the contracts around it:
      1. only COMPLETED (or timed-out) attempts count; in-progress never;
@@ -19,9 +33,11 @@
      3. a SET attempt contributes its frozen snapshot refs (form and bank);
         an unknown ref is counted "unindexed" AND surfaced as a caveat,
         never silently unseen;
-     4. the builder holds ONE entry per canonical item for form questions
-        (within a form and across forms), bank rows are unaffected in BOTH
-        directions, and copies that got in anyway are called out;
+     4. the builder holds ONE entry per canonical item, form AND bank
+        questions alike (within a form, across forms, bank <-> form and
+        bank <-> bank; 2026-09-30 — until then bank rows were left out of
+        the grouping as v1 scope), symmetric in click order, and copies
+        that got in anyway are called out;
      5. provenance strings: "also in" = exact class, "reskin of" = family
         outside the class; a ruled-DISTINCT pair shares a family but not a
         canonical id;
@@ -35,7 +51,13 @@
         innerHTML site (hostile ref, family, set name, attempt id);
      8. a record-derived student code named like an Object.prototype
         property is just a code;
-     9. a retake counts each form item once per source attempt.
+     9. a retake counts each form item once per source attempt;
+    10. bank items are SEEN exactly as form items are: a form sitting marks
+        its bank twin, a set sitting's bank item marks its form twin, and
+        the picker row carries the mark and the provenance;
+    11. a RETIRED bank item never enters a set: no Add in the picker,
+        pushRef refuses it (whatever button was clicked), and a set that
+        already held one is reported and left as saved.
 
    To watch this fail on the pre-feature dashboard:
      git show 8915e95:dashboard.js > <scratch>/dashboard-pre.js
@@ -70,7 +92,9 @@ function loadScript(file){
   vm.runInContext(fs.readFileSync(file, "utf8"), ctx);
   return ctx;
 }
-const REAL_INDEX = loadScript("testdata/dedup-index.js").window.DEDUP_INDEX;
+const INDEX_PATH = process.env.DEDUP_INDEX_SRC || "testdata/dedup-index.js";
+const REAL_INDEX = loadScript(INDEX_PATH).window.DEDUP_INDEX;
+const BANK_INDEX = loadScript("testdata/bank-index.js").window.BANK_INDEX;
 const TEST_MANIFEST = loadScript("testdata/manifest.js").window.TEST_MANIFEST;
 const BANK_MANIFEST = loadScript("testdata/bank-manifest.js").window.BANK_MANIFEST;
 const escapeHtml = loadScript("render.js").escapeHtml;       // the real one: escapes & < > " '
@@ -102,8 +126,11 @@ const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled"
   "builderHeldAs", "pushRef", "builderDuplicateGroups", "builderAddRef", "refKey", "fmtDay", "nameFor",
   "studentCell", "codeOptionLabel", "formCodes",
   // tombstones (2026-09-18): the seen set and the code pickers read these
-  "tombFor", "isDeletedStudent", "isTombstoned", "deletedAttemptsOf"];
-const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI"];
+  "tombFor", "isDeletedStudent", "isTombstoned", "deletedAttemptsOf",
+  // retired bank items + the builder view itself (2026-09-30)
+  "bankEntryIn", "isRetiredBankRef", "retiredRefsOf", "retiredRefText", "bankStatusBadge", "refLabel", "stripTokens",
+  "qIndex", "ensureTestLoaded", "viewSetBuilder"];
+const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI", "qIndexes"];
 const extracted = NAMES.map(n => { try{ return [n, extractFn(src, n)]; }catch(e){ return [n, ""]; } });
 const BODY = extracted.map(x => x[1]).join("\n") + "\n" +
   CONSTS.map(n => { try{ return extractConst(src, n); }catch(e){ return ""; } }).join("\n");
@@ -141,12 +168,17 @@ function build(opts){
       /* "hang": nothing */
     } }
   };
-  const windowStub = { TEST_MANIFEST: opts.manifest || TEST_MANIFEST, BANK_MANIFEST: opts.banks || BANK_MANIFEST };
+  /* the page loads bank-index.js at startup (index.html), so the dashboard
+     always has window.BANK_INDEX — the real one here */
+  const windowStub = { TEST_MANIFEST: opts.manifest || TEST_MANIFEST, BANK_MANIFEST: opts.banks || BANK_MANIFEST,
+                       BANK_INDEX: opts.bankIndex || BANK_INDEX };
   if(opts.inlined) windowStub.DEDUP_INDEX = opts.inlined;
   const setTimeoutStub = (fn, ms) => { timers.push({ fn, ms, cleared: false }); return timers.length; };
   const clearTimeoutStub = id => { if(timers[id - 1]) timers[id - 1].cleared = true; };
-  const factory = new Function("window", "document", "$", "escapeHtml", "StudentCode", "setTimeout", "clearTimeout", "wipe", `
-    let recs = [], profiles = {}, builder = null, tab = ${JSON.stringify(opts.tab || "sets")}, tombs = {};
+  const factory = new Function("window", "document", "$", "escapeHtml", "StudentCode", "setTimeout", "clearTimeout", "wipe", "BANK_INDEX", `
+    let recs = [], profiles = {}, builder = null, tab = ${JSON.stringify(opts.tab || "sets")}, tombs = {}, sets = [];
+    let builderTestId = "", openAttemptId = null;
+    const fullTests = {}, loadingTests = {};
     const loads = { render: 0 };
     const testsById = {};
     (window.TEST_MANIFEST || []).forEach(t => { testsById[t.testId] = t; (t.legacyIds || []).forEach(old => { testsById[old] = t; }); });
@@ -163,6 +195,7 @@ function build(opts){
       state: () => ({ dedup, dedupState, dedupNote, dedupTransient, recs, builder, tab }),
       seed: o => {
         if("recs" in o) recs = o.recs; if("builder" in o) builder = o.builder; if("tab" in o) tab = o.tab;
+        if("sets" in o) sets = o.sets;
         if("profiles" in o) profiles = o.profiles;
       }
     };
@@ -172,7 +205,8 @@ function build(opts){
     el.value = ""; el.innerHTML = ""; el.checked = false;
     if(el.options) el.options.forEach(o => { o.selected = false; }); else el.selectedOptions = [];
   });
-  const d = factory(windowStub, documentStub, $, escapeHtml, StudentCode, setTimeoutStub, clearTimeoutStub, wipe);
+  const d = factory(windowStub, documentStub, $, escapeHtml, StudentCode, setTimeoutStub, clearTimeoutStub, wipe,
+    windowStub.BANK_INDEX);   // a browser page reads window globals bare too (dashboard.js says BANK_INDEX.entries)
   d.els = els; d.$ = $; d.scripts = scripts; d.timers = timers; d.window = windowStub;
   return d;
 }
@@ -187,17 +221,25 @@ function formRec(testId, status, extra){
 }
 
 /* ======================= the proof case ======================= */
+/* pinned from the committed index (f64c512, 2026-09-30) — see the header */
 const EXACT_V4_V2 = [   // 202506asiav4 RW2 item  =  its canonical on 202506asiav2
   ["re2-q1", "re2-q1"], ["re2-q2", "re2-q2"], ["re2-q3", "re2-q3"], ["re2-q4", "re2-q4"],
-  ["re2-q6", "re2-q7"], ["re2-q11", "re2-q12"], ["re2-q12", "re2-q14"], ["re2-q13", "re2-q15"],
-  ["re2-q14", "re2-q16"], ["re2-q15", "re2-q17"], ["re2-q17", "re2-q19"], ["re2-q18", "re2-q20"],
-  ["re2-q20", "re2-q22"], ["re2-q21", "re2-q23"], ["re2-q22", "re2-q24"]
+  ["re2-q6", "re2-q7"], ["re2-q7", "re2-q8"], ["re2-q11", "re2-q12"], ["re2-q12", "re2-q14"],
+  ["re2-q13", "re2-q15"], ["re2-q14", "re2-q16"], ["re2-q15", "re2-q17"], ["re2-q17", "re2-q19"],
+  ["re2-q18", "re2-q20"], ["re2-q20", "re2-q22"], ["re2-q21", "re2-q23"], ["re2-q22", "re2-q24"]
 ];
 const SKELETON_V4_V2 = [   // 202506asiav4 RW2 item  ~  its reskin on 202506asiav2
-  ["re2-q5", "re2-q6"], ["re2-q7", "re2-q8"], ["re2-q8", "re2-q9"], ["re2-q9", "re2-q10"],
-  ["re2-q10", "re2-q11"], ["re2-q16", "re2-q18"], ["re2-q19", "re2-q21"], ["re2-q24", "re2-q25"],
-  ["re2-q26", "re2-q26"], ["re2-q27", "re2-q27"]
+  ["re2-q5", "re2-q6"], ["re2-q8", "re2-q9"], ["re2-q9", "re2-q10"], ["re2-q10", "re2-q11"],
+  ["re2-q16", "re2-q18"], ["re2-q19", "re2-q21"], ["re2-q24", "re2-q25"], ["re2-q26", "re2-q26"],
+  ["re2-q27", "re2-q27"]
 ];
+/* a form that shares NOTHING with 202506asiav2 — no class, no family */
+const CLEAN_VS_V2 = "202511asiav1";
+/* the bank <-> form class the 2026-09-30 grouping exists for */
+const BANK_TWIN = "bank-202608-salvage:q0049", FORM_TWIN = "202412usv2:re2-q25";
+/* a bank <-> bank class: q0032 was retired 2026-09-12 as supersededBy q0202 */
+const RETIRED = "bank-202608-salvage:q0032", REMINT = "bank-202608-salvage:q0202";
+const bankRef = k => ({ type: "bank", bankId: k.split(":")[0], qid: k.split(":")[1] });
 console.log("--- proof: 202506asiav4 offered after a completed 202506asiav2 sitting ---");
 run("proof", () => {
   const d = build({ inlined: REAL_INDEX });
@@ -211,34 +253,36 @@ run("proof", () => {
     o && JSON.stringify({ total: o.total, attempts: o.attempts, caveat: o.caveat }));
   const seenPairs = o.seenItems.map(x => [x.ref.split(":")[1], x.via[0].ref.split(":")[1]]).sort();
   check(JSON.stringify(seenPairs) === JSON.stringify(EXACT_V4_V2.slice().sort()),
-    "SEEN: exactly the 15 identical RW2 items, each traced to its 202506asiav2 canonical", "got " + JSON.stringify(seenPairs));
+    "SEEN: exactly the 16 identical RW2 items, each traced to its 202506asiav2 canonical", "got " + JSON.stringify(seenPairs));
   const reskinPairs = o.reskinItems.map(x => [x.ref.split(":")[1], x.via[0].ref.split(":")[1]]).sort();
   check(JSON.stringify(reskinPairs) === JSON.stringify(SKELETON_V4_V2.slice().sort()),
-    "RESKIN: exactly the 10 family siblings in RW2, each traced to its 202506asiav2 reskin", "got " + JSON.stringify(reskinPairs));
+    "RESKIN: exactly the 9 family siblings in RW2, each traced to its 202506asiav2 reskin", "got " + JSON.stringify(reskinPairs));
   check(o.seenItems.concat(o.reskinItems).every(x => x.ref.indexOf("202506asiav4:re2-") === 0),
     "nothing outside RW2 is flagged (RW1 and both Math modules are clean between these forms)");
-  check(o.sources.length === 1 && o.sources[0].seen === 15 && o.sources[0].reskin === 10 &&
+  check(o.sources.length === 1 && o.sources[0].seen === 16 && o.sources[0].reskin === 9 &&
         o.sources[0].att.name === nameOf("202506asiav2") && o.sources[0].att.status === "completed",
-    "the source attempt is named from the MANIFEST (not the record's testName) with 15 identical / 10 reskin", JSON.stringify(o.sources));
+    "the source attempt is named from the MANIFEST (not the record's testName) with 16 identical / 9 reskin", JSON.stringify(o.sources));
   const seen = d.fns.seenSetFor(CODE);
   const c = d.fns.seenCounts(d.fns.formRefs("202506asiav4"), seen);
-  check(c.seen === 15 && c.reskin === 10 && c.unseen === 73 && c.unindexed === 0 && c.total === 98,
-    "seenCounts over the whole form: 15 seen · 10 reskin · 73 unseen · 0 not indexed", JSON.stringify(c));
-  check(d.fns.countsText(c) === "15 seen · 10 reskin · 73 unseen", "countsText omits the not-indexed clause when zero", d.fns.countsText(c));
-  const m13 = d.fns.markFor("202506asiav4:re2-q13", seen), m7 = d.fns.markFor("202506asiav4:re2-q7", seen), m30 = d.fns.markFor("202506asiav4:re1-q1", seen);
-  check(m13.mark === "seen" && m13.via[0].ref === "202506asiav2:re2-q15" && m7.mark === "reskin" && m7.via[0].ref === "202506asiav2:re2-q8" && m30.mark === "unseen",
-    "markFor: re2-q13 seen (via v2 re2-q15), re2-q7 reskin (via v2 re2-q8), re1-q1 unseen");
+  check(c.seen === 16 && c.reskin === 9 && c.unseen === 73 && c.unindexed === 0 && c.total === 98,
+    "seenCounts over the whole form: 16 seen · 9 reskin · 73 unseen · 0 not indexed", JSON.stringify(c));
+  check(d.fns.countsText(c) === "16 seen · 9 reskin · 73 unseen", "countsText omits the not-indexed clause when zero", d.fns.countsText(c));
+  const m13 = d.fns.markFor("202506asiav4:re2-q13", seen), m7 = d.fns.markFor("202506asiav4:re2-q7", seen),
+        m5 = d.fns.markFor("202506asiav4:re2-q5", seen), m30 = d.fns.markFor("202506asiav4:re1-q1", seen);
+  check(m13.mark === "seen" && m13.via[0].ref === "202506asiav2:re2-q15" && m7.mark === "seen" && m7.via[0].ref === "202506asiav2:re2-q8" &&
+        m5.mark === "reskin" && m5.via[0].ref === "202506asiav2:re2-q6" && m30.mark === "unseen",
+    "markFor: re2-q13 seen (via v2 re2-q15), re2-q7 seen (via v2 re2-q8, EXACT since 28d192d), re2-q5 reskin (via v2 re2-q6), re1-q1 unseen");
   const html = d.fns.assignOverlapHtml([CODE], "202506asiav4");
   check(html.indexOf("has already seen 25 of " + nameOf("202506asiav4") + "’s 98 items") !== -1 &&
-        html.indexOf("15 identical (same canonical id) and 10 reskin items (family siblings)") !== -1 &&
+        html.indexOf("16 identical (same canonical id) and 9 reskin items (family siblings)") !== -1 &&
         html.indexOf("nothing is excluded automatically") !== -1,
-    "the assignment warning reads 25 of 98 — 15 identical, 10 reskin items — and says nothing is excluded", html.slice(0, 400));
+    "the assignment warning reads 25 of 98 — 16 identical, 9 reskin items — and says nothing is excluded", html.slice(0, 400));
   const notes = d.fns.overlapNotes([CODE], "202506asiav4");
-  check(notes.length === 1 && notes[0] === CODE + " had already seen 25 of its 98 items (15 identical, 10 reskin).",
+  check(notes.length === 1 && notes[0] === CODE + " had already seen 25 of its 98 items (16 identical, 9 reskin).",
     "status-line note after Create assignment repeats the overlap", JSON.stringify(notes));
-  const none = d.fns.overlapFor(CODE, "202503usv1");
-  check(!!none && none.seenItems.length === 0 && none.reskinItems.length === 0,
-    "control: 2025 March US v1 shares nothing with 202506asiav2 — zero overlap");
+  const none = d.fns.overlapFor(CODE, CLEAN_VS_V2);
+  check(!!none && none.total === 98 && none.seenItems.length === 0 && none.reskinItems.length === 0,
+    "control: " + nameOf(CLEAN_VS_V2) + " shares nothing with 202506asiav2 — zero overlap over its 98 indexed items");
   const mh = d.fns.markHtml(m13);
   const whenText = d.fns.attemptLabel(formRec("202506asiav2")).whenText;   // locale-formatted by fmtDay; never "—" for a real date
   check(mh.indexOf('class="dstatus to canon-mark seen"') !== -1 && whenText !== "—" && mh.split("completed " + whenText).length - 1 === 2,
@@ -253,9 +297,9 @@ run("completed-only", () => {
   const o = d.fns.overlapFor(CODE, "202506asiav4");
   check(o.attempts === 0 && o.seenItems.length === 0 && o.reskinItems.length === 0, "an in-progress sitting contributes nothing (attempts 0, no items)");
   d.seed({ recs: [formRec("202506asiav2", "timed-out")] });
-  check(d.fns.overlapFor(CODE, "202506asiav4").attempts === 1 && d.fns.overlapFor(CODE, "202506asiav4").seenItems.length === 15, "a timed-out sitting counts as completed");
+  check(d.fns.overlapFor(CODE, "202506asiav4").attempts === 1 && d.fns.overlapFor(CODE, "202506asiav4").seenItems.length === 16, "a timed-out sitting counts as completed");
   d.seed({ recs: [Object.assign(formRec("202506asiav2"), { student: { code: OTHER, key: OTHER } })] });
-  check(d.fns.overlapFor(CODE, "202506asiav4").attempts === 0 && d.fns.overlapFor(OTHER, "202506asiav4").seenItems.length === 15,
+  check(d.fns.overlapFor(CODE, "202506asiav4").attempts === 0 && d.fns.overlapFor(OTHER, "202506asiav4").seenItems.length === 16,
     "the seen set is per student — another code's sitting never marks this one");
   check(d.fns.seenSetFor("") === null, "no student selected -> no seen set (marks off, not 'all unseen')");
   d.seed({ recs: [Object.assign(formRec("202506asiav2"), { answers: "not a map" })] });
@@ -326,45 +370,56 @@ run("set-attempt", () => {
   check(JSON.stringify(d.fns.attemptRefs(noSnap)) === JSON.stringify(["202506asiav2:re2-q15", "junk"]), "a set record with no snapshot falls back to its answer keys");
 });
 
-console.log("--- 4. builder: one entry per canonical item (form questions), bank unaffected both ways ---");
+console.log("--- 4. builder: one entry per canonical item — form and bank questions alike ---");
 run("builder", () => {
   const d = build({ inlined: REAL_INDEX });
   d.fns.ensureDedupLoaded();
-  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [{ type: "form", testId: "202506asiav2", moduleId: "m", qid: "re2-q15" }] } });
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [{ type: "form", testId: "202506asiav2", moduleId: "m", qid: "re2-q15" },
+                                                                  { type: "form", testId: "202506asiav2", moduleId: "m", qid: "re2-q11" }] } });
   const cand13 = { type: "form", testId: "202506asiav4", moduleId: "m", qid: "re2-q13" };
+  const reskin10 = { type: "form", testId: "202506asiav4", moduleId: "m", qid: "re2-q10" };     // family sibling of v2 re2-q11, in the set
   check(d.fns.builderHeldAs(cand13) === "202506asiav2:re2-q15", "builderHeldAs: v4 re2-q13's exact class is held by v2 re2-q15");
-  check(d.fns.builderHeldAs({ type: "form", testId: "202506asiav4", moduleId: "m", qid: "re2-q7" }) === null, "a reskin (family, not class) is NOT held");
+  check(d.fns.builderHeldAs(reskin10) === null, "a reskin of an item in the set (family, not class: v4 re2-q10 ~ v2 re2-q11) is NOT held");
   d.fns.builderAddRef(cand13);
-  check(d.state().builder.refs.length === 1 && d.loads.render === 0, "builderAddRef refuses a second member of a held canonical class (no push, no render)");
-  d.fns.builderAddRef({ type: "form", testId: "202506asiav4", moduleId: "m", qid: "re2-q7" });
-  check(d.state().builder.refs.length === 2 && d.loads.render === 1, "a reskin is a different canonical item — it can be added (one render)");
+  check(d.state().builder.refs.length === 2 && d.loads.render === 0, "builderAddRef refuses a second member of a held canonical class (no push, no render)");
+  d.fns.builderAddRef(reskin10);
+  check(d.state().builder.refs.length === 3 && d.loads.render === 1, "a reskin is a different canonical item — it can be added (one render)");
   check(d.fns.builderHeldAs({ type: "form", testId: "202506asiav2", moduleId: "m", qid: "re2-q15" }) === "202506asiav2:re2-q15", "a ref already in the set is held by its own key");
   d.seed({ builder: { setId: null, name: "", subject: "math", refs: [{ type: "form", testId: "202512usv2", moduleId: "m", qid: "ma1-q4" }] } });
   check(d.fns.builderHeldAs({ type: "form", testId: "202512usv2", moduleId: "m", qid: "ma1-q11" }) === "202512usv2:ma1-q4",
     "within-form duplicate: 202512usv2 ma1-q11 is held by ma1-q4 (dup-ack pair)");
-  /* bank unaffected in BOTH directions: a synthetic index where a bank item
-     is an exact duplicate of a form item */
-  const synth = { items: { "202506asiav2:ma1-q1": { canonical: "202506asiav2:ma1-q1" },
-                           "bank-david-core:q0001": { canonical: "202506asiav2:ma1-q1" } },
-                  reference: { forms: [], banks: [] } };
-  const d2 = build({ inlined: synth });
-  d2.fns.ensureDedupLoaded();
-  d2.seed({ builder: { setId: null, name: "", subject: "math", refs: [{ type: "form", testId: "202506asiav2", moduleId: "m", qid: "ma1-q1" }] } });
-  check(d2.fns.pushRef({ type: "bank", bankId: "bank-david-core", qid: "q0001" }) === true && d2.state().builder.refs.length === 2,
-    "form held, bank copy offered: the bank ref still adds (bank rows are unaffected)");
-  check(d2.fns.pushRef({ type: "bank", bankId: "bank-david-core", qid: "q0001" }) === false && d2.state().builder.refs.length === 2, "plain duplicate refs are still refused");
-  d2.seed({ builder: { setId: null, name: "", subject: "math", refs: [{ type: "bank", bankId: "bank-david-core", qid: "q0001" }] } });
-  check(d2.fns.builderHeldAs({ type: "form", testId: "202506asiav2", moduleId: "m", qid: "ma1-q1" }) === null &&
-        d2.fns.pushRef({ type: "form", testId: "202506asiav2", moduleId: "m", qid: "ma1-q1" }) === true,
-    "bank held, form copy offered: the form ref still adds — the outcome does not depend on click order");
+  /* bank questions take part (2026-09-30), BOTH ways, on the real index's
+     bank/form class: bank-202608-salvage q0049 = 2024 December US v2 re2-q25 */
+  const formTwin = { type: "form", testId: FORM_TWIN.split(":")[0], moduleId: "m", qid: FORM_TWIN.split(":")[1] };
+  check(!!REAL_INDEX.items[BANK_TWIN] && !!REAL_INDEX.items[FORM_TWIN] && REAL_INDEX.items[BANK_TWIN].canonical === REAL_INDEX.items[FORM_TWIN].canonical,
+    "PIN: the index puts " + BANK_TWIN + " and " + FORM_TWIN + " in one exact class");
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [formTwin] } });
+  check(d.fns.builderHeldAs(bankRef(BANK_TWIN)) === FORM_TWIN && d.fns.pushRef(bankRef(BANK_TWIN)) === false && d.state().builder.refs.length === 1,
+    "form held, bank twin offered: the bank ref is held AS the form ref and refused");
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [bankRef(BANK_TWIN)] } });
+  check(d.fns.builderHeldAs(formTwin) === BANK_TWIN && d.fns.pushRef(formTwin) === false && d.state().builder.refs.length === 1,
+    "bank held, form twin offered: the form ref is held AS the bank ref and refused — the same outcome in either click order");
+  check(d.fns.pushRef(bankRef(BANK_TWIN)) === false && d.state().builder.refs.length === 1, "a plain duplicate bank ref is still refused");
+  /* an unrelated active RW bank item (a class of one) still adds */
+  const classSize = ref => Object.keys(REAL_INDEX.items).filter(k => REAL_INDEX.items[k].canonical === REAL_INDEX.items[ref].canonical).length;
+  const loner = BANK_INDEX.entries.find(e => e.subject === "rw" && !e.retired && REAL_INDEX.items[e.ref] && classSize(e.ref) === 1);
+  check(!!loner && d.fns.pushRef(bankRef(loner.ref)) === true && d.state().builder.refs.length === 2,
+    "an unrelated active bank item (" + (loner && loner.ref) + ", a class of one) still adds");
+  /* bank <-> bank: a set saved before q0032 was retired holds its re-mint's class */
+  check(!!REAL_INDEX.items[REMINT] && REAL_INDEX.items[REMINT].canonical === RETIRED, "PIN: the index makes " + REMINT + " an exact duplicate of " + RETIRED);
+  d.seed({ builder: { setId: "pset-legacy", name: "", subject: "rw", refs: [bankRef(RETIRED)] } });
+  check(d.fns.builderHeldAs(bankRef(REMINT)) === RETIRED && d.fns.pushRef(bankRef(REMINT)) === false,
+    "bank <-> bank: a set holding the retired q0032 already holds q0202's class, so q0202 is refused as a second copy");
   /* copies that got in anyway (index not loaded at the time) are called out */
   d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [
     { type: "form", testId: "202506asiav2", moduleId: "m", qid: "re2-q15" },
     { type: "form", testId: "202506asiav4", moduleId: "m", qid: "re2-q13" },
-    { type: "form", testId: "202506asiav4", moduleId: "m", qid: "re2-q7" }] } });
+    { type: "form", testId: "202506asiav4", moduleId: "m", qid: "re2-q10" },
+    bankRef(BANK_TWIN), formTwin] } });
   const groups = d.fns.builderDuplicateGroups();
-  check(groups.length === 1 && JSON.stringify(groups[0]) === JSON.stringify(["202506asiav2:re2-q15", "202506asiav4:re2-q13"]),
-    "builderDuplicateGroups names the two members of one class and ignores the singleton", JSON.stringify(groups));
+  check(groups.length === 2 && JSON.stringify(groups[0]) === JSON.stringify(["202506asiav2:re2-q15", "202506asiav4:re2-q13"]) &&
+        JSON.stringify(groups[1]) === JSON.stringify([BANK_TWIN, FORM_TWIN]),
+    "builderDuplicateGroups names each class held twice — form/form AND bank/form — and ignores the singleton", JSON.stringify(groups));
   const d3 = build({ fetch: "error" });
   d3.seed({ builder: { setId: null, name: "", subject: "rw", refs: [{ type: "form", testId: "202506asiav2", moduleId: "m", qid: "re2-q15" }] } });
   d3.fns.ensureDedupLoaded();
@@ -380,10 +435,12 @@ run("provenance", () => {
     "canonInfo: v4 re2-q13 -> canonical v2 re2-q15, alsoIn = [that], no reskins", JSON.stringify(ci));
   check(d.fns.provHtml("202506asiav4:re2-q13") === '<span class="canon-prov">also in ' + nameOf("202506asiav2") + " re2-q15</span>",
     "provHtml: 'also in 2025 June Asia v2 re2-q15'", d.fns.provHtml("202506asiav4:re2-q13"));
-  const c7 = d.fns.canonInfo("202506asiav4:re2-q7");
-  check(c7.alsoIn.length === 0 && JSON.stringify(c7.reskins) === JSON.stringify(["202506asiav2:re2-q8"]) &&
-        d.fns.provHtml("202506asiav4:re2-q7") === '<span class="canon-prov reskin">reskin of ' + nameOf("202506asiav2") + " re2-q8</span>",
-    "provHtml: 'reskin of 2025 June Asia v2 re2-q8' for a skeleton sibling");
+  const c10 = d.fns.canonInfo("202506asiav4:re2-q10");
+  check(c10.alsoIn.length === 0 && JSON.stringify(c10.reskins) === JSON.stringify(["202506asiav2:re2-q11"]) &&
+        d.fns.provHtml("202506asiav4:re2-q10") === '<span class="canon-prov reskin">reskin of ' + nameOf("202506asiav2") + " re2-q11</span>",
+    "provHtml: 'reskin of 2025 June Asia v2 re2-q11' for a skeleton sibling");
+  check(JSON.stringify(d.fns.canonInfo("202506asiav4:re2-q7").alsoIn) === JSON.stringify(["202506asiav2:re2-q8"]),
+    "v4 re2-q7 is 'also in' v2 re2-q8 — one exact class since the 'acritical' fix (28d192d)");
   const cv2 = d.fns.canonInfo("202506asiav2:re2-q15");
   check(cv2.canonical === "202506asiav2:re2-q15" && JSON.stringify(cv2.alsoIn) === JSON.stringify(["202506asiav4:re2-q13"]), "the canonical member lists its later duplicate as 'also in'");
   check(d.fns.provHtml("202506asiav4:re1-q1") === "", "a singleton has no provenance");
@@ -445,12 +502,12 @@ run("degrade", () => {
   d4.scripts[0].onload();
   check(d4.state().dedupState === "failed", "the late onload itself is latched out (done), state unchanged");
   d4.fns.ensureDedupLoaded();
-  check(d4.state().dedupState === "ready" && d4.scripts.length === 1 && d4.fns.overlapFor(CODE, "202506asiav4").seenItems.length === 15,
+  check(d4.state().dedupState === "ready" && d4.scripts.length === 1 && d4.fns.overlapFor(CODE, "202506asiav4").seenItems.length === 16,
     "the next render adopts the late-arriving index from memory — no second fetch, marks on");
   const d5 = build({ fetch: "ok", fetched: REAL_INDEX });
   d5.seed({ recs: [formRec("202506asiav2")] });
   d5.fns.ensureDedupLoaded();
-  check(d5.state().dedupState === "ready" && d5.loads.render === 1 && d5.fns.overlapFor(CODE, "202506asiav4").seenItems.length === 15,
+  check(d5.state().dedupState === "ready" && d5.loads.render === 1 && d5.fns.overlapFor(CODE, "202506asiav4").seenItems.length === 16,
     "a fetched index -> ready, one re-render, same derivation as inlined");
   check(d5.fns.dedupNoticeHtml() === "", "ready and covering every manifest test/bank at its shipped version -> no notice at all");
   /* an async settle must not wipe what the tutor typed, on any tab */
@@ -493,7 +550,8 @@ run("degrade", () => {
   d9.seed({ recs: [formRec("202506asiav2"), futureRec] });
   d9.fns.ensureDedupLoaded();
   const notice = d9.fns.dedupNoticeHtml();
-  check(notice.indexOf("predates 2099 January US v1") !== -1 && notice.indexOf("different build of " + nameOf("202506asiav2") + " (index 2026-09-04-a, library 2099-01-01-a)") !== -1 &&
+  const v2Indexed = REAL_INDEX.reference.forms.find(x => x.testId === "202506asiav2").testVersion;   // the notice's format is the check, not the version
+  check(notice.indexOf("predates 2099 January US v1") !== -1 && notice.indexOf("different build of " + nameOf("202506asiav2") + " (index " + v2Indexed + ", library 2099-01-01-a)") !== -1 &&
         (notice.match(/canon-notice/g) || []).length === 1,
     "one notice names both the test the index predates and the test it was built against a different version of", notice);
   const seen9 = d9.fns.seenSetFor(CODE);
@@ -501,8 +559,8 @@ run("degrade", () => {
   const o9 = d9.fns.overlapFor(CODE, "209901usv1");
   check(o9.total === 0 && o9.seenItems.length === 0 && d9.fns.assignOverlapHtml([CODE], "209901usv1").indexOf("is not in the canonical-id index, so nothing can be compared") !== -1,
     "offering the unindexed form: 0 of 0 reads as 'not in the index', never 'none of its 0 items'");
-  const h9 = d9.fns.assignOverlapHtml([CODE], "202503usv1");
-  check(h9.indexOf("none of " + nameOf("202503usv1") + "’s 98 items appear in their 2 completed attempts") !== -1 && h9.indexOf("2 questions from 1 of their 2 completed attempts are not in the index") !== -1,
+  const h9 = d9.fns.assignOverlapHtml([CODE], CLEAN_VS_V2);
+  check(h9.indexOf("none of " + nameOf(CLEAN_VS_V2) + "’s 98 items appear in their 2 completed attempts") !== -1 && h9.indexOf("2 questions from 1 of their 2 completed attempts are not in the index") !== -1,
     "offering a clean form: the 'none' line carries the caveat that part of the history could not be compared", h9);
   check(d9.fns.markFor("209901usv1:re1-q1", seen9).mark === "unindexed", "its questions mark 'unindexed', never 'unseen'");
 });
@@ -553,7 +611,7 @@ run("proto-keys", () => {
     d.fns.ensureDedupLoaded();
     const seen = d.fns.seenSetFor(bad);
     const o = d.fns.overlapFor(bad, "202506asiav4");
-    check(!!seen && seen.attempts === 1 && !!o && o.seenItems.length === 15 && d.fns.assignOverlapHtml([bad], "202506asiav4").indexOf("has already seen 25 of") !== -1 &&
+    check(!!seen && seen.attempts === 1 && !!o && o.seenItems.length === 16 && d.fns.assignOverlapHtml([bad], "202506asiav4").indexOf("has already seen 25 of") !== -1 &&
           d.fns.overlapNotes([bad], "202506asiav4").length === 1,
       "a student key of \"" + bad + "\" is just a code: seen set, overlap, block and status note all work");
   });
@@ -576,6 +634,82 @@ run("retake", () => {
     "the within-form dup-ack pair (ma1-q4 = ma1-q11) is counted once per item, so the source line's count equals the item count", JSON.stringify(o.sources.map(s => s.seen)));
   const m11 = d.fns.markFor("202512usv2:ma1-q11", d.fns.seenSetFor(CODE));
   check(m11.mark === "seen" && m11.via.length === 2, "the duplicated item was seen twice in that sitting (both refs are provenance)");
+});
+
+console.log("--- 10. bank items are seen exactly as form items are ---");
+run("bank-seen", () => {
+  const d = build({ inlined: REAL_INDEX });
+  d.fns.ensureDedupLoaded();
+  d.seed({ recs: [formRec(FORM_TWIN.split(":")[0])] });
+  const s1 = d.fns.seenSetFor(CODE);
+  const mb = d.fns.markFor(BANK_TWIN, s1);
+  check(mb.mark === "seen" && mb.via[0].ref === FORM_TWIN && mb.via[0].att.name === nameOf(FORM_TWIN.split(":")[0]),
+    "a completed 2024 December US v2 sitting marks its bank twin q0049 SEEN (via re2-q25, named from the manifest)", JSON.stringify(mb));
+  const setRec = { attemptId: "attempt:pset-b:1700000002:s1", student: { code: CODE, key: CODE }, kind: "set",
+    testId: "pset-b", setId: "pset-b", setName: "Bank warm-up", testName: "Bank warm-up", status: "completed", submittedAt: "2026-09-29T09:00:00.000Z",
+    setQuestions: [{ ref: BANK_TWIN, source: "bank", bankId: BANK_TWIN.split(":")[0], qid: BANK_TWIN.split(":")[1], bankVersion: "x" },
+                   { ref: RETIRED, source: "bank", bankId: RETIRED.split(":")[0], qid: RETIRED.split(":")[1], bankVersion: "x" }],
+    answers: {} };
+  d.seed({ recs: [setRec] });
+  const s2 = d.fns.seenSetFor(CODE);
+  const mf = d.fns.markFor(FORM_TWIN, s2);
+  check(mf.mark === "seen" && mf.via[0].ref === BANK_TWIN && mf.via[0].att.name === "Bank warm-up" && s2.unindexed === 0,
+    "a completed SET that served bank q0049 marks its form twin 202412usv2 re2-q25 SEEN, named after the set", JSON.stringify(mf));
+  const o = d.fns.overlapFor(CODE, FORM_TWIN.split(":")[0]);
+  check(o.seenItems.length === 1 && o.seenItems[0].ref === FORM_TWIN && o.sources.length === 1 && o.sources[0].att.name === "Bank warm-up" && o.sources[0].seen === 1,
+    "…and assigning 2024 December US v2 warns: 1 identical item, sourced to that set", JSON.stringify(o.sources.map(x => [x.att.name, x.seen])));
+  check(d.fns.markFor(REMINT, s2).mark === "seen" && d.fns.markFor(REMINT, s2).via[0].ref === RETIRED,
+    "bank <-> bank: a set that served q0032 marks its re-mint q0202 seen");
+  check(d.fns.seenCounts(d.fns.setRefKeys({ refs: [formTwin(), bankRef(BANK_TWIN)] }), s2).seen === 2,
+    "a saved set holding either twin counts it seen in the Sets list's Seen column");
+  check(d.fns.provHtml(BANK_TWIN) === '<span class="canon-prov">also in ' + nameOf(FORM_TWIN.split(":")[0]) + " " + FORM_TWIN.split(":")[1] + "</span>",
+    "provHtml on the bank ref: 'also in 2024 December US v2 re2-q25'", d.fns.provHtml(BANK_TWIN));
+  check(d.fns.provHtml(FORM_TWIN) === '<span class="canon-prov">also in bank-202608-salvage q0049</span>',
+    "provHtml on the form ref: 'also in bank-202608-salvage q0049'", d.fns.provHtml(FORM_TWIN));
+  function formTwin(){ return { type: "form", testId: FORM_TWIN.split(":")[0], moduleId: "m", qid: FORM_TWIN.split(":")[1] }; }
+});
+
+console.log("--- 11. a retired bank item never enters a set ---");
+run("retired", () => {
+  const d = build({ inlined: REAL_INDEX });
+  d.fns.ensureDedupLoaded();
+  const formTwin = { type: "form", testId: FORM_TWIN.split(":")[0], moduleId: "m", qid: FORM_TWIN.split(":")[1] };
+  check(d.fns.isRetiredBankRef(bankRef(RETIRED)) === true && d.fns.isRetiredBankRef(bankRef(REMINT)) === false && d.fns.isRetiredBankRef(formTwin) === false &&
+        d.fns.isRetiredBankRef(null) === false && d.fns.isRetiredBankRef(bankRef("bank-nowhere:q1")) === false,
+    "isRetiredBankRef reads the loaded BANK_INDEX: q0032 retired, q0202 active; form refs, null and unknown refs are not 'retired'");
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] } });
+  d.fns.builderAddRef(bankRef(RETIRED));
+  check(d.fns.pushRef(bankRef(RETIRED)) === false && d.state().builder.refs.length === 0 && d.loads.render === 0,
+    "pushRef/builderAddRef refuse a retired bank item — a click on a stale Add button changes nothing");
+  const rows = html => html.split('<div class="setpick-row').slice(1);
+  const rowOf = (html, ref) => rows(html).find(r => r.indexOf("<b>" + ref + "</b>") !== -1) || "";
+  const h1 = d.fns.viewSetBuilder();
+  const rwEntries = BANK_INDEX.entries.filter(e => e.subject === "rw");
+  const retiredRw = rwEntries.filter(e => e.retired), activeRw = rwEntries.filter(e => !e.retired);
+  const retiredWithButton = retiredRw.filter(e => /class="dash-rel pick-bank"/.test(rowOf(h1, e.ref)));
+  const activeWithButton = activeRw.filter(e => /class="dash-rel pick-bank"/.test(rowOf(h1, e.ref)));
+  check(retiredRw.length > 0 && retiredWithButton.length === 0,
+    "picker: none of the " + retiredRw.length + " retired RW rows carries an Add button", retiredWithButton.map(e => e.ref).join(", "));
+  check(activeWithButton.length === activeRw.length, "picker: every one of the " + activeRw.length + " active RW rows still does");
+  check(rowOf(h1, RETIRED).indexOf("Retired — can’t be added; use q0202") !== -1 && /is-retired/.test(rowOf(h1, RETIRED)),
+    "picker: q0032's row says it is retired and names its replacement", rowOf(h1, RETIRED));
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [formTwin] } });
+  const h2 = d.fns.viewSetBuilder();
+  const twinRow = rowOf(h2, BANK_TWIN);
+  check(/<button class="dash-rel pick-bank"[^>]*disabled[^>]*>In set as 2024 December US v2 re2-q25<\/button>/.test(twinRow.replace(/\s+/g, " ")) &&
+        twinRow.indexOf("also in " + nameOf(FORM_TWIN.split(":")[0]) + " re2-q25") !== -1 && /is-held/.test(twinRow),
+    "picker: with its form twin in the set, q0049 reads 'In set as 2024 December US v2 re2-q25' (disabled) and carries the provenance", twinRow);
+  const own = rowOf(h2, REMINT);
+  check(/>Add<\/button>/.test(own), "picker: an unrelated active row still reads Add", own);
+  /* a set that already held the retired item: reported, kept, never changed */
+  const legacy = { setId: "pset-legacy", name: "Old warm-up", subject: "rw", refs: [bankRef(RETIRED), bankRef(BANK_TWIN)] };
+  d.seed({ builder: JSON.parse(JSON.stringify(legacy)) });
+  const h3 = d.fns.viewSetBuilder();
+  check(/class="retired-notice rv-notice warn">This set holds a retired bank item, kept as saved: bank-202608-salvage:q0032 → q0202\./.test(h3) &&
+        rowOf(h3, RETIRED).indexOf("In set · retired") !== -1 && JSON.stringify(d.state().builder.refs) === JSON.stringify(legacy.refs),
+    "builder: a set that held q0032 before it was retired says so, shows it 'In set · retired', and keeps it untouched", (h3.match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0]);
+  check(d.fns.retiredRefsOf(legacy.refs).length === 1 && d.fns.retiredRefsOf([null, "junk", 7, bankRef(BANK_TWIN)]).length === 0,
+    "retiredRefsOf finds exactly the retired refs and skips malformed ones");
 });
 
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);
