@@ -3015,7 +3015,10 @@ window.Dashboard = (function(){
       await loadAssignsAndBugs();              // `assigns` holds the new cards before the lock comes off
     }finally{
       setSaveInFlight = Math.max(0, setSaveInFlight - 1);
-      renderKeepingInputs();
+      /* a PLAIN render, as before the lock: it empties the form, so pressing
+         Assign again can't re-send codes that already landed (each would get
+         a duplicate card); the outcome survives in saMsg, which it re-emits */
+      render();
     }
   }
   function builderAddRef(ref){

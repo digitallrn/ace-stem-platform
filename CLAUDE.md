@@ -405,17 +405,24 @@ record-derived value.
   snapshot it checked, and a PAGE-wide lock (`setSaveInFlight`) keeps the
   Sets list's Edit / Delete / New set off until the save — and its reload
   of `sets` — has settled, even if the tutor pressed Cancel. The lock works
-  BOTH ways: every control that writes a `pset:` row or deletes/creates an
-  `assign:` row — Save set, set Delete, Assign set, Clear all assignments,
-  an assignment Delete — refuses while it is held AND takes it for its own
-  writes (and its reload of `sets`/`assigns`, before releasing), so none can
-  interleave with another (a save's card patch would write a just-deleted
-  card back, Assign set would stamp a pre-save name/count, a Save during an
-  Assign would miss the new cards). A builder open on a set that a Delete
-  removes becomes an unsaved NEW set (as with a set gone elsewhere). Any new
-  such control must do the same, in its function AND its button — the
-  tutor-writes suite runs the dashboard's REAL `loadSets`/
-  `loadAssignsAndBugs`, so these checks can't lean on hand-seeded state.
+  BOTH ways for exactly these five controls — Save set, set Delete, Assign
+  set, Clear all assignments, an assignment Delete: each refuses while it is
+  held AND takes it for its own writes (and its reload of `sets`/`assigns`,
+  before releasing), so none of them interleaves with another (a save's
+  card patch would write a just-deleted card back, Assign set would stamp a
+  pre-save name/count, a Save during an Assign would miss the new cards). A
+  builder open on a set that a Delete removes becomes an unsaved NEW set (as
+  with a set gone elsewhere). Assign set empties its form afterwards, so a
+  second press can't duplicate cards that landed. Deliberately OUTSIDE the
+  lock: Create assignment (test cards — no set card patch touches them),
+  Save name only, and the Phase H upload. Create can still interleave with a
+  Clear all on the same student (pre-existing): the table, reloaded after
+  both, is the truth, not the last status line. A new control that writes a
+  `pset:` row or a set card, or deletes `assign:` rows, must join the lock in
+  its function AND its button — the tutor-writes suite runs the dashboard's
+  REAL `loadSets`/`loadAssignsAndBugs` (a gated case can't hang it silently:
+  a drained event loop reports HARNESS HUNG and exits 2), so these checks
+  can't lean on hand-seeded state.
   Not covered, a stated limit (pre-existing since sets shipped, and true of
   EVERY tutor write, not only sets): a Refresh whose server snapshot was
   taken before a write can land after it and put the old row back in this

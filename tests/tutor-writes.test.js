@@ -37,6 +37,14 @@ const src = fs.readFileSync(SRC_PATH, "utf8");
 
 let pass = 0, fail = 0;
 const failures = [];
+/* A case that awaits a call stuck behind its own closed gate never settles:
+   node drains the event loop and would exit 0 with no summary. process.exit()
+   never fires beforeExit, so reaching it means the suite did not finish. */
+process.on("beforeExit", () => {
+  if(process.exitCode) return;
+  console.log("HARNESS HUNG — a case never settled (a gated call awaited behind its own gate?). " + pass + " passed, " + fail + " failed before it.");
+  process.exitCode = 2;
+});
 function check(ok, label, detail){
   if(ok){ pass++; console.log("PASS | " + label); }
   else { fail++; failures.push(label + (detail ? " — " + detail : ""));
@@ -299,7 +307,7 @@ function build(store, win, doc){
     let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {}, tab = "sets";
     let dedup = null;                      // canonical grouping is canonical-index.test.js's; here: exact keys only
     const testsById = {};
-    const loads = { assigns: 0, sets: 0, storage: 0, render: 0, setsLock: [], assignsLock: [] };
+    const loads = { assigns: 0, sets: 0, storage: 0, render: 0, setsLock: [], assignsLock: [], profilesAtReload: [] };
     async function loadFromStorage(){ loads.storage++; }
     /* render paints what viewSetBuilder paints for the builder's outcome
        line and Save button (so a check can see a render happened, and what
@@ -327,7 +335,7 @@ function build(store, win, doc){
        fake store like the real one); wrapped only to count the calls and
        record the page lock each ran under */
     if(typeof loadSets === "function"){ const realLoadSets = loadSets; loadSets = async function(){ loads.sets++; loads.setsLock.push(inFlightNow()); return realLoadSets(); }; }
-    if(typeof loadAssignsAndBugs === "function"){ const realLoadAB = loadAssignsAndBugs; loadAssignsAndBugs = async function(){ loads.assigns++; loads.assignsLock.push(inFlightNow()); return realLoadAB(); }; }
+    if(typeof loadAssignsAndBugs === "function"){ const realLoadAB = loadAssignsAndBugs; loadAssignsAndBugs = async function(){ loads.assigns++; loads.assignsLock.push(inFlightNow()); loads.profilesAtReload.push(JSON.parse(JSON.stringify(profiles))); return realLoadAB(); }; }
     const fns = {};
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
     return {
@@ -356,6 +364,10 @@ function build(store, win, doc){
   return d;
 }
 const C1 = "AS-ABCDEFGH", C2 = "AS-JKLMNPQR";
+/* the profiles map as the write left it: the real reload rebuilds it from the
+   mirror, so a check on the map AFTER the reload can't see saveProfiles' own
+   rule (review round 6, finding 6) */
+const mapBeforeReload = d => { const a = d.state().loads.profilesAtReload; return a.length ? a[a.length - 1] : d.state().profiles; };
 const status = d => { const t = d.$("dashStatus").textContent; everyMessage.push(t); return t; };
 const noSync = t => !/sync/i.test(t);
 
@@ -453,8 +465,8 @@ const noSync = t => !/sync/i.test(t);
     const before = s.snapshot();
     await d.fns.createAssignment();
     const t = status(d);
-    check(s.snapshot() === before && Object.keys(d.state().profiles).length === 0,
-      "rejected with a name typed: no student: row in the mirror and the in-memory profiles map is unchanged");
+    check(s.snapshot() === before && Object.keys(mapBeforeReload(d)).length === 0 && d.state().loads.profilesAtReload.length > 0 && Object.keys(d.state().profiles).length === 0,
+      "rejected with a name typed: no student: row in the mirror and the in-memory profiles map is unchanged (before AND after the reload)");
     check(/Not saved — the display name for AS-ABCDEFGH/.test(t) && /Not saved — assignment a-/.test(t),
       "rejected with a name typed: BOTH rejections are reported (the name used to be silent)", t);
   });
@@ -489,8 +501,8 @@ const noSync = t => !/sync/i.test(t);
     const before = s.snapshot();
     await d.fns.saveNameOnly();
     const t = status(d);
-    check(s.snapshot() === before && Object.keys(d.state().profiles).length === 0,
-      "rejected name save: mirror unchanged, profiles map unchanged (the dashboard does not render the name as saved)");
+    check(s.snapshot() === before && Object.keys(mapBeforeReload(d)).length === 0 && Object.keys(d.state().profiles).length === 0,
+      "rejected name save: mirror unchanged, profiles map unchanged before AND after the reload (the dashboard does not render the name as saved)");
     check(/^Not saved — the display name for AS-ABCDEFGH: the tutor sign-in has expired/.test(t) && noSync(t), "rejected name save: message names the row", t);
   });
   await run(async () => {
@@ -501,8 +513,8 @@ const noSync = t => !/sync/i.test(t);
     const before = s.snapshot();
     await d.fns.saveNameOnly();
     const t = status(d);
-    check(s.snapshot() === before && s.server.has("student:" + C1) && d.state().profiles[C1] === "Erin K",
-      "rejected name CLEAR: the row stays in mirror and server, profiles map still has the name");
+    check(s.snapshot() === before && s.server.has("student:" + C1) && mapBeforeReload(d)[C1] === "Erin K" && d.state().profiles[C1] === "Erin K",
+      "rejected name CLEAR: the row stays in mirror and server, profiles map still has the name (before AND after the reload)");
     check(/^Not deleted — the display name for AS-ABCDEFGH/.test(t) && noSync(t), "rejected name clear: message names the row", t);
   });
   await run(async () => {
@@ -510,7 +522,7 @@ const noSync = t => !/sync/i.test(t);
     s.seedBoth("student:" + C1, { displayName: "Erin K" }, C1); d.seed({ profiles: { [C1]: "Erin K" } });
     d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.$("afName").value = "";
     await d.fns.saveNameOnly();
-    check(!s.server.has("student:" + C1) && !s.mirror.has("student:" + C1) && !(C1 in d.state().profiles) && /Name cleared for AS-ABCDEFGH/.test(status(d)),
+    check(!s.server.has("student:" + C1) && !s.mirror.has("student:" + C1) && !(C1 in mapBeforeReload(d)) && !(C1 in d.state().profiles) && /Name cleared for AS-ABCDEFGH/.test(status(d)),
       "control: an accepted clear removes server, mirror and the profiles entry");
   });
 
@@ -1813,15 +1825,17 @@ const noSync = t => !/sync/i.test(t);
     const delDuring = d.fns.deleteSetFromList("pset-A");
     await d.fns.clearAssignments(C1);
     const clearMsg = status(d);
-    const secondAssign = (await d.fns.assignSetFromForm(), d.state().saMsg);
-    gate.open(); await pA;
+    const pSecond = d.fns.assignSetFromForm();       // never awaited behind the closed gate: a regressed refusal would hang there
+    const secondSettled = await Promise.race([pSecond.then(() => true), new Promise(r => setTimeout(() => r(false), 500))]);
+    const secondAssign = d.state().saMsg;
+    gate.open(); await pA; await pSecond;
     const cards = [...s.server.entries()].filter(([k]) => k.indexOf("assign:") === 0).map(([, r]) => r.value);
     check(reached && lockDuring === 1 && saveBtnDuring === true && newBtnDuring === true && setUpsertsDuring === 0 && delDuring === false &&
           s.server.has("pset:pset-A") && s.calls.filter(c => c[0] === "adminDelete").length === 0 &&
           clearMsg === "Another set or assignment change is still being saved — clear the assignments once it finishes." &&
-          secondAssign === "Another set or assignment change is still being saved — assign once it finishes.",
+          secondSettled === true && secondAssign === "Another set or assignment change is still being saved — assign once it finishes.",
       "while Assign set is writing, it holds the page lock (painted): Save set, set Delete, Clear all and a second Assign are all refused",
-      JSON.stringify({ reached, lockDuring, saveBtnDuring, newBtnDuring, setUpsertsDuring, delDuring, clearMsg, secondAssign }));
+      JSON.stringify({ reached, lockDuring, saveBtnDuring, newBtnDuring, setUpsertsDuring, delDuring, clearMsg, secondSettled, secondAssign }));
     check(cards.length === 2 && cards.every(a => a.setId === "pset-A" && a.setName === "Old name" && a.questionCount === 1 && a.holdRelease === true) &&
           d.state().setSaveInFlight === 0 && /^Assigned “Old name” to AS-ABCDEFGH, AS-JKLMNPQR \(on the server\)\.$/.test(d.state().saMsg) &&
           d.state().assigns.reduce((n, e) => n + e.list.length, 0) === 2 && d.state().loads.assignsLock.slice(-1)[0] === 1,
@@ -1864,6 +1878,8 @@ const noSync = t => !/sync/i.test(t);
     d2.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [],
               builder: d2.fns.builderFromSet(Object.assign({}, stored, { refs: [ACTIVE, FORMREF] })) });
     d2.$("sbName").value = "New name";
+    await d2.fns.loadAssignsAndBugs();                  // the page's real list: both cards (a seeded [] can't tell a reload from none)
+    const preC = d2.state().assigns.reduce((n, e) => n + e.list.length, 0);
     const pC = d2.fns.clearAssignments(C1);
     for(let i = 0; i < 200 && !r2; i++) await new Promise(r => setTimeout(r, 5));
     const lockC = d2.state().setSaveInFlight;
@@ -1874,6 +1890,10 @@ const noSync = t => !/sync/i.test(t);
           /^Cleared every assignment for AS-ABCDEFGH/.test(status(d2)),
       "Clear all holds the page lock while it deletes: a Save pressed meanwhile is refused; the clear completes and releases it",
       JSON.stringify({ r2, lockC, upsC }));
+    const nowC = d2.state().assigns.reduce((n, e) => n + e.list.length, 0);
+    check(preC === 2 && nowC === 0 && d2.state().loads.assignsLock.slice(-1)[0] === 1,
+      "Clear all reloads `assigns` BEFORE it releases the lock (the cleared cards leave the page's list)",
+      JSON.stringify({ preC, nowC, lk: d2.state().loads.assignsLock }));
     const s3 = makeStore({}); const d3 = build(s3, { fetch: realFetch() }, { page: "origin" });
     s3.seedBoth("pset:pset-A", stored);
     s3.seedBoth("assign:" + C1 + ":a-1", { assignmentId: "a-1", kind: "set", setId: "pset-A", setName: "Old name", questionCount: 1 }, C1);
@@ -1884,6 +1904,8 @@ const noSync = t => !/sync/i.test(t);
     d3.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [],
               builder: d3.fns.builderFromSet(Object.assign({}, stored, { refs: [ACTIVE, FORMREF] })) });
     d3.$("sbName").value = "New name";
+    await d3.fns.loadAssignsAndBugs();
+    const preD = d3.state().assigns.reduce((n, e) => n + e.list.length, 0);
     const pD = d3.fns.deleteAssignment(C1, "a-1");
     for(let i = 0; i < 200 && !r3; i++) await new Promise(r => setTimeout(r, 5));
     const lockD = d3.state().setSaveInFlight;
@@ -1893,6 +1915,10 @@ const noSync = t => !/sync/i.test(t);
     check(r3 && lockD === 1 && upsD === 0 && d3.state().setSaveInFlight === 0 && !s3.server.has("assign:" + C1 + ":a-1") && s3.server.has("assign:" + C1 + ":a-2"),
       "an assignment Delete holds the page lock while it writes: a Save pressed meanwhile is refused; the delete completes and releases it",
       JSON.stringify({ r3, lockD, upsD }));
+    const idsD = [].concat(...d3.state().assigns.map(e => (e.list || []).map(a => a.assignmentId)));
+    check(preD === 2 && idsD.length === 1 && idsD[0] === "a-2" && d3.state().loads.assignsLock.slice(-1)[0] === 1,
+      "an assignment Delete reloads `assigns` BEFORE it releases the lock (the deleted card leaves the page's list)",
+      JSON.stringify({ preD, idsD, lk: d3.state().loads.assignsLock }));
 
     /* a cancelled confirm leaves no lock behind */
     const s4 = makeStore({}); const d4 = build(s4, { confirm: () => false });
@@ -1977,6 +2003,23 @@ const noSync = t => !/sync/i.test(t);
     const t = d.state().saMsg; everyMessage.push(t);   // the module var render() re-emits — the old node is wiped
     check(s.snapshot() === before && s.server.size === 0 && /^Not saved — assignment a-\S+ for AS-ABCDEFGH/.test(t),
       "rejected set assignment: nothing anywhere, message names the row", t);
+  });
+  await run(async () => {
+    /* review round 6, finding 1: after an assign the form is EMPTIED (as
+       before the lock), so pressing Assign again — a retry after a partial
+       rejection, or one more code added — can't re-send codes that landed */
+    const s = makeStore({ reject: (op, k) => k.indexOf(C2) !== -1 }); const d = build(s);
+    s.seedBoth("pset:pset-1", { setId: "pset-1", name: "Set A", subject: "math", refs: [REF] });
+    d.seed({ sets: [{ setId: "pset-1", name: "Set A", subject: "math", refs: [REF] }], assigns: [] });
+    d.$("saSet").value = "pset-1"; d.$("saFree").value = C1 + ", " + C2; d.$("saLimit").value = "30"; d.$("saExpires").value = ""; d.$("saHold").checked = true;
+    await d.fns.assignSetFromForm();
+    const t1 = d.state().saMsg; everyMessage.push(t1);
+    const form = { saFree: d.$("saFree").value, saSet: d.$("saSet").value, saLimit: d.$("saLimit").value, saHold: d.$("saHold").checked };
+    await d.fns.assignSetFromForm();                    // the tutor presses Assign again
+    const mine = [...s.server.keys()].filter(k => k.indexOf("assign:" + C1 + ":") === 0);
+    check(/^Assigned “Set A” to AS-ABCDEFGH/.test(t1) && form.saFree === "" && form.saSet === "" && form.saLimit === "" && form.saHold === false && mine.length === 1,
+      "after an assign (partial rejection here) the form is emptied, so a second press can't give a code that landed a duplicate card",
+      JSON.stringify({ form, cardsForC1: mine.length }));
   });
 
   /* =================== 11. sweeps =================== */
