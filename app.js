@@ -205,6 +205,14 @@
      annotation, and none is allowed. That removes the positioning vocabulary
      and the size multiplier at the root rather than trying to bound them.
      Add the highlighter's own output and the list is complete.
+     Complete for fmt()'s OWN classes means every one render.js can emit, not
+     only those the library happened to contain when this was measured: the
+     {{credit}} token's fmt-credit arrived with later forms (202403intv2,
+     202510usv1, 202609usv1 — "©2016 by A. Hope Jahren" on 202609usv1
+     re1-q8), was missing here, and a highlighted-then-resumed passage lost
+     its credit line's right alignment (2026-09-30).
+     tests/keep-classes.test.js now pins this list against render.js's
+     emitters AND against fmt() over every shipped RW field, in node.
      If a future test bank ever puts math in an RW field, restored math would
      lose its styling. That is a visible degradation, not a hole, and it fails
      LOUDLY: tests/injection-proof.js asserts that fmt() over the whole library
@@ -212,8 +220,8 @@
   const KEEP_CLASSES = new RegExp("^(?:" + [
     // the highlighter's own output — these MUST survive or annotations vanish
     "hl", "c-(?:yellow|blue|pink|none)", "u-(?:solid|dashed|dotted)",
-    // every class fmt() emits in a Reading and Writing field (measured, all 7)
-    "fmt-(?:blank|bullets|caption|passage-label|quote|table|tnote)"
+    // every block class fmt() can emit (render.js's full set, all 8)
+    "fmt-(?:blank|bullets|caption|credit|passage-label|quote|table|tnote)"
   ].join("|") + ")$");
 
   /* The style ATTRIBUTE is filtered by an ALLOWLIST of properties. It used to
