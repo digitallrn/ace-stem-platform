@@ -2319,21 +2319,49 @@ window.Dashboard = (function(){
     const live = liveReplacement(r);
     return refKey(r) + (live ? " → " + live : "");
   }
-  /* What the tutor can do about one retired ref in the builder, said per
-     item and TRUE for this builder: the live replacement may already be in
-     the set, may be blocked only by this retired copy (same canonical item),
-     may be held as some other ref of its class, may be addable right now (a
-     reskin in another class — 12 of the retired items), or may not exist.
-     Plain text; callers escape it. */
-  function replacementNote(r){
+  /* Where a retired ref's live replacement stands in THIS builder:
+       live      — the live end of the chain (or null)
+       liveKey   — its key
+       mates     — every builder ref in its canonical class (the replacement
+                   itself included, if held), as keys
+       offered   — can this page's picker actually add it? The picker lists
+                   only the index this page LOADED; a replacement minted by
+                   the deploy that retired r exists only in a later re-read
+                   (bankIndexFresh), with no Add button until a reload. */
+  function replacementState(r){
     const live = liveReplacement(r);
-    if(!live) return "no replacement is listed";
-    const liveKey = canonRef(r.bankId + ":" + live);
-    const h = builderHeldAs({ type: "bank", bankId: r.bankId, qid: live });
-    if(!h) return "its replacement " + live + " can be added now";
-    if(h === liveKey) return "its replacement " + live + " is already in the set";
-    if(h === canonRef(refKey(r))) return "its replacement " + live + " can be added once this one is removed";
-    return "its replacement " + live + " is in the set as " + refText(h);
+    if(!live) return { live: null, liveKey: null, mates: [], offered: false };
+    const liveRef = { type: "bank", bankId: r.bankId, qid: live };
+    const liveKey = canonRef(refKey(liveRef));
+    const liveItem = dedup ? dedup.items[liveKey] : null;
+    const mates = (builder ? builder.refs : []).filter(x => x && typeof x === "object").map(x => canonRef(refKey(x)))
+      .filter(k => k === liveKey || !!(liveItem && dedup.items[k] && dedup.items[k].canonical === liveItem.canonical));
+    const pageE = bankEntryIn(window.BANK_INDEX, liveRef);
+    const offered = !!(pageE && !isRetiredBankRef(liveRef) && builder && pageE.subject === builder.subject);
+    return { live: live, liveKey: liveKey, mates: mates, offered: offered };
+  }
+  const bankRefOfKey = k => { const p = splitRef(k); return { type: "bank", bankId: p.container, qid: p.qid }; };
+  /* What the tutor can do about one retired ref in the builder, said per
+     item and TRUE for this builder: no replacement; the replacement already
+     in the set; one this page can't offer yet (reload); one addable now (a
+     reskin in another class — 12 of the retired items); one blocked only by
+     retired copies of its canonical item (named, when more than this one);
+     or one whose place a live class-mate holds. Plain text; callers escape. */
+  function replacementNote(r){
+    const st = replacementState(r);
+    if(!st.live) return "no replacement is listed";
+    if(st.mates.indexOf(st.liveKey) !== -1) return "its replacement " + st.live + " is already in the set";
+    if(!st.offered) return "its replacement " + st.live + " is newer than this page — reload the dashboard to add it";
+    if(!st.mates.length) return "its replacement " + st.live + " can be added now";
+    const self = canonRef(refKey(r));
+    const liveMates = st.mates.filter(k => !isRetiredBankRef(bankRefOfKey(k)));
+    if(!liveMates.length){
+      const others = st.mates.filter(k => k !== self);
+      return "its replacement " + st.live + " can be added once " +
+        (others.length ? (st.mates.indexOf(self) !== -1 ? "this one and " : "") + others.map(refText).join(", ") + (others.length === 1 && st.mates.indexOf(self) === -1 ? " is" : " are") + " removed"
+                       : "this one is removed");
+    }
+    return "its replacement " + st.live + " is in the set as " + refText(liveMates[0]);
   }
   /* The Sets-list report: how many stored sets hold a retired bank item,
      and which items. No claim about WHEN (the index carries no retirement
@@ -2376,6 +2404,9 @@ window.Dashboard = (function(){
   function viewSets(){
     const canWrite = source === "storage";
     if(!canWrite) return '<p class="dash-empty">You\'re viewing a loaded archive file — sets are managed against live storage. Reload from storage first.</p>';
+    /* while a set save runs, the list's Edit / Delete / New set wait for it:
+       an Edit opened now would be built from the pre-save copy */
+    const listBusy = !!(builder && builder.saving);
     /* canonical-id marks (2026-09-07): lazy index, one notice when off, and
        the seen set of the student chosen in the Student filter */
     ensureDedupLoaded();
@@ -2395,8 +2426,8 @@ window.Dashboard = (function(){
           <td>${nAssign}</td>
           <td>${nAtt}</td>
           <td>
-            <button class="dash-rel set-edit" data-set="${escAttr(s.setId)}">Edit</button>
-            <button class="dash-rel set-del" data-set="${escAttr(s.setId)}">Delete</button>
+            <button class="dash-rel set-edit" data-set="${escAttr(s.setId)}" ${listBusy ? "disabled" : ""}>Edit</button>
+            <button class="dash-rel set-del" data-set="${escAttr(s.setId)}" ${listBusy ? "disabled" : ""}>Delete</button>
           </td>
         </tr>`;
       }).join("") + "</tbody></table>"
@@ -2438,7 +2469,7 @@ window.Dashboard = (function(){
         ${listHtml}
         ${retiredHtml}
         <div class="af-actions">
-          <button class="pill" id="setNewBtn" style="padding:9px 22px;">New set</button>
+          <button class="pill" id="setNewBtn" style="padding:9px 22px;" ${listBusy ? "disabled" : ""}>New set</button>
           <span class="dash-hint" id="setsMsg">${esc(setsMsg)}</span>
         </div>
       </div>
@@ -2519,14 +2550,14 @@ window.Dashboard = (function(){
       const retired = isRetiredBankRef(ref);
       const held = builderHeldAs(ref);
       const own = held === canonRef(k);
-      const live = retired ? liveReplacement(ref) : null;
-      const liveHeld = live ? builderHeldAs({ type: "bank", bankId: e.bankId, qid: live }) : null;
-      /* "is in the set" only when the replacement ITSELF is; a class-mate
-         (possibly another retired copy) holding its place is named */
-      const liveNote = !live ? ""
-        : !liveHeld ? "; use " + esc(live)
-        : liveHeld === canonRef(e.bankId + ":" + live) ? "; its replacement " + esc(live) + " is in the set"
-        : "; its replacement " + esc(live) + " is held by " + esc(refText(liveHeld));
+      /* "is in the set" only when the replacement ITSELF is; "use" only when
+         this page can offer it; a class-mate holding its place is named */
+      const st = retired ? replacementState(ref) : null;
+      const liveNote = !st || !st.live ? ""
+        : st.mates.indexOf(st.liveKey) !== -1 ? "; its replacement " + esc(st.live) + " is in the set"
+        : !st.offered ? "; its replacement " + esc(st.live) + " is newer than this page — reload to add it"
+        : !st.mates.length ? "; use " + esc(st.live)
+        : "; its replacement " + esc(st.live) + " is held by " + esc(refText(st.mates[0]));
       const action = retired
         ? `<span class="setpick-retired">${own ? "In set · retired" : "Retired — can’t be added" + liveNote}</span>`
         : `<button class="dash-rel pick-bank" data-bank="${escAttr(e.bankId)}" data-qid="${escAttr(e.qid)}"
@@ -2722,11 +2753,23 @@ window.Dashboard = (function(){
           return;
         }
         if(stored === null){
-          /* deleted in another browser or tab: saving would recreate it (and
-             re-open its unstarted assignments), so the save stops here */
+          /* No stored row. Saving under this id would recreate a set deleted
+             elsewhere (and re-open its unstarted assignments), so it never
+             does. Instead the builder BECOMES an unsaved new set that keeps
+             its questions: the next Save set writes a new id, Cancel drops
+             them. Remote mode can't tell "deleted in another browser" from
+             "built on this device in local mode and never uploaded", so it
+             names both, and the Upload button for the second. */
+          const what = describeRow("pset:" + b.setId);
+          b.setId = null;
+          delete b.createdAt;
+          b.storedKeys = [];
           b.saving = false;
-          say("Not saved — " + describeRow("pset:" + b.setId) + " no longer exists (deleted in another browser or tab). " +
-              "Cancel to drop it; to keep these questions, start a new set with them.");
+          say("Not saved — " + what + (AttemptStore.isRemote()
+                ? " isn't on the server: it was deleted in another browser or tab, or it was built on this device and never uploaded" +
+                  " (if so, Cancel and press “Upload local records to server” instead)."
+                : " no longer exists (deleted in another tab).") +
+              " Its questions are kept here as a NEW set: press Save set to save them under a new id, or Cancel to drop them.");
           return;
         }
         held = stored;
@@ -2812,7 +2855,13 @@ window.Dashboard = (function(){
          (and on the Sets line); a successful one closes the builder it saved
          — never one the tutor opened while this save was running */
       b.msg = ok ? "" : res.message;
-      if(ok){ b.storedKeys = snap.filter(r => r && typeof r === "object").map(refKey); if(builder === b) builder = null; }
+      /* …and, defensively, one opened on THIS set from pre-save data (the
+         list's Edit is disabled while a save runs, so only a stale click
+         could reach here) */
+      if(ok){
+        b.storedKeys = snap.filter(r => r && typeof r === "object").map(refKey);
+        if(builder === b || (builder && builder.setId && builder.setId === set.setId)) builder = null;
+      }
       if(ok){ if(isNew) await loadSets(); else await loadAssignsAndBugs(); }
       renderKeepingInputs();
     }finally{
@@ -2906,6 +2955,28 @@ window.Dashboard = (function(){
   function builderAddRef(ref){
     if(pushRef(ref)) render();             // builderHeldAs() is the one rule: no duplicate key, one entry per canonical item
   }
+  /* The builder a stored set opens into: a deep copy, plus storedKeys — what
+     the saved set holds as this browser loaded it (each save re-reads the
+     stored row and replaces it). The retired notice's saved/unsaved split
+     rests on it. */
+  function builderFromSet(s){
+    const loaded = Array.isArray(s.refs) ? s.refs : [];
+    return JSON.parse(JSON.stringify({ setId: s.setId, name: s.name,
+      subject: s.subject === "math" ? "math" : "rw",
+      refs: loaded, createdAt: s.createdAt,
+      storedKeys: loaded.filter(r => r && typeof r === "object").map(refKey) }));
+  }
+  /* Edit: never while a save is in flight — the set it would open is still
+     the pre-save copy in `sets` */
+  function openSetInBuilder(setId){
+    if(builder && builder.saving) return false;
+    const s = sets.find(x => x && x.setId === setId);
+    if(!s) return false;
+    builder = builderFromSet(s);
+    builderTestId = "";
+    render();
+    return true;
+  }
   /* The builder's other edits, each refusing while a save is in flight (the
      save writes a snapshot of these refs) and clearing the last outcome. */
   function builderAddModule(moduleId){
@@ -2933,26 +3004,15 @@ window.Dashboard = (function(){
   function attachSetsHandlers(){
     const nb = $("setNewBtn");
     if(nb) nb.addEventListener("click", ()=>{
+      if(builder && builder.saving) return;          // the save in flight finishes first
       builder = { setId: null, name: "", subject: "math", refs: [] };
       builderTestId = "";
       render();
     });
     document.querySelectorAll("#dashBody .set-edit").forEach(btn =>
-      btn.addEventListener("click", ()=>{
-        const s = sets.find(x => x.setId === btn.dataset.set);
-        if(!s) return;
-        const loaded = Array.isArray(s.refs) ? s.refs : [];
-        builder = JSON.parse(JSON.stringify({ setId: s.setId, name: s.name,
-          subject: s.subject === "math" ? "math" : "rw",
-          refs: loaded, createdAt: s.createdAt,
-          /* what the saved set holds, as this browser loaded it — the save
-             re-reads the stored row and replaces it */
-          storedKeys: loaded.filter(r => r && typeof r === "object").map(refKey) }));
-        builderTestId = "";
-        render();
-      }));
+      btn.addEventListener("click", ()=> openSetInBuilder(btn.dataset.set)));
     document.querySelectorAll("#dashBody .set-del").forEach(btn =>
-      btn.addEventListener("click", ()=> deleteSet(btn.dataset.set)));
+      btn.addEventListener("click", ()=>{ if(!(builder && builder.saving)) deleteSet(btn.dataset.set); }));
     if(builder){
       const nameIn = $("sbName");
       if(nameIn) nameIn.addEventListener("input", ()=>{ builder.name = nameIn.value; });

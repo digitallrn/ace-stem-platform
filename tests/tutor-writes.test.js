@@ -203,7 +203,7 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   "freshestBankIndex", "refusedBankRefs", "storedSetRefKeys",
   // the builder's own edits and the renderer the save uses (second review, 2026-09-30)
   "renderKeepingInputs", "pushRef", "builderHeldAs", "canonRef", "splitRef", "manifestEntry",
-  "builderAddModule", "builderRemoveRef", "builderMoveRef"];
+  "builderAddModule", "builderRemoveRef", "builderMoveRef", "builderFromSet", "openSetInBuilder"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
@@ -237,7 +237,15 @@ const BODY = NAMES.map(tryExtract).join("\n") + "\n" + URL_SRC + "\n" + KEPT_SRC
    browser's would for invalid CSS. */
 const INDEX_HTML = fs.readFileSync("index.html", "utf8");
 const SCRIPT_SRCS = [...INDEX_HTML.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/g)].map(m => m[1]);
-const INLINED_SRCS = SCRIPT_SRCS.filter(u => /^(https?:)?\/\//.test(u) || /(^|\/)config\.js$/.test(u));
+/* the single-file build's scripts, by assemble.py's OWN rule read from
+   assemble.py (LOCAL_JS_RE + SKIP_INLINE): a <script src> survives inlining
+   unless its whole tag matches that pattern and it isn't skipped — so a tag
+   that grows an attribute stays a <script src> here exactly as in the build */
+const ASSEMBLE_PY = fs.readFileSync("assemble.py", "utf8");
+const LOCAL_JS_RE_SRC = (ASSEMBLE_PY.match(/LOCAL_JS_RE = re\.compile\(r'([^']+)'\)/) || [])[1];
+const SKIP_INLINE = ((ASSEMBLE_PY.match(/SKIP_INLINE = \{([^}]*)\}/) || [])[1] || "").split(",").map(x => x.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+const INLINED_AWAY = LOCAL_JS_RE_SRC ? [...INDEX_HTML.matchAll(new RegExp(LOCAL_JS_RE_SRC, "g"))].map(m => m[1]).filter(u => SKIP_INLINE.indexOf(u) === -1) : [];
+const INLINED_SRCS = SCRIPT_SRCS.filter(u => INLINED_AWAY.indexOf(u) === -1);
 const PAGE_KINDS = { origin: { srcs: SCRIPT_SRCS, protocol: "https:" }, file: { srcs: SCRIPT_SRCS, protocol: "file:" },
                      inlined: { srcs: INLINED_SRCS, protocol: "https:" } };
 function selectorQuery(srcs){
@@ -290,8 +298,12 @@ function build(store, win, doc){
     async function loadAssignsAndBugs(){ loads.assigns++; }
     async function loadSets(){ loads.sets++; }
     async function loadFromStorage(){ loads.storage++; }
-    function render(){ loads.render++; wipeBody(); }
-    function renderAll(){ loads.render++; wipeBody(); }
+    /* render paints what viewSetBuilder paints for the builder's outcome
+       line and Save button (so a check can see a render happened, and what
+       it showed), after wiping the body as the real one does */
+    function paintBuilder(){ $("sbMsg").textContent = builder ? (builder.msg || "") : ""; $("sbSaveBtn").disabled = !!(builder && builder.saving); }
+    function render(){ loads.render++; wipeBody(); paintBuilder(); }
+    function renderAll(){ loads.render++; wipeBody(); paintBuilder(); }
     /* canonical-id awareness (2026-09-07): createAssignment appends the
        overlap notes to its status line. The derivation itself is covered by
        tests/canonical-index.test.js; here the stub returns one sentinel note
@@ -310,6 +322,7 @@ function build(store, win, doc){
         if("lastExport" in o) lastExport = o.lastExport; if("sets" in o) sets = o.sets; if("builder" in o) builder = o.builder;
         if("source" in o) source = o.source; if("lastStartCode" in o) lastStartCode = o.lastStartCode;
         if("tombs" in o) tombs = o.tombs;
+        if("builderTestId" in o) builderTestId = o.builderTestId; if("fullTest" in o) fullTests[o.fullTest.testId] = o.fullTest;
       }
     };
   `);
@@ -1208,13 +1221,21 @@ const noSync = t => !/sync/i.test(t);
 
   /* which pages re-read the index — decided on the REAL markup */
   await run(async () => {
-    check(SCRIPT_SRCS.indexOf("testdata/bank-index.js") !== -1 && INLINED_SRCS.indexOf("testdata/bank-index.js") === -1,
-      "index.html loads testdata/bank-index.js by <script src>; the single-file build inlines it", SCRIPT_SRCS.join(", "));
+    check(!!LOCAL_JS_RE_SRC && SKIP_INLINE.indexOf("config.js") !== -1, "assemble.py's inlining rule (LOCAL_JS_RE, SKIP_INLINE) was read from assemble.py", String(LOCAL_JS_RE_SRC));
+    check(SCRIPT_SRCS.indexOf("testdata/bank-index.js") !== -1 && INLINED_AWAY.indexOf("testdata/bank-index.js") !== -1 && INLINED_SRCS.indexOf("testdata/bank-index.js") === -1,
+      "index.html loads testdata/bank-index.js by <script src>, and by assemble.py's own rule that tag is inlined into the single-file build", SCRIPT_SRCS.join(", "));
+    const withAttr = INDEX_HTML.replace('<script src="testdata/bank-index.js"></script>', '<script src="testdata/bank-index.js" defer></script>');
+    check(withAttr !== INDEX_HTML && [...withAttr.matchAll(new RegExp(LOCAL_JS_RE_SRC, "g"))].map(m => m[1]).indexOf("testdata/bank-index.js") === -1,
+      "control: the same rule would NOT inline a tag that grew an attribute (so this model can't hide that change)");
     const kinds = {};
     for(const page of ["origin", "file", "inlined"]) kinds[page] = build(makeStore({}), {}, { page: page }).fns.bankIndexReReadable();
     check(kinds.origin === true && kinds.file === false && kinds.inlined === false,
       "bankIndexReReadable: true for index.html over http(s), false for a file:// copy and for the single-file build", JSON.stringify(kinds));
-    if(fs.existsSync("dist/index-live.html")){
+    if(!fs.existsSync("dist/index-live.html")){
+      console.log("SKIP | dist/index-live.html is absent (gitignored) — the built file itself was not checked; the model above follows assemble.py's rule");
+    } else if(fs.statSync("dist/index-live.html").mtimeMs < fs.statSync("index.html").mtimeMs){
+      check(false, "dist/index-live.html is older than index.html — rebuild it (python assemble.py) so its <script> tags are checked");
+    } else {
       const distSrcs = [...fs.readFileSync("dist/index-live.html", "utf8").matchAll(/<script\b[^>]*\bsrc="([^"]*)"/g)].map(m => m[1]);
       check(distSrcs.indexOf("testdata/bank-index.js") === -1, "the assembled dist/index-live.html carries no <script src> for the bank index", distSrcs.join(", "));
     }
@@ -1241,9 +1262,22 @@ const noSync = t => !/sync/i.test(t);
     d.$("sbName").value = "N";
     d.$("saFree").value = "AS-ABCDEFGH"; d.$("saLimit").value = "25"; d.$("saHold").checked = true;
     await d.fns.saveSetFromBuilder();
-    check(/can't be added/.test(msgOf(d)) && d.$("saFree").value === "AS-ABCDEFGH" && d.$("saLimit").value === "25" && d.$("saHold").checked === true,
-      "a refused save re-renders keeping the Assign-a-set form (codes, limit, hold) the tutor was filling in",
-      JSON.stringify([d.$("saFree").value, d.$("saLimit").value, d.$("saHold").checked]));
+    check(/can't be added/.test(msgOf(d)) && d.$("sbMsg").textContent === msgOf(d) && d.$("sbSaveBtn").disabled === false &&
+          d.$("saFree").value === "AS-ABCDEFGH" && d.$("saLimit").value === "25" && d.$("saHold").checked === true,
+      "a refused save RE-RENDERS (the refusal is painted, Save enabled) keeping the Assign-a-set form (codes, limit, hold)",
+      JSON.stringify([d.$("sbMsg").textContent, d.$("saFree").value, d.$("saLimit").value, d.$("saHold").checked]));
+    /* the same at the WRITE: a save the server rejects, and a save that succeeds */
+    for(const reject of [true, false]){
+      const s2 = makeStore(reject ? { reject: (op, k) => op === "put" && k.indexOf("pset:") === 0 } : {}); const d2 = build(s2);
+      d2.seed({ builder: { setId: null, name: "W", subject: "rw", refs: [FORMREF] }, sets: [], assigns: [] });
+      d2.$("sbName").value = "W";
+      d2.$("saFree").value = "AS-ABCDEFGH"; d2.$("saLimit").value = "25"; d2.$("saHold").checked = true;
+      await d2.fns.saveSetFromBuilder();
+      check(d2.$("saFree").value === "AS-ABCDEFGH" && d2.$("saLimit").value === "25" && d2.$("saHold").checked === true &&
+            (reject ? /^Not saved — set pset-/.test(d2.$("sbMsg").textContent) : d2.state().builder === null),
+        (reject ? "a save the server rejects" : "a save that succeeds") + " re-renders keeping the Assign-a-set form" + (reject ? ", with the reason painted beside Save" : ""),
+        JSON.stringify([d2.$("sbMsg").textContent, d2.$("saFree").value]));
+    }
   });
 
   await run(async () => {
@@ -1329,8 +1363,16 @@ const noSync = t => !/sync/i.test(t);
       await d.fns.saveSetFromBuilder();
       const m = msgOf(d); everyMessage.push(m);
       check(!s.server.has("pset:pset-X") && !s.mirror.has("pset:pset-X") && !s.calls.some(c => (c[0] === "adminUpsert" || c[0] === "setLocal") && c[1] === "pset:pset-X") &&
-            /no longer exists \(deleted in another browser or tab\)/.test(m),
-        (remote ? "remote" : "local") + ": a set deleted elsewhere is not recreated by a save from a page that still lists it", m);
+            (remote ? /isn't on the server: it was deleted in another browser or tab, or it was built on this device and never uploaded.*Upload local records to server/.test(m)
+                    : /no longer exists \(deleted in another tab\)/.test(m)) &&
+            /kept here as a NEW set/.test(m) && d.state().builder.setId === null && d.state().builder.refs.length === 1 &&
+            JSON.stringify(d.state().builder.storedKeys) === "[]" && !("createdAt" in d.state().builder),
+        (remote ? "remote" : "local") + ": a set with no stored row is not recreated; the builder becomes an unsaved NEW set that keeps its questions" +
+        (remote ? " (and the message names the never-uploaded case and the Upload button)" : ""), m);
+      await d.fns.saveSetFromBuilder();
+      const rows = [...(remote ? s.server.keys() : s.mirror.keys())].filter(k => k.indexOf("pset:") === 0);
+      check(rows.length === 1 && rows[0] !== "pset:pset-X" && d.state().builder === null,
+        (remote ? "remote" : "local") + ": the next Save set saves those questions under a NEW id — the deleted id is never recreated", rows.join(", "));
     }
   });
 
@@ -1457,15 +1499,22 @@ const noSync = t => !/sync/i.test(t);
        the builder meanwhile, the checked snapshot is what's written or nothing is */
     const g = gateOf();
     const slow = async () => { await g.p; return { ok: true, text: async () => REAL_BANK_BYTES }; };
+    const MINI_TEST = { testId: "tMini", modules: [{ moduleId: "mMini", questions: [{ id: "x1" }, { id: "x2" }] }] };
+    const OTHER_ACTIVE = { type: "bank", bankId: "bank-202608-salvage", qid: "q0202" };     // active, not in the set
     const s = makeStore({}); const d = build(s, { fetch: slow }, { page: "origin" });
-    d.seed({ builder: { setId: null, name: "Race", subject: "rw", refs: [ACTIVE, FORMREF] }, sets: [], assigns: [] });
+    d.seed({ builder: { setId: null, name: "Race", subject: "rw", refs: [ACTIVE, FORMREF] }, sets: [], assigns: [], fullTest: MINI_TEST, builderTestId: "tMini" });
     d.$("sbName").value = "Race";
     const p = d.fns.saveSetFromBuilder();
-    const locked = d.state().builder.saving === true && /Checking the bank items/.test(msgOf(d)) &&
-      d.fns.pushRef(RETIRED) === false && d.fns.builderRemoveRef(0) === false && d.fns.builderMoveRef(0, 1) === false &&
-      d.fns.builderAddModule("anything") === false && d.state().builder.refs.length === 2;
-    check(locked, "while the check runs the builder is locked: pushRef, remove, reorder and Add whole module all refuse, the refs are untouched, and it says 'Checking…'",
+    const locked = d.state().builder.saving === true && /Checking the bank items/.test(msgOf(d)) && d.$("sbSaveBtn").disabled === true &&
+      d.fns.pushRef(OTHER_ACTIVE) === false && d.fns.builderRemoveRef(0) === false && d.fns.builderMoveRef(0, 1) === false &&
+      d.fns.builderAddModule("mMini") === false && d.state().builder.refs.length === 2;
+    check(locked, "while the check runs the builder is locked (Save painted disabled): adding an ACTIVE item, remove, reorder and Add whole module all refuse",
       JSON.stringify(d.state().builder.refs.map(r => r.qid)));
+    const dIdle = build(makeStore({}), {}, { page: "origin" });
+    dIdle.seed({ builder: { setId: null, name: "Idle", subject: "rw", refs: [ACTIVE, FORMREF] }, fullTest: MINI_TEST, builderTestId: "tMini" });
+    check(dIdle.fns.pushRef(OTHER_ACTIVE) === true && dIdle.fns.builderMoveRef(0, 1) === true && dIdle.fns.builderRemoveRef(0) === true &&
+          dIdle.fns.builderAddModule("mMini") === true && dIdle.state().builder.refs.length === 4,
+      "control: the same four calls succeed when no save is running — each refusal above came from the lock");
     const second = d.fns.saveSetFromBuilder();          // a double click while the first is in flight
     d.state().builder.refs.push(RETIRED);              // …and the refs change anyway (the case the re-check exists for)
     g.open(); await p; await second;
@@ -1518,6 +1567,27 @@ const noSync = t => !/sync/i.test(t);
       "a ref pushed into the live array during the server write reaches neither the server nor the mirror — both hold the checked snapshot",
       k ? JSON.stringify([s.server.get(k).value.refs, s.mirror.get(k).refs]) : "no row");
     check(d.state().builder === other, "a builder opened while a save was writing is NOT closed when that save succeeds");
+    /* …but Edit on the SAME set during the write is refused (the list copy is
+       pre-save), and a builder on that set left over by a stale click closes */
+    const stored = { setId: "pset-same", name: "Same", subject: "rw", refs: [ACTIVE, FORMREF], createdAt: "2026-09-01T00:00:00Z" };
+    const s2 = makeStore({}); const d2 = build(s2, { fetch: realFetch() }, { page: "origin" });
+    s2.seedBoth("pset:pset-same", stored);
+    const put2 = gateOf();
+    const up2 = s2.AS.adminUpsert;
+    s2.AS.adminUpsert = async function(k, owner, v){ const body = JSON.parse(JSON.stringify(v)); await put2.p; return up2.call(this, k, owner, body); };
+    d2.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [], builder: d2.fns.builderFromSet(Object.assign({}, stored, { refs: [FORMREF] })) });
+    d2.$("sbName").value = "Same";
+    const pSame = d2.fns.saveSetFromBuilder();
+    for(let i = 0; i < 40 && !s2.calls.some(c => c[0] === "adminUpsert"); i++) await new Promise(r => setTimeout(r, 5));
+    const saving = d2.state().builder;
+    const reopened = d2.fns.openSetInBuilder("pset-same");
+    const stale = d2.fns.builderFromSet(stored);        // what a stale Edit click would have opened
+    d2.seed({ builder: stale });
+    put2.open(); await pSame;
+    check(reopened === false && d2.state().builder === null && JSON.stringify(s2.server.get("pset:pset-same").value.refs) === JSON.stringify([FORMREF]),
+      "Edit on the set being written is refused, and a builder on that set opened from the pre-save copy is closed when the save lands",
+      JSON.stringify([reopened, d2.state().builder && d2.state().builder.refs]));
+    void saving;
   });
 
   await run(async () => {
@@ -1527,8 +1597,10 @@ const noSync = t => !/sync/i.test(t);
     d.$("sbName").value = "Boom";
     let threw = false;
     try{ await d.fns.saveSetFromBuilder(); }catch(e){ threw = true; }
-    check(threw && d.state().builder !== null && d.state().builder.saving === false && /something went wrong/.test(msgOf(d)),
-      "a storage exception mid-save still unlocks the builder and says something went wrong", [threw, msgOf(d)].join(" | "));
+    check(threw && d.state().builder !== null && d.state().builder.saving === false && /something went wrong/.test(msgOf(d)) &&
+          /something went wrong/.test(d.$("sbMsg").textContent) && d.$("sbSaveBtn").disabled === false,
+      "a storage exception mid-save still unlocks the builder and RE-RENDERS it (Save enabled, 'something went wrong' shown)",
+      [threw, d.$("sbMsg").textContent, d.$("sbSaveBtn").disabled].join(" | "));
   });
 
   /* =================== 9e. the upload button: mirror → server, never the other way =================== */

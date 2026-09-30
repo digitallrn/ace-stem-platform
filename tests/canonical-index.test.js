@@ -136,9 +136,10 @@ const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled"
   "bankEntryIn", "isRetiredBankRef", "retiredRefsOf", "retiredRefText", "bankStatusBadge", "refLabel", "stripTokens",
   "qIndex", "ensureTestLoaded", "viewSetBuilder",
   "bankEntryOf", "liveReplacement", "bankIndexReReadable", "retiredSetsNoticeHtml",
-  "replacementNote", "builderAddModule", "builderRemoveRef", "builderMoveRef"];
+  "replacementNote", "builderAddModule", "builderRemoveRef", "builderMoveRef",
+  "replacementState", "builderFromSet", "openSetInBuilder"];
 const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI", "qIndexes",
-  "BANK_INDEX_URL", "BANK_INDEX_TIMEOUT_MS"];
+  "BANK_INDEX_URL", "BANK_INDEX_TIMEOUT_MS", "bankRefOfKey"];
 const extracted = NAMES.map(n => { try{ return [n, extractFn(src, n)]; }catch(e){ return [n, ""]; } });
 /* module state the new code relies on is taken FROM dashboard.js (a
    declaration missing from the page must fail here too) */
@@ -768,13 +769,13 @@ run("retired", () => {
   check(/>Add<\/button>/.test(own), "picker: an unrelated active row still reads Add", own);
   /* a set that already holds the retired item: reported, kept, never changed */
   const legacy = { setId: "pset-legacy", name: "Old warm-up", subject: "rw", refs: [bankRef(RETIRED), bankRef(BANK_TWIN)] };
-  d.seed({ builder: Object.assign(JSON.parse(JSON.stringify(legacy)), { storedKeys: [RETIRED, BANK_TWIN] }) });   // as the Edit handler opens it
+  d.seed({ builder: d.fns.builderFromSet(legacy) });   // exactly what the list's Edit opens (openSetInBuilder -> builderFromSet)
   const h3 = d.fns.viewSetBuilder();
   const notice3 = (h3.match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0];
   check(notice3.indexOf("This set holds a retired bank item: bank-202608-salvage:q0032 → q0202 (its replacement q0202 can be added once this one is removed). Students still get it as the set was saved") !== -1 &&
         rowOf(h3, RETIRED).indexOf("In set · retired") !== -1 && JSON.stringify(d.state().builder.refs) === JSON.stringify(legacy.refs),
     "builder: a set holding q0032 says so (no claim about when it got there), shows it 'In set · retired', and keeps it untouched", notice3);
-  d.seed({ builder: { setId: "pset-legacy", name: "", subject: "rw", refs: [bankRef(RETIRED), bankRef("bank-202608-salvage:q0098")], storedKeys: [RETIRED, "bank-202608-salvage:q0098"] } });
+  d.seed({ builder: d.fns.builderFromSet({ setId: "pset-legacy", name: "", subject: "rw", refs: [bankRef(RETIRED), bankRef("bank-202608-salvage:q0098")] }) });
   const notice4 = (d.fns.viewSetBuilder().match(/<p class="retired-notice[^]*?<\/p>/) || [""])[0];
   check(notice4.indexOf("holds 2 retired bank items") !== -1 && notice4.indexOf("q0098 → q0239") !== -1 && notice4.indexOf("remove them") !== -1,
     "builder: two retired items read in the plural and each names its live replacement", notice4);
@@ -856,11 +857,13 @@ run("retired", () => {
   const nNew = noteOf(d.fns.viewSetBuilder());
   check(nNew.indexOf("not in the saved set and can't be saved") !== -1 && nNew.indexOf("Students still get") === -1,
     "a NEW set holding an item a save just found retired: 'not in the saved set and can't be saved', never 'students still get it'", nNew);
+  /* the state a save leaves when its re-read found the stored row WITHOUT
+     the item (tutor-writes §9f pins that the save sets storedKeys so) */
   d.seed({ builder: { setId: "pset-e", name: "", subject: "rw", refs: [bankRef(BANK_TWIN)], storedKeys: [] } });
   const nEdit = noteOf(d.fns.viewSetBuilder());
   check(nEdit.indexOf("not in the saved set") !== -1 && nEdit.indexOf("Students still get") === -1,
     "an EDITED set whose stored row doesn't hold that item says the same", nEdit);
-  d.seed({ builder: { setId: "pset-e", name: "", subject: "rw", refs: [bankRef(BANK_TWIN)], storedKeys: [BANK_TWIN] } });
+  d.seed({ builder: d.fns.builderFromSet({ setId: "pset-e", name: "", subject: "rw", refs: [bankRef(BANK_TWIN)] }) });
   check(noteOf(d.fns.viewSetBuilder()).indexOf("Students still get it as the set was saved") !== -1,
     "control: when the stored set DOES hold it, the notice says students still get it");
   d.seed({ bankIndexFresh: null });
@@ -873,7 +876,7 @@ run("retired", () => {
   check(E(S("q0086")).retired && E(S("q0086")).supersededBy === "q0214" && !E(S("q0214")).retired && IT(S("q0086")).canonical !== IT(S("q0214")).canonical,
     "PIN: q0086 is retired → q0214, an active reskin in ANOTHER canonical class");
   check(E(S("q0186")).retired && !E(S("q0186")).supersededBy, "PIN: q0186 is retired with no replacement");
-  const math = (refs) => ({ setId: "pset-n", name: "", subject: E(S("q0086")).subject, refs: refs.map(q => bankRef(S(q))), storedKeys: refs.map(S) });
+  const math = (refs) => d.fns.builderFromSet({ setId: "pset-n", name: "", subject: E(S("q0086")).subject, refs: refs.map(q => bankRef(S(q))) });
   d.seed({ builder: math(["q0086"]) });
   check(d.fns.replacementNote(bankRef(S("q0086"))) === "its replacement q0214 can be added now",
     "a reskin replacement in another class: 'can be added now' (removing the retired one isn't needed)", d.fns.replacementNote(bankRef(S("q0086"))));
@@ -881,10 +884,10 @@ run("retired", () => {
   const n86 = noteOf(d.fns.viewSetBuilder());
   check(d.fns.replacementNote(bankRef(S("q0086"))) === "its replacement q0214 is already in the set" && n86.indexOf("already in the set") !== -1 && n86.indexOf("can then be added") === -1,
     "…already in the set: the notice says so, and promises no replacement 'can then be added'", n86);
-  d.seed({ builder: { setId: "pset-n", name: "", subject: "rw", refs: [bankRef(RETIRED)], storedKeys: [RETIRED] } });
+  d.seed({ builder: d.fns.builderFromSet({ setId: "pset-n", name: "", subject: "rw", refs: [bankRef(RETIRED)] }) });
   check(d.fns.replacementNote(bankRef(RETIRED)) === "its replacement q0202 can be added once this one is removed",
     "same canonical class (q0032 / q0202): 'can be added once this one is removed'", d.fns.replacementNote(bankRef(RETIRED)));
-  d.seed({ builder: { setId: "pset-n", name: "", subject: E(S("q0186")).subject, refs: [bankRef(S("q0186"))], storedKeys: [S("q0186")] } });
+  d.seed({ builder: d.fns.builderFromSet({ setId: "pset-n", name: "", subject: E(S("q0186")).subject, refs: [bankRef(S("q0186"))] }) });
   check(d.fns.replacementNote(bankRef(S("q0186"))) === "no replacement is listed" && noteOf(d.fns.viewSetBuilder()).indexOf("no replacement is listed") !== -1,
     "no replacement at all: says so, never promises one");
   /* a class-mate (possibly another retired copy) holds the replacement's place */
@@ -896,11 +899,11 @@ run("retired", () => {
   }).find(Boolean);
   check(!!pair, "PIN: the index has a retired item whose live replacement shares its class with ANOTHER retired item (the finding-15 shape)", JSON.stringify(pair));
   if(pair){
-    d.seed({ builder: { setId: "pset-n", name: "", subject: E(pair.r).subject, refs: [bankRef(pair.mate)], storedKeys: [pair.mate] } });
+    d.seed({ builder: d.fns.builderFromSet({ setId: "pset-n", name: "", subject: E(pair.r).subject, refs: [bankRef(pair.mate)] }) });
     const rowR = rowOf(d.fns.viewSetBuilder(), pair.r);
     check(rowR.indexOf("its replacement " + pair.live + " is in the set") === -1 && rowR.indexOf("is held by " + d.fns.refText(pair.mate)) !== -1,
       "picker: when a class-mate holds the replacement's place, the row names it instead of claiming the replacement is in the set", rowR);
-    d.seed({ builder: { setId: "pset-n", name: "", subject: E(pair.r).subject, refs: [bankRef(S(pair.live))], storedKeys: [S(pair.live)] } });
+    d.seed({ builder: d.fns.builderFromSet({ setId: "pset-n", name: "", subject: E(pair.r).subject, refs: [bankRef(S(pair.live))] }) });
     check(rowOf(d.fns.viewSetBuilder(), pair.r).indexOf("its replacement " + pair.live + " is in the set") !== -1,
       "control: with the replacement itself in the set, the row says it is in the set");
   }
@@ -929,6 +932,62 @@ run("retired", () => {
   d.seed({ builder: { setId: null, name: "Idle", subject: "rw", refs: [bankRef(REMINT), bankRef(BANK_TWIN)] } });
   check(d.fns.builderMoveRef(0, 1) === true && d.state().builder.refs[0].qid === BANK_TWIN.split(":")[1] && d.fns.builderRemoveRef(1) === true && d.state().builder.refs.length === 1,
     "control: idle, the same edit functions reorder and remove");
+
+  /* ---- third review (2026-09-30) ---- */
+  /* Edit opens the set through builderFromSet: storedKeys = what the stored
+     set holds, so a legacy set's retired item reads "students still get it"
+     (finding 9: the Edit path itself, not a hand-fed seed) */
+  const legacyRow = { setId: "pset-l2", name: "Legacy", subject: "rw", refs: [bankRef(RETIRED), bankRef(BANK_TWIN), "junk"], createdAt: "2026-09-10T00:00:00Z" };
+  d.seed({ sets: [legacyRow], builder: null });
+  check(d.fns.openSetInBuilder("pset-l2") === true && JSON.stringify(d.state().builder.storedKeys) === JSON.stringify([RETIRED, BANK_TWIN]) &&
+        d.state().builder.refs !== legacyRow.refs && noteOf(d.fns.viewSetBuilder()).indexOf("Students still get it as the set was saved") !== -1 &&
+        noteOf(d.fns.viewSetBuilder()).indexOf("not in the saved set") === -1,
+    "Edit (openSetInBuilder -> builderFromSet) records what the stored set holds, so a legacy set's retired item reads 'students still get it'");
+  d.seed({ builder: Object.assign(d.fns.builderFromSet(legacyRow), { saving: true }) });
+  const before2 = d.state().builder;
+  check(d.fns.openSetInBuilder("pset-l2") === false && d.state().builder === before2,
+    "Edit while a save is in flight is refused: no builder is opened from the pre-save copy (finding 1)");
+  const vsSrc = (() => { try{ return extractFn(src, "viewSets"); }catch(e){ return ""; } })();
+  check(/const listBusy = !!\(builder && builder\.saving\);/.test(vsSrc) && /set-edit"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc) &&
+        /set-del"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc) && /id="setNewBtn"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc),
+    "the Sets list renders Edit, Delete and New set disabled while a save is in flight");
+
+  /* a replacement this page's picker can't offer (it exists only in a later
+     re-read) is never promised as addable (finding 5) */
+  const pageCopy = JSON.parse(JSON.stringify(BANK_INDEX));
+  pageCopy.entries = pageCopy.entries.filter(e => e.ref !== REMINT).map(e => e.ref === RETIRED ? Object.assign({}, e, { retired: false, supersededBy: null }) : e);
+  const dP = build({ inlined: REAL_INDEX, bankIndex: pageCopy });
+  dP.fns.ensureDedupLoaded();
+  dP.seed({ builder: { setId: null, name: "", subject: "rw", refs: [bankRef(RETIRED)] }, bankIndexFresh: BANK_INDEX });
+  const nP = dP.fns.replacementNote(bankRef(RETIRED));
+  check(nP === "its replacement q0202 is newer than this page — reload the dashboard to add it" && noteOf(dP.fns.viewSetBuilder()).indexOf("can be added") === -1,
+    "a page older than the retirement: the replacement (minted by the same deploy, absent from this page's picker) says 'reload to add it', never 'can be added'", nP);
+
+  /* two retired copies of one canonical item in the set (finding 6) */
+  check(IT(S("q0148")).canonical === IT(S("q0211")).canonical && IT(S("q0211")).canonical === IT(S("q0241")).canonical &&
+        E(S("q0148")).retired && E(S("q0211")).retired && !E(S("q0241")).retired,
+    "PIN: q0148, q0211 (both retired) and q0241 (live) are one canonical item");
+  d.seed({ builder: d.fns.builderFromSet({ setId: "pset-2r", name: "", subject: E(S("q0148")).subject, refs: [bankRef(S("q0148")), bankRef(S("q0211"))] }) });
+  const n148 = d.fns.replacementNote(bankRef(S("q0148"))), n211 = d.fns.replacementNote(bankRef(S("q0211")));
+  check(n148 === "its replacement q0241 can be added once this one and bank-202608-salvage q0211 are removed" &&
+        n211 === "its replacement q0241 can be added once this one and bank-202608-salvage q0148 are removed",
+    "both retired copies say the replacement is blocked by BOTH (never 'in the set as' a retired item)", n148 + " | " + n211);
+  d.fns.builderRemoveRef(0);
+  check(d.fns.replacementNote(bankRef(S("q0211"))) === "its replacement q0241 can be added once this one is removed" &&
+        /pick-bank"[^>]*data-qid="q0241"[^>]*disabled/.test(d.fns.viewSetBuilder().replace(/\s+/g, " ")),
+    "after removing one, the other says 'once this one is removed', and q0241 is still blocked until it is");
+
+  /* every edit clears the last outcome line; a refused one leaves it (third review, finding 10) */
+  const seedMsg = extra => d.seed({ builder: Object.assign({ setId: null, name: "", subject: "rw", refs: [bankRef(BANK_TWIN), bankRef(REMINT)], msg: "Not saved — X" }, extra || {}) });
+  seedMsg(); d.fns.builderRemoveRef(0); const m1 = d.state().builder.msg;
+  seedMsg(); d.fns.builderMoveRef(0, 1); const m2 = d.state().builder.msg;
+  const freshActive = BANK_INDEX.entries.find(e => e.subject === "rw" && !e.retired && e.ref !== BANK_TWIN && e.ref !== REMINT && REAL_INDEX.items[e.ref] &&
+    Object.keys(REAL_INDEX.items).filter(k => REAL_INDEX.items[k].canonical === REAL_INDEX.items[e.ref].canonical).length === 1);
+  seedMsg(); d.fns.pushRef(bankRef(freshActive.ref)); const m3 = d.state().builder.msg;
+  seedMsg({ saving: true }); d.fns.builderRemoveRef(0); const m4 = d.state().builder.msg;
+  check(m1 === "" && m2 === "" && m3 === "" && m4 === "Not saved — X",
+    "remove, reorder and add each clear the last outcome line; a refused edit (save in flight) leaves it", JSON.stringify([m1, m2, m3, m4]));
+
 
 });
 

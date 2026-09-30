@@ -1280,8 +1280,12 @@
         edit3.click();
         await wait(300);
         const bn = document.querySelector("#dashBody .set-builder .retired-notice");
-        results.push({ surface: "Set builder retired notice renders for the hostile set",
-          pass: !!bn && bn.querySelectorAll("img, [onerror]").length === 0 && !window.__XSS_FIRED,
+        /* the planted row HOLDS the retired ref, so Edit (builderFromSet)
+           must open it as saved: "students still get it", never "not in the
+           saved set" */
+        results.push({ surface: "Set builder retired notice renders for the hostile set, as SAVED",
+          pass: !!bn && bn.querySelectorAll("img, [onerror]").length === 0 && !window.__XSS_FIRED &&
+                /Students still get/.test(bn.textContent) && !/not in the saved set/.test(bn.textContent),
           note: bn ? bn.textContent.slice(0, 160) : "no retired notice in the builder" });
         results.push(audit("Set builder on a hostile set holding a retired item (notice + retired picker rows)", $("dashBody")));
       } else {
