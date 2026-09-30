@@ -37,6 +37,9 @@ window.Dashboard = (function(){
   let builder = null;            // {setId|null, name, subject, refs:[]} while editing
   let bankFilter = { q: "", subject: "", retired: true };   // Question Bank tab
   let bankIndexFresh = null;     // the last successful save-time re-read of bank-index.js (retired items)
+  let setSaveInFlight = 0;       // set saves running — a PAGE-level lock: Cancel can close the saving
+                                 // builder, but Edit/Delete/New set wait until the save (and the reload
+                                 // of `sets` it ends with) has settled
   let builderTestId = "";        // which form's questions the builder shows
   let setsMsg = "";              // one-line status inside the Sets tab
   let saMsg = "";                // outcome line under the set-assign form — a
@@ -2404,9 +2407,10 @@ window.Dashboard = (function(){
   function viewSets(){
     const canWrite = source === "storage";
     if(!canWrite) return '<p class="dash-empty">You\'re viewing a loaded archive file — sets are managed against live storage. Reload from storage first.</p>';
-    /* while a set save runs, the list's Edit / Delete / New set wait for it:
-       an Edit opened now would be built from the pre-save copy */
-    const listBusy = !!(builder && builder.saving);
+    /* while ANY set save runs, the list's Edit / Delete / New set wait for
+       it — Cancel closes the saving builder but not the save, and an Edit
+       opened before the save's reload of `sets` would be the pre-save copy */
+    const listBusy = setSaveInFlight > 0;
     /* canonical-id marks (2026-09-07): lazy index, one notice when off, and
        the seen set of the student chosen in the Student filter */
     ensureDedupLoaded();
@@ -2707,7 +2711,7 @@ window.Dashboard = (function(){
   }
   async function saveSetFromBuilder(){
     const b = builder;
-    if(!b || b.saving) return;           // one save at a time: the builder is read-only while it runs
+    if(!b || b.saving || setSaveInFlight > 0) return;   // one save at a time, page-wide; the builder is read-only while it runs
     /* Every outcome line lives on the builder (b.msg) and is rendered by
        viewSetBuilder: a textContent write into #sbMsg is wiped by the next
        re-render, and async settles re-render at any moment (the saMsg
@@ -2729,8 +2733,10 @@ window.Dashboard = (function(){
     const snap = JSON.parse(JSON.stringify(b.refs));
     const keysOf = refs => JSON.stringify(refs.map(r => (r && typeof r === "object") ? refKey(r) : String(r)));
     const hasBank = snap.some(r => r && r.type === "bank");
+    let counted = false;
     try{
       b.saving = true;
+      setSaveInFlight++; counted = true;
       say(hasBank ? "Checking the bank items…" : "Saving…");
       /* A retired bank item never ENTERS a set (see freshestBankIndex).
          "Already in the set" is judged against the set as STORED NOW —
@@ -2765,10 +2771,17 @@ window.Dashboard = (function(){
           delete b.createdAt;
           b.storedKeys = [];
           b.saving = false;
+          /* local: storage is the only store, so the list can drop the row;
+             remote: the mirror is never pruned (a known limit), and the row
+             may also be a never-uploaded one, so it stays listed */
+          if(!AttemptStore.isRemote()){ try{ await loadSets(); }catch(e){} }
+          /* local mode: one browser's storage; artifact (shared) mode: storage
+             shared across browsers */
           say("Not saved — " + what + (AttemptStore.isRemote()
-                ? " isn't on the server: it was deleted in another browser or tab, or it was built on this device and never uploaded" +
-                  " (if so, Cancel and press “Upload local records to server” instead)."
-                : " no longer exists (deleted in another tab).") +
+                ? " isn't on the server: it was deleted in another browser or tab, or it was built on this device and never uploaded." +
+                  " Only if you're sure it was never uploaded, Cancel and use “Upload local records to server” — if it was deleted" +
+                  " elsewhere, that brings it back and re-opens its unstarted assignments."
+                : " no longer exists (deleted in another " + (AttemptStore.isLocal() ? "tab" : "browser or tab") + ").") +
               " Its questions are kept here as a NEW set: press Save set to save them under a new id, or Cancel to drop them.");
           return;
         }
@@ -2852,12 +2865,11 @@ window.Dashboard = (function(){
         : res.message;
       b.saving = false;
       /* a rejected save leaves the builder open with the reason BESIDE Save
-         (and on the Sets line); a successful one closes the builder it saved
-         — never one the tutor opened while this save was running */
+         (and on the Sets line); a successful one closes the builder it saved.
+         While a save runs no other builder can be opened (the page lock);
+         defensively, a builder on THIS set is closed as well, since it could
+         only hold pre-save data */
       b.msg = ok ? "" : res.message;
-      /* …and, defensively, one opened on THIS set from pre-save data (the
-         list's Edit is disabled while a save runs, so only a stale click
-         could reach here) */
       if(ok){
         b.storedKeys = snap.filter(r => r && typeof r === "object").map(refKey);
         if(builder === b || (builder && builder.setId && builder.setId === set.setId)) builder = null;
@@ -2866,13 +2878,17 @@ window.Dashboard = (function(){
       renderKeepingInputs();
     }finally{
       /* an exception on the way (a throwing storage or render) must never
-         leave the builder locked read-only; the unlock's own re-render must
-         not mask the original exception */
+         leave the builder locked read-only */
       if(b.saving){
         b.saving = false;
         b.msg = "Not saved — something went wrong (see the browser console).";
-        if(builder === b){ try{ renderKeepingInputs(); }catch(e){ console.warn(e); } }
       }
+      /* the page lock comes off only now — after the success path reloaded
+         `sets` — and the page is repainted so the list's buttons come back
+         (also when the tutor cancelled the builder mid-save). The repaint must
+         not mask an original exception. */
+      if(counted) setSaveInFlight = Math.max(0, setSaveInFlight - 1);
+      try{ renderKeepingInputs(); }catch(e){ console.warn(e); }
     }
   }
   /* The freshest copy of one assignment row, or null if it no longer exists:
@@ -2966,15 +2982,28 @@ window.Dashboard = (function(){
       refs: loaded, createdAt: s.createdAt,
       storedKeys: loaded.filter(r => r && typeof r === "object").map(refKey) }));
   }
-  /* Edit: never while a save is in flight — the set it would open is still
-     the pre-save copy in `sets` */
+  /* Edit / New set / Delete from the Sets list: never while a set save is in
+     flight (page-wide — Cancel doesn't end a save): an Edit would open the
+     pre-save copy in `sets`, and a New set or Delete would act mid-write */
   function openSetInBuilder(setId){
-    if(builder && builder.saving) return false;
+    if(setSaveInFlight > 0) return false;
     const s = sets.find(x => x && x.setId === setId);
     if(!s) return false;
     builder = builderFromSet(s);
     builderTestId = "";
     render();
+    return true;
+  }
+  function newSetInBuilder(){
+    if(setSaveInFlight > 0) return false;
+    builder = { setId: null, name: "", subject: "math", refs: [] };
+    builderTestId = "";
+    render();
+    return true;
+  }
+  function deleteSetFromList(setId){
+    if(setSaveInFlight > 0) return false;
+    deleteSet(setId);
     return true;
   }
   /* The builder's other edits, each refusing while a save is in flight (the
@@ -3003,16 +3032,11 @@ window.Dashboard = (function(){
   }
   function attachSetsHandlers(){
     const nb = $("setNewBtn");
-    if(nb) nb.addEventListener("click", ()=>{
-      if(builder && builder.saving) return;          // the save in flight finishes first
-      builder = { setId: null, name: "", subject: "math", refs: [] };
-      builderTestId = "";
-      render();
-    });
+    if(nb) nb.addEventListener("click", ()=> newSetInBuilder());
     document.querySelectorAll("#dashBody .set-edit").forEach(btn =>
       btn.addEventListener("click", ()=> openSetInBuilder(btn.dataset.set)));
     document.querySelectorAll("#dashBody .set-del").forEach(btn =>
-      btn.addEventListener("click", ()=>{ if(!(builder && builder.saving)) deleteSet(btn.dataset.set); }));
+      btn.addEventListener("click", ()=> deleteSetFromList(btn.dataset.set)));
     if(builder){
       const nameIn = $("sbName");
       if(nameIn) nameIn.addEventListener("input", ()=>{ builder.name = nameIn.value; });

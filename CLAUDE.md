@@ -398,10 +398,13 @@ record-derived value.
   re-read fails on a page that loaded the index over http(s), the save is
   refused too (the single-file build, whose index is inlined, and a file://
   copy, which can't fetch, trust their own copy — no re-read is tried). A
-  set deleted elsewhere is never recreated by such a save. A successful
+  set whose stored row is gone is never recreated by such a save: the
+  builder becomes an unsaved NEW set keeping its questions. A successful
   re-read is kept, so the picker then drops the Add. The builder (name
   included) is read-only while a save runs, the save writes the exact
-  snapshot it checked, and it closes only the builder it saved. Limits: a tab loaded BEFORE this code shipped runs the
+  snapshot it checked, and a PAGE-wide lock (`setSaveInFlight`) keeps the
+  Sets list's Edit / Delete / New set off until the save — and its reload
+  of `sets` — has settled, even if the tutor pressed Cancel. Limits: a tab loaded BEFORE this code shipped runs the
   old picker (reload open dashboards after a deploy), and the server does not
   check set contents. A set that already holds a retired item — saved before
   the retirement, or built on the old picker — keeps it; the Sets tab reports

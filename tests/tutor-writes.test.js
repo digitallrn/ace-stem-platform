@@ -71,6 +71,7 @@ function makeStore(opts){
   const expired = () => { const e = new Error(opts.errorMessage || "JWT expired"); e.status = opts.errorStatus === undefined ? 401 : opts.errorStatus; return e; };
   const AS = {
     isRemote: () => opts.remote !== false,
+    isLocal: () => opts.remote === false && !opts.shared,        // artifact ("shared") mode is neither remote nor local
     hasAuthToken: () => true,
     async setLocal(k, v){ calls.push(["setLocal", k]); ops.push(["mirror:set", k]); if(opts.localThrow) throw new Error("storage exploded"); if(opts.localFail) return false; mirror.set(k, clone(v)); return true; },
     async remove(k){ calls.push(["remove", k]); ops.push(["mirror:remove", k]); if(opts.localFail) return false; mirror.delete(k); return true; },
@@ -203,7 +204,7 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   "freshestBankIndex", "refusedBankRefs", "storedSetRefKeys",
   // the builder's own edits and the renderer the save uses (second review, 2026-09-30)
   "renderKeepingInputs", "pushRef", "builderHeldAs", "canonRef", "splitRef", "manifestEntry",
-  "builderAddModule", "builderRemoveRef", "builderMoveRef", "builderFromSet", "openSetInBuilder"];
+  "builderAddModule", "builderRemoveRef", "builderMoveRef", "builderFromSet", "openSetInBuilder", "newSetInBuilder", "deleteSetFromList"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
@@ -225,7 +226,7 @@ function decl(name){
   const m = src.match(new RegExp("^[ \\t]*(?:let|const)[ \\t]+" + name + "[ \\t]*=[^;\\n]*;", "m"));
   return m ? m[0] : "/* dashboard.js no longer declares " + name + " */";
 }
-const STATE_SRC = [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests")].join("\n");
+const STATE_SRC = [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight")].join("\n");
 const BODY = NAMES.map(tryExtract).join("\n") + "\n" + URL_SRC + "\n" + KEPT_SRC + "\n" + STATE_SRC +
   "\nconst BANK_INDEX_TIMEOUT_MS = 60;\n";
 /* The page kinds the re-read decision depends on, built from the REAL
@@ -301,7 +302,13 @@ function build(store, win, doc){
     /* render paints what viewSetBuilder paints for the builder's outcome
        line and Save button (so a check can see a render happened, and what
        it showed), after wiping the body as the real one does */
-    function paintBuilder(){ $("sbMsg").textContent = builder ? (builder.msg || "") : ""; $("sbSaveBtn").disabled = !!(builder && builder.saving); }
+    const paints = [];
+    function paintBuilder(){
+      $("sbMsg").textContent = builder ? (builder.msg || "") : ""; $("sbSaveBtn").disabled = !!(builder && builder.saving);
+      $("setNewBtn").disabled = setSaveInFlight > 0;       // viewSets' listBusy
+      paints.push({ msg: builder ? (builder.msg || "") : null, setId: builder ? builder.setId : undefined,
+                    storedKeys: builder && builder.storedKeys ? builder.storedKeys.slice() : null, inFlight: setSaveInFlight });
+    }
     function render(){ loads.render++; wipeBody(); paintBuilder(); }
     function renderAll(){ loads.render++; wipeBody(); paintBuilder(); }
     /* canonical-id awareness (2026-09-07): createAssignment appends the
@@ -315,7 +322,7 @@ function build(store, win, doc){
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
     return {
       fns,
-      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs }),
+      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs, paints, setSaveInFlight }),
       setTab: t => { tab = t; },
       seed: o => {
         if("recs" in o) recs = o.recs; if("assigns" in o) assigns = o.assigns; if("profiles" in o) profiles = o.profiles;
@@ -1231,14 +1238,26 @@ const noSync = t => !/sync/i.test(t);
     for(const page of ["origin", "file", "inlined"]) kinds[page] = build(makeStore({}), {}, { page: page }).fns.bankIndexReReadable();
     check(kinds.origin === true && kinds.file === false && kinds.inlined === false,
       "bankIndexReReadable: true for index.html over http(s), false for a file:// copy and for the single-file build", JSON.stringify(kinds));
-    if(!fs.existsSync("dist/index-live.html")){
-      console.log("SKIP | dist/index-live.html is absent (gitignored) — the built file itself was not checked; the model above follows assemble.py's rule");
-    } else if(fs.statSync("dist/index-live.html").mtimeMs < fs.statSync("index.html").mtimeMs){
-      check(false, "dist/index-live.html is older than index.html — rebuild it (python assemble.py) so its <script> tags are checked");
-    } else {
-      const distSrcs = [...fs.readFileSync("dist/index-live.html", "utf8").matchAll(/<script\b[^>]*\bsrc="([^"]*)"/g)].map(m => m[1]);
-      check(distSrcs.indexOf("testdata/bank-index.js") === -1, "the assembled dist/index-live.html carries no <script src> for the bank index", distSrcs.join(", "));
+    /* …and the REAL build: assemble.py run into a temp file, its surviving
+       <script src> tags compared with the model the page kinds use */
+    const os = require("os"), path = require("path"), { spawnSync } = require("child_process");
+    const outFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tw-assemble-")), "index-live.html");
+    let built = null;
+    for(const py of ["python", "python3"]){
+      const r = spawnSync(py, ["assemble.py", "--out", outFile], { encoding: "utf8" });
+      if(r.status === 0 && fs.existsSync(outFile)){ built = fs.readFileSync(outFile, "utf8"); break; }
     }
+    if(built === null){
+      console.log("SKIP | no python could run assemble.py — the real single-file build was not checked (the model follows assemble.py's regex)");
+    } else {
+      const realSrcs = [...built.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/g)].map(m => m[1]);
+      check(realSrcs.indexOf("testdata/bank-index.js") === -1 && JSON.stringify(realSrcs.slice().sort()) === JSON.stringify(INLINED_SRCS.slice().sort()),
+        "the REAL single-file build (assemble.py, run now) keeps exactly the <script src> tags the 'inlined' page model keeps — and not the bank index's",
+        JSON.stringify({ real: realSrcs, model: INLINED_SRCS }));
+    }
+    try{ fs.rmSync(path.dirname(outFile), { recursive: true, force: true }); }catch(e){}
+    check(/id="dashMigrateBtn"[^>]*>[^<]*Upload local records to server</.test(INDEX_HTML),
+      "the button the no-stored-row advice names ('Upload local records to server') exists in index.html under that label");
   });
 
   await run(async () => {
@@ -1274,7 +1293,8 @@ const noSync = t => !/sync/i.test(t);
       d2.$("saFree").value = "AS-ABCDEFGH"; d2.$("saLimit").value = "25"; d2.$("saHold").checked = true;
       await d2.fns.saveSetFromBuilder();
       check(d2.$("saFree").value === "AS-ABCDEFGH" && d2.$("saLimit").value === "25" && d2.$("saHold").checked === true &&
-            (reject ? /^Not saved — set pset-/.test(d2.$("sbMsg").textContent) : d2.state().builder === null),
+            (reject ? /^Not saved — set pset-/.test(d2.$("sbMsg").textContent)
+                    : (d2.state().builder === null && d2.$("sbMsg").textContent === "" && d2.$("sbSaveBtn").disabled === false && d2.$("setNewBtn").disabled === false)),
         (reject ? "a save the server rejects" : "a save that succeeds") + " re-renders keeping the Assign-a-set form" + (reject ? ", with the reason painted beside Save" : ""),
         JSON.stringify([d2.$("sbMsg").textContent, d2.$("saFree").value]));
     }
@@ -1355,24 +1375,29 @@ const noSync = t => !/sync/i.test(t);
     /* deleted in another browser or tab (second review, finding 9): gone is
        not "holds nothing" — the save must not recreate it */
     const gone = { setId: "pset-X", name: "Deleted elsewhere", subject: "rw", refs: [RETIRED, ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
-    for(const remote of [true, false]){
-      const s = makeStore({ remote: remote }); const d = build(s, { fetch: realFetch() }, { page: "origin" });
-      d.seed({ sets: [JSON.parse(JSON.stringify(gone))], assigns: [],
-        builder: { setId: "pset-X", name: "Deleted elsewhere", subject: "rw", refs: [ACTIVE], createdAt: gone.createdAt } });
+    for(const mode of ["remote", "local", "shared"]){
+      const remote = mode === "remote";
+      const s = makeStore({ remote: remote, shared: mode === "shared" }); const d = build(s, { fetch: realFetch() }, { page: "origin" });
+      d.seed({ sets: [JSON.parse(JSON.stringify(gone))], assigns: [], builder: d.fns.builderFromSet(gone) });
+      const sets0 = d.state().loads.sets;
       d.$("sbName").value = "Deleted elsewhere";
       await d.fns.saveSetFromBuilder();
       const m = msgOf(d); everyMessage.push(m);
+      const refusalPaint = d.state().paints.filter(p => p.msg === m).pop();
       check(!s.server.has("pset:pset-X") && !s.mirror.has("pset:pset-X") && !s.calls.some(c => (c[0] === "adminUpsert" || c[0] === "setLocal") && c[1] === "pset:pset-X") &&
-            (remote ? /isn't on the server: it was deleted in another browser or tab, or it was built on this device and never uploaded.*Upload local records to server/.test(m)
-                    : /no longer exists \(deleted in another tab\)/.test(m)) &&
-            /kept here as a NEW set/.test(m) && d.state().builder.setId === null && d.state().builder.refs.length === 1 &&
-            JSON.stringify(d.state().builder.storedKeys) === "[]" && !("createdAt" in d.state().builder),
-        (remote ? "remote" : "local") + ": a set with no stored row is not recreated; the builder becomes an unsaved NEW set that keeps its questions" +
-        (remote ? " (and the message names the never-uploaded case and the Upload button)" : ""), m);
+            (remote ? /isn't on the server: it was deleted in another browser or tab, or it was built on this device and never uploaded\. Only if you're sure it was never uploaded.*Upload local records to server.*brings it back and re-opens its unstarted assignments/.test(m)
+                    : mode === "shared" ? /no longer exists \(deleted in another browser or tab\)/.test(m) : /no longer exists \(deleted in another tab\)/.test(m)) &&
+            /kept here as a NEW set/.test(m) && d.state().builder.setId === null && d.state().builder.refs.length === 2 &&
+            JSON.stringify(d.state().builder.storedKeys) === "[]" && !("createdAt" in d.state().builder) &&
+            !!refusalPaint && refusalPaint.setId === null && JSON.stringify(refusalPaint.storedKeys) === "[]" &&
+            (remote ? d.state().loads.sets === sets0 : d.state().loads.sets === sets0 + 1),
+        mode + ": a set with no stored row is not recreated; the builder becomes an unsaved NEW set keeping ALL its questions (already so when the refusal is painted)" +
+        (remote ? ", and the Upload advice carries its warning" : ", and the list is reloaded"), m);
+      d.fns.builderRemoveRef(0);                          // the retired item can't go into a new set
       await d.fns.saveSetFromBuilder();
       const rows = [...(remote ? s.server.keys() : s.mirror.keys())].filter(k => k.indexOf("pset:") === 0);
       check(rows.length === 1 && rows[0] !== "pset:pset-X" && d.state().builder === null,
-        (remote ? "remote" : "local") + ": the next Save set saves those questions under a NEW id — the deleted id is never recreated", rows.join(", "));
+        mode + ": the next Save set saves those questions under a NEW id — the deleted id is never recreated", rows.join(", "));
     }
   });
 
@@ -1588,6 +1613,26 @@ const noSync = t => !/sync/i.test(t);
       "Edit on the set being written is refused, and a builder on that set opened from the pre-save copy is closed when the save lands",
       JSON.stringify([reopened, d2.state().builder && d2.state().builder.refs]));
     void saving;
+    /* Cancel does not end a save: after it, Edit / New set / Delete still
+       wait for the save (the lock is page-wide), then come back */
+    const s3 = makeStore({}); const d3 = build(s3, { fetch: realFetch() }, { page: "origin" });
+    s3.seedBoth("pset:pset-same", stored);
+    const put3 = gateOf();
+    const up3 = s3.AS.adminUpsert;
+    s3.AS.adminUpsert = async function(k, owner, v){ const body = JSON.parse(JSON.stringify(v)); await put3.p; return up3.call(this, k, owner, body); };
+    d3.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [], builder: d3.fns.builderFromSet(Object.assign({}, stored, { refs: [FORMREF] })) });
+    d3.$("sbName").value = "Same";
+    const p3 = d3.fns.saveSetFromBuilder();
+    for(let i = 0; i < 40 && !s3.calls.some(c => c[0] === "adminUpsert"); i++) await new Promise(r => setTimeout(r, 5));
+    d3.seed({ builder: null });                         // Cancel mid-write
+    const afterCancel = [d3.fns.openSetInBuilder("pset-same"), d3.fns.newSetInBuilder(), d3.fns.deleteSetFromList("pset-same")];
+    const deletesDuring = s3.calls.filter(c => c[0] === "adminDelete").length;
+    put3.open(); await p3;
+    const afterSave = d3.fns.openSetInBuilder("pset-same");
+    check(JSON.stringify(afterCancel) === "[false,false,false]" && deletesDuring === 0 && d3.state().setSaveInFlight === 0 && afterSave === true &&
+          d3.$("setNewBtn").disabled === false,
+      "Cancel during a write doesn't end the save: Edit, New set and Delete still refuse until it settles (the page lock), then the list works again",
+      JSON.stringify({ afterCancel, deletesDuring, inFlight: d3.state().setSaveInFlight, afterSave }));
   });
 
   await run(async () => {

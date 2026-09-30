@@ -137,7 +137,7 @@ const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled"
   "qIndex", "ensureTestLoaded", "viewSetBuilder",
   "bankEntryOf", "liveReplacement", "bankIndexReReadable", "retiredSetsNoticeHtml",
   "replacementNote", "builderAddModule", "builderRemoveRef", "builderMoveRef",
-  "replacementState", "builderFromSet", "openSetInBuilder"];
+  "replacementState", "builderFromSet", "openSetInBuilder", "newSetInBuilder"];
 const CONSTS = ["esc", "escAttr", "MARKS", "DEDUP_FETCH_TIMEOUT_MS", "KEPT_VALUES", "KEPT_CHECKS", "KEPT_MULTI", "qIndexes",
   "BANK_INDEX_URL", "BANK_INDEX_TIMEOUT_MS", "bankRefOfKey"];
 const extracted = NAMES.map(n => { try{ return [n, extractFn(src, n)]; }catch(e){ return [n, ""]; } });
@@ -149,7 +149,7 @@ function decl(name){
 }
 const BODY = extracted.map(x => x[1]).join("\n") + "\n" +
   CONSTS.map(n => { try{ return extractConst(src, n); }catch(e){ return ""; } }).join("\n") + "\n" +
-  [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests")].join("\n");
+  [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight")].join("\n");
 const PRESENT = extracted.filter(x => x[1] !== "").map(x => x[0]);
 
 const StudentCode = {
@@ -213,6 +213,7 @@ function build(opts){
         if("recs" in o) recs = o.recs; if("builder" in o) builder = o.builder; if("tab" in o) tab = o.tab;
         if("sets" in o) sets = o.sets; if("bankIndexFresh" in o) bankIndexFresh = o.bankIndexFresh;
         if("builderTestId" in o) builderTestId = o.builderTestId; if("fullTest" in o) fullTests[o.fullTest.testId] = o.fullTest;
+        if("setSaveInFlight" in o) setSaveInFlight = o.setSaveInFlight;
         if("profiles" in o) profiles = o.profiles;
       }
     };
@@ -943,12 +944,22 @@ run("retired", () => {
         d.state().builder.refs !== legacyRow.refs && noteOf(d.fns.viewSetBuilder()).indexOf("Students still get it as the set was saved") !== -1 &&
         noteOf(d.fns.viewSetBuilder()).indexOf("not in the saved set") === -1,
     "Edit (openSetInBuilder -> builderFromSet) records what the stored set holds, so a legacy set's retired item reads 'students still get it'");
-  d.seed({ builder: Object.assign(d.fns.builderFromSet(legacyRow), { saving: true }) });
+  d.seed({ builder: Object.assign(d.fns.builderFromSet(legacyRow), { saving: true }), setSaveInFlight: 1 });
   const before2 = d.state().builder;
-  check(d.fns.openSetInBuilder("pset-l2") === false && d.state().builder === before2,
-    "Edit while a save is in flight is refused: no builder is opened from the pre-save copy (finding 1)");
+  check(d.fns.openSetInBuilder("pset-l2") === false && d.fns.newSetInBuilder() === false && d.state().builder === before2,
+    "Edit and New set while a save is in flight are refused: no builder is opened from the pre-save copy (finding 1)");
+  d.seed({ builder: null, setSaveInFlight: 1 });      // the saving builder was CANCELLED — the save still runs
+  check(d.fns.openSetInBuilder("pset-l2") === false && d.fns.newSetInBuilder() === false && d.state().builder === null,
+    "…and still refused after Cancel closed the saving builder: the lock is page-wide, not per-builder (verification sweep 1)");
+  d.seed({ setSaveInFlight: 0 });
+  check(d.fns.newSetInBuilder() === true && d.state().builder && d.state().builder.setId === null, "control: with no save in flight, New set opens an empty builder");
+  const ashSrc = (() => { try{ return extractFn(src, "attachSetsHandlers"); }catch(e){ return ""; } })();
+  check(/\.set-edit"\)\.forEach\(btn =>\s*btn\.addEventListener\("click", \(\)=> openSetInBuilder\(btn\.dataset\.set\)\)\)/.test(ashSrc) &&
+        /nb\.addEventListener\("click", \(\)=> newSetInBuilder\(\)\)/.test(ashSrc) &&
+        /\.set-del"\)\.forEach\(btn =>\s*btn\.addEventListener\("click", \(\)=> deleteSetFromList\(btn\.dataset\.set\)\)\)/.test(ashSrc),
+    "the Sets list's Edit, New set and Delete buttons are wired to the guarded functions (openSetInBuilder, newSetInBuilder, deleteSetFromList)");
   const vsSrc = (() => { try{ return extractFn(src, "viewSets"); }catch(e){ return ""; } })();
-  check(/const listBusy = !!\(builder && builder\.saving\);/.test(vsSrc) && /set-edit"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc) &&
+  check(/const listBusy = setSaveInFlight > 0;/.test(vsSrc) && /set-edit"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc) &&
         /set-del"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc) && /id="setNewBtn"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc),
     "the Sets list renders Edit, Delete and New set disabled while a save is in flight");
 
@@ -987,6 +998,54 @@ run("retired", () => {
   seedMsg({ saving: true }); d.fns.builderRemoveRef(0); const m4 = d.state().builder.msg;
   check(m1 === "" && m2 === "" && m3 === "" && m4 === "Not saved — X",
     "remove, reorder and add each clear the last outcome line; a refused edit (save in flight) leaves it", JSON.stringify([m1, m2, m3, m4]));
+
+  /* ---- verification pass (2026-09-30) ---- */
+  /* the picker's row note follows the offered rule (sweep 4): a retired row
+     whose replacement this page can't offer says "reload", never "use" */
+  dP.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] }, bankIndexFresh: BANK_INDEX });
+  const rowPage = rowOf(dP.fns.viewSetBuilder(), RETIRED);
+  d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [] }, bankIndexFresh: null });
+  const rowFull = rowOf(d.fns.viewSetBuilder(), RETIRED);
+  check(rowPage.indexOf("its replacement q0202 is newer than this page — reload to add it") !== -1 && rowPage.indexOf("use q0202") === -1 &&
+        rowFull.indexOf("; use q0202") !== -1,
+    "picker: a retired row whose replacement only a later re-read knows says 'reload to add it'; with the replacement on the page it says 'use q0202'",
+    rowPage.slice(-220) + " || " + rowFull.slice(-120));
+  /* the reskin case: the replacement is in another class, so no class-mate
+     is involved — "can be added now" must still yield to "not offered" */
+  const page86 = JSON.parse(JSON.stringify(BANK_INDEX));
+  page86.entries = page86.entries.filter(e => e.ref !== S("q0214"));
+  const d86 = build({ inlined: REAL_INDEX, bankIndex: page86 });
+  d86.fns.ensureDedupLoaded();
+  d86.seed({ builder: d86.fns.builderFromSet({ setId: "pset-86", name: "", subject: E(S("q0086")).subject, refs: [bankRef(S("q0086"))] }), bankIndexFresh: BANK_INDEX });
+  check(d86.fns.replacementNote(bankRef(S("q0086"))) === "its replacement q0214 is newer than this page — reload the dashboard to add it",
+    "a reskin replacement (another class) missing from this page's picker: 'reload', never 'can be added now'", d86.fns.replacementNote(bankRef(S("q0086"))));
+  /* a retired copy plus a LIVE copy of one canonical item (verification fix 5) */
+  check(E(S("q0044")).retired && E(S("q0044")).supersededBy === "q0204" && !E(S("q0217")).retired &&
+        IT(S("q0044")).canonical === IT(S("q0217")).canonical && IT(S("q0204")).canonical === IT(S("q0044")).canonical,
+    "PIN: q0044 (retired → q0204) shares its canonical item with live q0217 and with q0204");
+  for(const order of [["q0044", "q0217"], ["q0217", "q0044"]]){
+    d.seed({ builder: d.fns.builderFromSet({ setId: "pset-44", name: "", subject: E(S("q0044")).subject, refs: order.map(q => bankRef(S(q))) }) });
+    check(d.fns.replacementNote(bankRef(S("q0044"))) === "its replacement q0204 is in the set as bank-202608-salvage q0217",
+      "a retired copy beside a LIVE copy of its item (" + order.join(", ") + "): the note names the live copy holding the place, never a retired one",
+      d.fns.replacementNote(bankRef(S("q0044"))));
+  }
+  /* Add whole module: goes through the one door (no duplicate, no retired),
+     clears the outcome line; a refused one leaves it (verification fix 8) */
+  const modTest = { testId: "202412usv2", modules: [{ moduleId: "m-t", section: "Reading and Writing", questions: [{ id: "re2-q25" }, { id: "re2-q24" }] }] };
+  d.seed({ fullTest: modTest, builderTestId: "202412usv2",
+           builder: { setId: null, name: "", subject: "rw", refs: [bankRef(BANK_TWIN)], msg: "Not saved — X" } });
+  check(d.fns.builderAddModule("m-t") === true && d.state().builder.msg === "" &&
+        JSON.stringify(d.state().builder.refs.map(r => r.qid)) === JSON.stringify(["q0049", "re2-q24"]),
+    "Add whole module clears the outcome line and adds through pushRef: re2-q25 (held as its bank twin q0049) is not added twice",
+    JSON.stringify(d.state().builder.refs.map(r => r.qid)));
+  for(const [label, call] of [["reorder", () => d.fns.builderMoveRef(0, 1)], ["Add whole module", () => d.fns.builderAddModule("m-t")],
+                               ["add", () => d.fns.pushRef(bankRef(freshActive.ref))]]){
+    d.seed({ builder: { setId: null, name: "", subject: "rw", refs: [bankRef(BANK_TWIN), bankRef(REMINT)], msg: "Checking the bank items…", saving: true } });
+    call();
+    check(d.state().builder.msg === "Checking the bank items…" && d.state().builder.refs.length === 2,
+      "a refused " + label + " (save in flight) leaves the outcome line and the refs alone");
+  }
+
 
 
 });
