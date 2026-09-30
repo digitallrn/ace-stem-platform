@@ -933,6 +933,25 @@ run("retired", () => {
   d.seed({ builder: { setId: null, name: "Idle", subject: "rw", refs: [bankRef(REMINT), bankRef(BANK_TWIN)] } });
   check(d.fns.builderMoveRef(0, 1) === true && d.state().builder.refs[0].qid === BANK_TWIN.split(":")[1] && d.fns.builderRemoveRef(1) === true && d.state().builder.refs.length === 1,
     "control: idle, the same edit functions reorder and remove");
+  /* a set write that is NOT this builder's own save — a set Delete, or a
+     save whose builder was cancelled — locks the view too (final check,
+     finding 3: its Save could otherwise race the Delete) */
+  const pageLocked = () => {
+    const h = d.fns.viewSetBuilder().replace(/\s+/g, " ");
+    const t = re => (h.match(re) || []);
+    return { refs: t(/<button class="dash-rel ref-(?:up|down|rm)"[^>]*>/g), picks: t(/<button class="dash-rel pick-(?:bank|form|module)"[^>]*>/g),
+             name: /<input id="sbName"[^>]*\sdisabled/.test(h), save: /id="sbSaveBtn"[^>]*disabled/.test(h) };
+  };
+  d.seed({ builder: { setId: "pset-open", name: "Open", subject: "rw", refs: [bankRef(REMINT), bankRef(BANK_TWIN), { type: "form", testId: "202412usv2", moduleId: rwMod.moduleId, qid: rwMod.questions[0].id }] },
+           setSaveInFlight: 1 });
+  const pl = pageLocked();
+  check(allDisabled(pl.refs) && allDisabled(pl.picks) && pl.name && pl.save,
+    "while ANY set write is in flight (not only this builder's save), every ↑ ↓ ✕, Add, the name and Save are disabled");
+  d.seed({ setSaveInFlight: 0 });
+  const pu = pageLocked();
+  const rms = pu.refs.filter(x => /ref-rm"/.test(x));   // ↑ on the first row and ↓ on the last are disabled by position
+  check(rms.length === 3 && rms.every(x => !/\sdisabled/.test(x)) && !pu.name && !pu.save,
+    "control: with no set write in flight, the same builder's ✕, name and Save are enabled");
 
   /* ---- third review (2026-09-30) ---- */
   /* Edit opens the set through builderFromSet: storedKeys = what the stored
@@ -962,6 +981,18 @@ run("retired", () => {
   check(/const listBusy = setSaveInFlight > 0;/.test(vsSrc) && /set-edit"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc) &&
         /set-del"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc) && /id="setNewBtn"[^>]*\$\{listBusy \? "disabled" : ""\}/.test(vsSrc),
     "the Sets list renders Edit, Delete and New set disabled while a save is in flight");
+  /* the other writes a set save races (final check, findings 1/2): every
+     assignment Delete button and Assign set render disabled under the lock
+     (the functions behind them refuse too — tests/tutor-writes.test.js) */
+  const vaSrc = (() => { try{ return extractFn(src, "viewAssign"); }catch(e){ return ""; } })();
+  const vsaSrc = (() => { try{ return extractFn(src, "viewSetAssign"); }catch(e){ return ""; } })();
+  const delBtns = s => (s.match(/<button class="dash-rel assign-del".*?>Delete<\/button>/g) || []);
+  const lockAttr = '${setSaveInFlight > 0 ? "disabled" : ""}';
+  check(delBtns(vaSrc).length === 1 && delBtns(vsaSrc).length === 1 && delBtns(src).length === 2 &&
+        delBtns(src).every(t => t.indexOf(lockAttr) !== -1) &&
+        /id="saAssignBtn"[^\n]*\$\{setSaveInFlight > 0 \? "disabled" : ""\}>Assign set</.test(vsaSrc),
+    "every assignment Delete button (Assign tab and Sets tab) and Assign set render disabled while a set write is in flight",
+    JSON.stringify([delBtns(vaSrc).length, delBtns(vsaSrc).length, delBtns(src).length]));
 
   /* a replacement this page's picker can't offer (it exists only in a later
      re-read) is never promised as addable (finding 5) */

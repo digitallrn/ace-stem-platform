@@ -204,7 +204,9 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   "freshestBankIndex", "refusedBankRefs", "storedSetRefKeys",
   // the builder's own edits and the renderer the save uses (second review, 2026-09-30)
   "renderKeepingInputs", "pushRef", "builderHeldAs", "canonRef", "splitRef", "manifestEntry",
-  "builderAddModule", "builderRemoveRef", "builderMoveRef", "builderFromSet", "openSetInBuilder", "newSetInBuilder", "deleteSetFromList"];
+  "builderAddModule", "builderRemoveRef", "builderMoveRef", "builderFromSet", "openSetInBuilder", "newSetInBuilder", "deleteSetFromList",
+  // the kept-as-a-new-set advice (final check, 2026-09-30)
+  "keptAsNewSetText", "retiredRefsOf", "refText"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
@@ -303,11 +305,14 @@ function build(store, win, doc){
        line and Save button (so a check can see a render happened, and what
        it showed), after wiping the body as the real one does */
     const paints = [];
+    /* the page lock as this source has it — undefined when it declares none
+       (a pre-fix source must fail its checks, not crash every paint) */
+    function inFlightNow(){ return typeof setSaveInFlight === "undefined" ? undefined : setSaveInFlight; }
     function paintBuilder(){
-      $("sbMsg").textContent = builder ? (builder.msg || "") : ""; $("sbSaveBtn").disabled = !!(builder && builder.saving);
-      $("setNewBtn").disabled = setSaveInFlight > 0;       // viewSets' listBusy
+      $("sbMsg").textContent = builder ? (builder.msg || "") : ""; $("sbSaveBtn").disabled = !!(builder && builder.saving) || inFlightNow() > 0;
+      $("setNewBtn").disabled = inFlightNow() > 0;         // viewSets' listBusy
       paints.push({ msg: builder ? (builder.msg || "") : null, setId: builder ? builder.setId : undefined,
-                    storedKeys: builder && builder.storedKeys ? builder.storedKeys.slice() : null, inFlight: setSaveInFlight });
+                    storedKeys: builder && builder.storedKeys ? builder.storedKeys.slice() : null, inFlight: inFlightNow() });
     }
     function render(){ loads.render++; wipeBody(); paintBuilder(); }
     function renderAll(){ loads.render++; wipeBody(); paintBuilder(); }
@@ -322,7 +327,7 @@ function build(store, win, doc){
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
     return {
       fns,
-      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs, paints, setSaveInFlight }),
+      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs, paints, setSaveInFlight: inFlightNow() }),
       setTab: t => { tab = t; },
       seed: o => {
         if("recs" in o) recs = o.recs; if("assigns" in o) assigns = o.assigns; if("profiles" in o) profiles = o.profiles;
@@ -330,6 +335,10 @@ function build(store, win, doc){
         if("source" in o) source = o.source; if("lastStartCode" in o) lastStartCode = o.lastStartCode;
         if("tombs" in o) tombs = o.tombs;
         if("builderTestId" in o) builderTestId = o.builderTestId; if("fullTest" in o) fullTests[o.fullTest.testId] = o.fullTest;
+        if("setSaveInFlight" in o){
+          if(typeof setSaveInFlight === "undefined") throw new Error("this dashboard.js declares no setSaveInFlight (no page lock)");
+          setSaveInFlight = o.setSaveInFlight;
+        }
       }
     };
   `);
@@ -1383,16 +1392,21 @@ const noSync = t => !/sync/i.test(t);
       d.$("sbName").value = "Deleted elsewhere";
       await d.fns.saveSetFromBuilder();
       const m = msgOf(d); everyMessage.push(m);
-      const refusalPaint = d.state().paints.filter(p => p.msg === m).pop();
+      /* the paints made WHILE the save still held the lock — the finally's
+         repaint shows the same text after the fact, so it proves nothing */
+      const refusalPaints = d.state().paints.filter(p => p.msg === m && p.inFlight > 0);
       check(!s.server.has("pset:pset-X") && !s.mirror.has("pset:pset-X") && !s.calls.some(c => (c[0] === "adminUpsert" || c[0] === "setLocal") && c[1] === "pset:pset-X") &&
             (remote ? /isn't on the server: it was deleted in another browser or tab, or it was built on this device and never uploaded\. Only if you're sure it was never uploaded.*Upload local records to server.*brings it back and re-opens its unstarted assignments/.test(m)
                     : mode === "shared" ? /no longer exists \(deleted in another browser or tab\)/.test(m) : /no longer exists \(deleted in another tab\)/.test(m)) &&
             /kept here as a NEW set/.test(m) && d.state().builder.setId === null && d.state().builder.refs.length === 2 &&
             JSON.stringify(d.state().builder.storedKeys) === "[]" && !("createdAt" in d.state().builder) &&
-            !!refusalPaint && refusalPaint.setId === null && JSON.stringify(refusalPaint.storedKeys) === "[]" &&
+            refusalPaints.length > 0 && refusalPaints.every(p => p.setId === null && JSON.stringify(p.storedKeys) === "[]") &&
             (remote ? d.state().loads.sets === sets0 : d.state().loads.sets === sets0 + 1),
         mode + ": a set with no stored row is not recreated; the builder becomes an unsaved NEW set keeping ALL its questions (already so when the refusal is painted)" +
         (remote ? ", and the Upload advice carries its warning" : ", and the list is reloaded"), m);
+      check(/Its questions are kept here as a NEW set\. A retired bank item can't go into a new set: remove bank-202608-salvage q0032 first, then press Save set to save the rest under a new id, or Cancel to drop them\.$/.test(m) &&
+            m.indexOf("press Save set to save them") === -1,
+        mode + ": the kept questions include a retired item, so the advice says to remove it first — never a bare 'press Save set' that would be refused (final check, finding 6)", m);
       d.fns.builderRemoveRef(0);                          // the retired item can't go into a new set
       await d.fns.saveSetFromBuilder();
       const rows = [...(remote ? s.server.keys() : s.mirror.keys())].filter(k => k.indexOf("pset:") === 0);
@@ -1633,6 +1647,112 @@ const noSync = t => !/sync/i.test(t);
           d3.$("setNewBtn").disabled === false,
       "Cancel during a write doesn't end the save: Edit, New set and Delete still refuse until it settles (the page lock), then the list works again",
       JSON.stringify({ afterCancel, deletesDuring, inFlight: d3.state().setSaveInFlight, afterSave }));
+  });
+
+  await run(async () => {
+    /* final check (2026-09-30): the save's page lock also holds off the other
+       writes it races — an assignment Delete (the save's card patch would
+       write the row back as a startable card: finding 1) and Assign set (it
+       would stamp the pre-save name and count: finding 2) */
+    const stored = { setId: "pset-L", name: "Old name", subject: "rw", refs: [ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
+    const card = { assignmentId: "a-L", kind: "set", category: "practice", setId: "pset-L", setName: "Old name", questionCount: 1, completedAttemptId: null };
+    const ak = "assign:" + C1 + ":a-L";
+    const s = makeStore({}); const d = build(s, { fetch: realFetch() }, { page: "origin" });
+    s.seedBoth("pset:pset-L", stored); s.seedBoth(ak, card, C1);
+    /* hold the CARD PATCH — the save's last write — mid-flight */
+    const gate = gateOf(); let reached = false;
+    const up = s.AS.adminUpsert;
+    s.AS.adminUpsert = async function(k, owner, v){ const body = JSON.parse(JSON.stringify(v)); if(k === ak){ reached = true; await gate.p; } return up.call(this, k, owner, body); };
+    d.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [{ code: C1, list: [JSON.parse(JSON.stringify(card))] }],
+             builder: d.fns.builderFromSet(Object.assign({}, stored, { refs: [ACTIVE, FORMREF] })) });
+    d.$("sbName").value = "New name";
+    const p = d.fns.saveSetFromBuilder();
+    for(let i = 0; i < 200 && !reached; i++) await new Promise(r => setTimeout(r, 5));
+    await d.fns.deleteAssignment(C1, "a-L");
+    const delMsg = status(d);
+    const deletesDuring = s.calls.filter(c => c[0] === "adminDelete").length;
+    d.$("saSet").value = "pset-L"; d.els.saCodes = { selectedOptions: [{ value: C2 }] };
+    d.$("saFree").value = ""; d.$("saLimit").value = ""; d.$("saExpires").value = ""; d.$("saHold").checked = false;
+    await d.fns.assignSetFromForm();
+    const saDuring = d.state().saMsg; everyMessage.push(saDuring);
+    const assignsDuring = [...s.server.keys()].filter(k => k.indexOf("assign:" + C2 + ":") === 0).length;
+    gate.open(); await p;
+    check(reached && deletesDuring === 0 && delMsg === "A practice set is being saved — delete the assignment once that finishes." &&
+          s.server.has(ak) && s.server.get(ak).value.setName === "New name" && s.server.get(ak).value.questionCount === 2,
+      "an assignment Delete while the set save is patching that card is refused (the patch would have written the row back as a startable card)",
+      JSON.stringify({ reached, deletesDuring, delMsg }));
+    check(assignsDuring === 0 && saDuring === "A practice set is being saved — assign once that finishes.",
+      "Assign set while a set save runs is refused (it would stamp the pre-save name and count)", saDuring);
+    /* once the save settles both go through, Assign set with the SAVED name and count */
+    d.seed({ sets: [Object.assign({}, stored, { name: "New name", refs: [ACTIVE, FORMREF] })] });
+    await d.fns.assignSetFromForm();
+    const c2 = [...s.server.keys()].filter(k => k.indexOf("assign:" + C2 + ":") === 0);
+    check(d.state().setSaveInFlight === 0 && c2.length === 1 && s.server.get(c2[0]).value.setName === "New name" && s.server.get(c2[0]).value.questionCount === 2,
+      "control: once the save settled, Assign set writes the saved name and count", c2.join(","));
+    await d.fns.deleteAssignment(C1, "a-L");
+    check(!s.server.has(ak) && !s.mirror.has(ak), "control: once the save settled, the assignment Delete goes through", status(d));
+  });
+
+  await run(async () => {
+    /* final check, finding 3: a set Delete holds the page lock while it runs,
+       and a builder left open on the deleted set becomes an unsaved NEW set,
+       so its Save can't write the deleted id back (re-opening the unstarted
+       assignments the confirm said would stop) */
+    const stored = { setId: "pset-D", name: "Doomed", subject: "rw", refs: [ACTIVE, FORMREF], createdAt: "2026-09-01T00:00:00Z" };
+    const s = makeStore({}); const d = build(s, { fetch: realFetch() }, { page: "origin" });
+    s.seedBoth("pset:pset-D", stored);
+    const gate = gateOf(); let reached = false;
+    const del = s.AS.adminDelete;
+    s.AS.adminDelete = async function(){ reached = true; await gate.p; return del.apply(this, arguments); };
+    d.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [], builder: d.fns.builderFromSet(stored) });
+    d.$("sbName").value = "Doomed";
+    const p = d.fns.deleteSet("pset-D");
+    for(let i = 0; i < 200 && !reached; i++) await new Promise(r => setTimeout(r, 5));
+    const lockDuring = d.state().setSaveInFlight;
+    const paintedLocked = d.state().paints.some(x => x.inFlight === 1) && d.$("setNewBtn").disabled === true && d.$("sbSaveBtn").disabled === true;
+    await d.fns.saveSetFromBuilder();
+    const upsertsDuring = s.calls.filter(c => c[0] === "adminUpsert").length;
+    const listDuring = [d.fns.openSetInBuilder("pset-D"), d.fns.newSetInBuilder(), d.fns.deleteSetFromList("pset-D")];
+    gate.open(); await p;
+    const b = d.state().builder;
+    check(reached && lockDuring === 1 && paintedLocked && upsertsDuring === 0 && JSON.stringify(listDuring) === "[false,false,false]",
+      "a set Delete holds the page lock while it runs (painted locked): Save, Edit, New set and Delete all wait",
+      JSON.stringify({ reached, lockDuring, paintedLocked, upsertsDuring, listDuring }));
+    everyMessage.push(b ? b.msg : "");
+    check(!s.server.has("pset:pset-D") && d.state().setSaveInFlight === 0 && d.$("setNewBtn").disabled === false &&
+          !!b && b.setId === null && !("createdAt" in b) && JSON.stringify(b.storedKeys) === "[]" && b.refs.length === 2 &&
+          b.msg === "This set was just deleted. Its questions are kept here as a NEW set: press Save set to save them under a new id, or Cancel to drop them.",
+      "the builder open on the deleted set becomes an unsaved NEW set keeping its questions, says so, and the lock comes off", b && b.msg);
+    await d.fns.saveSetFromBuilder();
+    const rows = psetRows(s);
+    check(rows.length === 1 && rows[0] !== "pset:pset-D" && d.state().builder === null,
+      "its next Save set writes a NEW id — the deleted set is never recreated", rows.join(","));
+
+    /* a rejected Delete deleted nothing: the builder stays on its set; a
+       builder on ANOTHER set is untouched by a Delete that lands */
+    const s2 = makeStore({ reject: true }); const d2 = build(s2);
+    s2.seedBoth("pset:pset-D", stored);
+    d2.seed({ sets: [JSON.parse(JSON.stringify(stored))], assigns: [], builder: d2.fns.builderFromSet(stored) });
+    await d2.fns.deleteSet("pset-D");
+    check(d2.state().builder.setId === "pset-D" && !d2.state().builder.msg && d2.state().setSaveInFlight === 0 && s2.server.has("pset:pset-D"),
+      "a rejected Delete leaves the builder on its set and releases the lock", JSON.stringify(d2.state().builder));
+    const keep = { setId: "pset-K", name: "Kept", subject: "rw", refs: [ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
+    const s3 = makeStore({}); const d3 = build(s3);
+    s3.seedBoth("pset:pset-D", stored); s3.seedBoth("pset:pset-K", keep);
+    d3.seed({ sets: [JSON.parse(JSON.stringify(stored)), JSON.parse(JSON.stringify(keep))], assigns: [], builder: d3.fns.builderFromSet(keep) });
+    await d3.fns.deleteSet("pset-D");
+    check(!s3.server.has("pset:pset-D") && d3.state().builder.setId === "pset-K" && !d3.state().builder.msg,
+      "a Delete of one set leaves a builder open on another set alone");
+    /* the kept questions include a retired item: the advice says to remove
+       it first (a bare "press Save set" would be refused — finding 6) */
+    const withRetired = { setId: "pset-R", name: "Legacy", subject: "rw", refs: [RETIRED, ACTIVE], createdAt: "2026-09-01T00:00:00Z" };
+    const s4 = makeStore({}); const d4 = build(s4);
+    s4.seedBoth("pset:pset-R", withRetired);
+    d4.seed({ sets: [JSON.parse(JSON.stringify(withRetired))], assigns: [], builder: d4.fns.builderFromSet(withRetired) });
+    await d4.fns.deleteSet("pset-R");
+    const m4 = d4.state().builder && d4.state().builder.msg; everyMessage.push(m4 || "");
+    check(/^This set was just deleted\. Its questions are kept here as a NEW set\. A retired bank item can't go into a new set: remove bank-202608-salvage q0032 first, then press Save set to save the rest under a new id, or Cancel to drop them\.$/.test(m4 || ""),
+      "…and when those questions include a retired item, the advice names it to remove first", m4);
   });
 
   await run(async () => {

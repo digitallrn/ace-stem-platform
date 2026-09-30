@@ -1550,7 +1550,7 @@ window.Dashboard = (function(){
         <td>${fmtDay(a.windowOpens)}</td>
         <td>${fmtDay(a.expiresAt)}</td>
         <td><span class="dstatus ${ {completed:"ok", "in-progress":"warn", expired:"to"}[st] || "" }">${st}</span></td>
-        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${escAttr(r.code)}" data-aid="${escAttr(a.assignmentId)}">Delete</button>` : ""}</td>
+        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${escAttr(r.code)}" data-aid="${escAttr(a.assignmentId)}" ${setSaveInFlight > 0 ? "disabled" : ""}>Delete</button>` : ""}</td>
       </tr>`;
     }).join("");
     return `
@@ -1979,6 +1979,9 @@ window.Dashboard = (function(){
   }
 
   async function deleteAssignment(code, assignmentId){
+    /* a set save in flight may be patching this very row: its upsert, landing
+       after this delete, would bring the assignment back as a startable card */
+    if(setSaveInFlight > 0){ $("dashStatus").textContent = "A practice set is being saved — delete the assignment once that finishes."; return; }
     const key = "assign:" + code + ":" + assignmentId;
     const keys = (await AttemptStore.list("assign:" + code + ":")) || [];
     const remaining = keys.filter(k => k !== key && k.slice(-7) !== ":__none");
@@ -2487,7 +2490,7 @@ window.Dashboard = (function(){
     const student = selectedStudent();
     const seen = student ? seenSetFor(student) : null;
     const mark = k => seen ? markHtml(markFor(k, seen)) : "";
-    const busy = builder.saving === true;  // a save is in flight: the builder is read-only until it settles
+    const busy = builder.saving === true || setSaveInFlight > 0;  // a set write is in flight: read-only until it settles
     const refsHtml = refs.length ? refs.map((ref, i) => {
       const lbl = refLabel(ref);
       const k = refKey(ref);
@@ -2671,7 +2674,7 @@ window.Dashboard = (function(){
         <td>${x.a.holdRelease ? "Held — release manually" : "Releases on submit"}</td>
         <td>${fmtDay(x.a.expiresAt)}</td>
         <td><span class="dstatus ${ {completed:"ok", "in-progress":"warn", expired:"to"}[st] || "" }">${st}</span></td>
-        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${escAttr(x.code)}" data-aid="${escAttr(x.a.assignmentId)}">Delete</button>` : ""}</td>
+        <td>${deletable ? `<button class="dash-rel assign-del" data-code="${escAttr(x.code)}" data-aid="${escAttr(x.a.assignmentId)}" ${setSaveInFlight > 0 ? "disabled" : ""}>Delete</button>` : ""}</td>
       </tr>`;
     }).join("");
     return `
@@ -2695,7 +2698,7 @@ window.Dashboard = (function(){
             Hold results — release manually instead of on submit</label>
         </div>
         <div class="af-actions">
-          <button class="pill" id="saAssignBtn" style="padding:9px 26px;">Assign set</button>
+          <button class="pill" id="saAssignBtn" style="padding:9px 26px;" ${setSaveInFlight > 0 ? "disabled" : ""}>Assign set</button>
           <span class="dash-hint" id="saMsg">${esc(saMsg)}</span>
         </div>
         ${existing.length ? `<table class="dtable slim"><thead><tr>
@@ -2782,7 +2785,7 @@ window.Dashboard = (function(){
                   " Only if you're sure it was never uploaded, Cancel and use “Upload local records to server” — if it was deleted" +
                   " elsewhere, that brings it back and re-opens its unstarted assignments."
                 : " no longer exists (deleted in another " + (AttemptStore.isLocal() ? "tab" : "browser or tab") + ").") +
-              " Its questions are kept here as a NEW set: press Save set to save them under a new id, or Cancel to drop them.");
+              " " + keptAsNewSetText(b));
           return;
         }
         held = stored;
@@ -2916,12 +2919,32 @@ window.Dashboard = (function(){
         : "") +
       "Completed and in-progress attempts are NOT affected — each attempt froze its own copy of the questions at start.";
     if(!confirm(warn)) return;
-    const res = await tutorDelete("pset:" + setId);
-    setsMsg = res.ok ? "Deleted “" + s.name + "”." + (res.warning ? " " + res.warning : "") : res.message;
-    await loadSets();
-    render();
+    /* the delete is a set write: it holds the page lock, so no save of this
+       set can race it (Save, Edit, New set and the assign controls wait) */
+    setSaveInFlight++;
+    try{
+      renderKeepingInputs();
+      const res = await tutorDelete("pset:" + setId);
+      setsMsg = res.ok ? "Deleted “" + s.name + "”." + (res.warning ? " " + res.warning : "") : res.message;
+      /* a builder still open on the deleted set must not save it back under
+         its old id (re-opening the assignments the confirm said would stop):
+         it becomes an unsaved NEW set keeping its questions */
+      if(res.ok && builder && builder.setId === setId && !builder.saving){
+        builder.setId = null;
+        delete builder.createdAt;
+        builder.storedKeys = [];
+        builder.msg = "This set was just deleted. " + keptAsNewSetText(builder);
+      }
+      await loadSets();
+    }finally{
+      setSaveInFlight = Math.max(0, setSaveInFlight - 1);
+      renderKeepingInputs();
+    }
   }
   async function assignSetFromForm(){
+    /* a set save in flight: `sets` still holds the pre-save name and count,
+       and its card patch has already listed the assignments it will update */
+    if(setSaveInFlight > 0){ saMsg = "A practice set is being saved — assign once that finishes."; renderKeepingInputs(); return; }
     const setId = $("saSet").value;
     const s = sets.find(x => x.setId === setId);
     if(!s){ $("saMsg").textContent = "Pick a set."; return; }
@@ -2993,6 +3016,16 @@ window.Dashboard = (function(){
     builderTestId = "";
     render();
     return true;
+  }
+  /* The tail of every "kept as a NEW set" message: a retired bank item can't
+     go into a new set, so when the kept questions include one the advice
+     says to remove it first — "press Save set" alone would be refused. */
+  function keptAsNewSetText(b){
+    const ret = retiredRefsOf(b ? b.refs : []);
+    return "Its questions are kept here as a NEW set" + (ret.length
+      ? ". A retired bank item can't go into a new set: remove " + ret.map(r => refText(refKey(r))).join(", ") +
+        " first, then press Save set to save the rest under a new id, or Cancel to drop them."
+      : ": press Save set to save them under a new id, or Cancel to drop them.");
   }
   function newSetInBuilder(){
     if(setSaveInFlight > 0) return false;

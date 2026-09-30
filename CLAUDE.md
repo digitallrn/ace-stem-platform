@@ -404,7 +404,14 @@ record-derived value.
   included) is read-only while a save runs, the save writes the exact
   snapshot it checked, and a PAGE-wide lock (`setSaveInFlight`) keeps the
   Sets list's Edit / Delete / New set off until the save — and its reload
-  of `sets` — has settled, even if the tutor pressed Cancel. Limits: a tab loaded BEFORE this code shipped runs the
+  of `sets` — has settled, even if the tutor pressed Cancel. The same lock
+  holds off every write a set write races: Assign set (it would stamp the
+  pre-save name/count), each assignment Delete (the save's card patch would
+  write the row back), and the builder itself; a set Delete TAKES the lock,
+  and a builder open on the set it deleted becomes an unsaved NEW set (as
+  with a set gone elsewhere). Any new set- or assignment-writing control
+  must refuse while `setSaveInFlight > 0`, in its function AND its button.
+  Limits: a tab loaded BEFORE this code shipped runs the
   old picker (reload open dashboards after a deploy), and the server does not
   check set contents. A set that already holds a retired item — saved before
   the retirement, or built on the old picker — keeps it; the Sets tab reports
