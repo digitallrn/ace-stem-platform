@@ -361,7 +361,7 @@ function newlyCorrectVerdicts(detail, ruled){
   return { excused, unexcused };
 }
 const unexcusedText = u => u.id + (u.shape
-  ? "  — the exempt SHAPE (" + u.shape.how + " of " + u.shape.key + ", which can't be written in the field) but NOT RULED: list it in RULED_EXEMPT only on a ruling"
+  ? "  — the exempt SHAPE (" + u.shape.how + " of " + u.shape.key + ", which has no decimal form the field holds) but NOT RULED: list it in RULED_EXEMPT only on a ruling"
   : "  — not the exempt shape: a wrong answer the new rule now credits");
 /* The two halves of the verdict — the SAME predicates the controls below
    assert on, so a control proves the actual pass/fail rule, not a copy. */
@@ -380,7 +380,7 @@ check("the ruled exception is exactly what the sweep finds — no unruled flip e
   excusedIsExactly(V, RULED_EXEMPT), true);
 
 /* The exemption's own arithmetic, pinned on values worked by hand. */
-check("independent: the ruled item's answer 297 + 27*sqrt(73) is 527.6881..., and its keys are its rounding (527.69) and truncation (527.68) to two places",
+check("independent arithmetic (constants): 297 + 27*sqrt(73) = 527.6881..., and rounded / truncated to two places it is 527.69 / 527.68 — R1's keys, which the control-items check pins in the shipped item",
   [(297 + 27 * Math.sqrt(73)).toFixed(4), (Math.round((297 + 27 * Math.sqrt(73)) * 100) / 100).toFixed(2), (Math.trunc((297 + 27 * Math.sqrt(73)) * 100) / 100).toFixed(2)].join(" "),
   "527.6881 527.69 527.68");
 check("independent: 527.69, 527.68, 142.25 (though it is 569/4), 2/3, -1/3, 1/72 and 500/3 cannot be written as a decimal in the field",
@@ -412,13 +412,19 @@ check("the exemption's arithmetic never calls grading.js",
    flip. Each runs the SAME sweep (sweepKey) and verdict code as above. */
 const findKey = (testId, qid) => keys.find(x => x.testId === testId && x.qid === qid) || null;
 const kQ10 = findKey("202505usv1", "ma2-q10"), kQ21 = findKey("202606asiav1", "ma2-q21");
-check("control items are in the library (202505usv1 ma2-q10 = 527.69, 202606asiav1 ma2-q21 = 9.96)",
-  !!(kQ10 && kQ21) && kQ10.q.correctAnswer === "527.69" && kQ21.q.correctAnswer === "9.96", true);
+check("control items are in the library (202505usv1 ma2-q10 = 527.69 alt 527.68, as R1 ruled; 202606asiav1 ma2-q21 = 9.96)",
+  !!(kQ10 && kQ21) && kQ10.q.correctAnswer === "527.69" && JSON.stringify(kQ10.q.altAnswers || []) === JSON.stringify(["527.68"]) &&
+  kQ21.q.correctAnswer === "9.96", true);
 const plant = (kk, entry) => (q, e) => (q === kk.q && e === entry) || G.answerMatches(q, e);
 const ids = v => JSON.stringify(v.unexcused.map(u => u.id + (u.shape ? " [shape]" : "")).sort());
 let changed97 = null;                                  // the ruled 9.97 control finishes at the moved-entries pin below
+/* every control goes through ctl(), and the count is asserted after the
+   last one — a control block that silently stops running is a failure */
+let controlsRan = 0;
+const CONTROLS_EXPECTED = 9;
+const ctl = (name, got, want) => { controlsRan++; check(name, got, want); };
 if(kQ10 && kQ21){
-  check("shape on the ruled item: 527.6 (truncation) and 527.7 (rounding) are the shape; 527.5, 527 and 528 are not",
+  ctl("shape on the ruled item: 527.6 (truncation) and 527.7 (rounding) are the shape; 527.5, 527 and 528 are not",
     ["527.6", "527.7", "527.5", "527", "528"].map(e => !!exemptShape(kQ10.q, e)).join(","), "true,true,false,false,false");
   /* (a) the ruled control: a grader that accepts 9.97 for the FITTING key
      9.96. The old band ALREADY accepted 9.97 — 9.97 - 9.96 is 0.00999... in
@@ -426,32 +432,33 @@ if(kQ10 && kQ21){
      see. It is caught by the moved-entries pin below (9.97 must move right ->
      wrong; under this grader it doesn't): proven there, on this same sweep. */
   changed97 = sweepKey(kQ21, plant(kQ21, "9.97"));
-  check("control: 9.97 for 9.96 is no wrong -> right flip (the old band already took it: 9.97 - 9.96 = " + Math.abs(9.97 - 9.96) + ") — so the moved-entries pin must catch it",
+  ctl("control: 9.97 for 9.96 is no wrong -> right flip (the old band already took it: 9.97 - 9.96 = " + Math.abs(9.97 - 9.96) + ") — so the moved-entries pin must catch it",
     ids(newlyCorrectVerdicts([{ k: kQ21, changed: changed97 }], RULED_EXEMPT)) === "[]" && Math.abs(9.97 - 9.96) < 0.01, true);
   /* (a') a GENUINE wrong -> right flip on that ordinary, fitting key: 9.98
      (the old band rejected it — 0.0199...) */
   const changed98 = sweepKey(kQ21, plant(kQ21, "9.98"));
   const vA = newlyCorrectVerdicts([{ k: kQ21, changed: changed98 }], RULED_EXEMPT);
-  check("control: a grader accepting 9.98 for the fitting key 9.96 (old band: wrong) FAILS this check — exactly that flip, not the exempt shape",
+  ctl("control: a grader accepting 9.98 for the fitting key 9.96 (old band: wrong) FAILS this check — exactly that flip, not the exempt shape",
     ids(vA) + " " + verdictOk(vA, []), JSON.stringify(["202606asiav1 ma2-q21 9.98"]) + " false");
   /* (b) the ruled item, the wrong number: 527.5 accepted for 527.69 */
   const vB = newlyCorrectVerdicts([{ k: kQ10, changed: sweepKey(kQ10, plant(kQ10, "527.5")) }], RULED_EXEMPT);
-  check("control: a grader accepting 527.5 for 527.69 FAILS the check (while the ruled 527.6 stays excused)",
+  ctl("control: a grader accepting 527.5 for 527.69 FAILS the check (while the ruled 527.6 stays excused)",
     JSON.stringify({ unexcused: JSON.parse(ids(vB)), excused: vB.excused, ok: verdictOk(vB, RULED_EXEMPT) }),
     JSON.stringify({ unexcused: ["202505usv1 ma2-q10 527.5"], excused: ["202505usv1 ma2-q10 527.6"], ok: false }));
   /* (c) the NEXT key too long for its field: the REAL grader on an unlisted
      item — the exact shape the exemption describes, still a failure */
   const kNext = { testId: "control-unruled", qid: "q1", q: { type: "spr", correctAnswer: "731.48", altAnswers: [] } };
   const vC = newlyCorrectVerdicts([{ k: kNext, changed: sweepKey(kNext, G.answerMatches) }], RULED_EXEMPT);
-  check("control: an UNLISTED flip of the exempt shape (key 731.48 -> 731.4 / 731.5, the real grader) FAILS the check until ruled on",
+  ctl("control: an UNLISTED flip of the exempt shape (key 731.48 -> 731.4 / 731.5, the real grader) FAILS the check until ruled on",
     ids(vC) + " " + verdictOk(vC, []), JSON.stringify(["control-unruled q1 731.4 [shape]", "control-unruled q1 731.5 [shape]"]) + " false");
   /* (d) the list alone excuses nothing: both conditions are required */
   const vD = newlyCorrectVerdicts([{ k: kQ21, changed: changed98 }], RULED_EXEMPT.concat(["202606asiav1 ma2-q21 9.98"]));
-  check("control: LISTING a flip that is not the exempt shape (9.98 for 9.96) does not excuse it",
+  ctl("control: LISTING a flip that is not the exempt shape (9.98 for 9.96) does not excuse it",
     ids(vD) + " " + verdictOk(vD, ["202606asiav1 ma2-q21 9.98"]), JSON.stringify(["202606asiav1 ma2-q21 9.98"]) + " false");
   /* (e) a stale pin fails: listing a flip the sweep no longer finds */
-  check("control: a STALE pin (a listed flip the sweep doesn't find, e.g. 527.7) FAILS the check",
-    verdictOk(V, RULED_EXEMPT.concat(["202505usv1 ma2-q10 527.7"])), false);
+  const staleList = RULED_EXEMPT.concat(["202505usv1 ma2-q10 527.7"]);   // through the SAME path a real stale pin takes
+  ctl("control: a STALE pin (a listed flip the sweep doesn't find, e.g. 527.7) FAILS the check",
+    verdictOk(newlyCorrectVerdicts(diffDetail, staleList), staleList), false);
   /* (f) the rule-then-list process works: a decimal key too long for the
      field that IS a short fraction (142.25 = 569/4) — the real grader's
      flips are the shape, fail unlisted, and pass once listed on a ruling */
@@ -460,7 +467,7 @@ if(kQ10 && kQ21){
   const vL = newlyCorrectVerdicts([{ k: kListed, changed: changedL }], RULED_EXEMPT);
   const listedOnRuling = vL.unexcused.map(u => u.id);
   const vL2 = newlyCorrectVerdicts([{ k: kListed, changed: changedL }], listedOnRuling);
-  check("control: key 142.25's flips are the exempt shape, FAIL unlisted, and pass once listed on a ruling",
+  ctl("control: key 142.25's flips are the exempt shape, FAIL unlisted, and pass once listed on a ruling",
     JSON.stringify({ unlisted: JSON.parse(ids(vL)), okUnlisted: verdictOk(vL, []), okListed: verdictOk(vL2, listedOnRuling) }),
     JSON.stringify({ unlisted: ["control-ruled q1 142.2 [shape]", "control-ruled q1 142.3 [shape]", "control-ruled q1 711/5 [shape]"], okUnlisted: false, okListed: true }));
 }
@@ -496,10 +503,11 @@ if(changed97 && kQ21){
   const planted = diffDetail.some(d => d.k === kQ21)
     ? diffDetail.map(d => d.k === kQ21 ? { k: kQ21, changed: changed97 } : d)
     : diffDetail.concat([{ k: kQ21, changed: changed97 }]);
-  check("control: a grader accepting 9.97 for the fitting key 9.96 FAILS the moved-entries pin — exactly 9.97",
+  ctl("control: a grader accepting 9.97 for the fitting key 9.96 FAILS the moved-entries pin — exactly 9.97",
     JSON.stringify(unmovedOf(planted).map(m => m.join(" "))),
     JSON.stringify(["202606asiav1 ma2-q21 9.97"]));
 }
+check("every §4b control ran (" + CONTROLS_EXPECTED + ")", controlsRan, CONTROLS_EXPECTED);
 
 /* and entries that must NOT move — valid shortenings and exact values */
 const mustHold = [
