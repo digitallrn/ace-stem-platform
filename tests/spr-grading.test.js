@@ -180,17 +180,94 @@ Object.keys(B).forEach(bankId => (B[bankId].questions || []).forEach(q => {
 }));
 console.log(`    ${keys.length} shipped SPR questions (forms + banks)\n`);
 
-let totalDiffs = 0;
-const diffDetail = [];
-if(!AUDIT_ONLY){
-keys.forEach(k => {
+/* The sweep for ONE key, against a given grader — the real one for the
+   library, a planted one for the controls in §4b, through the same code. */
+function sweepKey(k, grade){
   const changed = [];
   entries.forEach(e => {
     const before = [k.q.correctAnswer].concat(k.q.altAnswers || [])
       .some(key => oldSprValueMatches(e, key));
-    const after = G.answerMatches(k.q, e);
+    const after = grade(k.q, e);
     if(before !== after) changed.push({ e, before, after });
   });
+  return changed;
+}
+
+/* ---- §4b's exemption arithmetic: exact rationals in BigInt, written here
+   and NOT taken from grading.js, so the check never grades the grader with
+   the grader's own arithmetic (a self-check below pins that). ---- */
+function xGcd(a, b){ a = a < 0n ? -a : a; b = b < 0n ? -b : b; while(b){ const t = a % b; a = b; b = t; } return a; }
+function xMake(n, d){
+  if(d === 0n) return null;
+  if(d < 0n){ n = -n; d = -d; }
+  const g = xGcd(n, d) || 1n;
+  return { n: n / g, d: d / g };                       // always reduced, so equality is field-wise
+}
+function xParse(s){
+  const t = String(s == null ? "" : s).trim();
+  let m = t.match(/^(-?)(\d+)\s*\/\s*(\d+)$/);
+  if(m) return xMake((m[1] ? -1n : 1n) * BigInt(m[2]), BigInt(m[3]));
+  m = t.match(/^(-?)(\d*)(?:\.(\d*))?$/);
+  if(!m || !(m[2] || m[3])) return null;               // "", "-", "." are not values
+  const fp = m[3] || "";
+  return xMake((m[1] ? -1n : 1n) * BigInt((m[2] || "") + fp), 10n ** BigInt(fp.length));
+}
+function xCanon(v){ return v.n + "/" + v.d; }
+function xEq(a, b){ return a.n === b.n && a.d === b.d; }
+function xAbsN(v){ return v.n < 0n ? -v.n : v.n; }
+/* The decimals the field holds for a value, per the directions: five
+   characters for the magnitude (a minus sign gets its own sixth). |v| < 1 is
+   written ".dddd" (4) or "0.ddd" (3) — the reference table accepts both
+   .6666 and 0.666 for 2/3; otherwise "I.dd" leaves 4 - intDigits, and only
+   a value whose integer part leaves no room for a decimal is cut to 0. */
+function xFieldDecimals(v){
+  const ip = xAbsN(v) / v.d;
+  if(ip === 0n) return [4, 3];
+  const digits = String(ip).length;
+  return digits <= 3 ? [4 - digits] : [0];
+}
+/* truncation (toward zero) or rounding (half away from zero) to k places */
+function xCut(v, k, round){
+  const p = 10n ** BigInt(k), m = xAbsN(v) * p;
+  const q = round ? (2n * m + v.d) / (2n * v.d) : m / v.d;
+  return xMake((v.n < 0n ? -1n : 1n) * q, p);
+}
+/* "cannot be written in the field" read STRICTLY: no enterable string —
+   decimal, integer OR fraction — has the key's exact value. Decided by the
+   same exhaustive enumeration the sweep runs on, not by a formula. */
+let enterableValues = null;
+function fitsField(v){
+  if(!enterableValues){
+    enterableValues = new Set();
+    entries.forEach(e => { const p = xParse(e); if(p) enterableValues.add(xCanon(p)); });
+  }
+  return enterableValues.has(xCanon(v));
+}
+/* The exempt SHAPE: some key for the item cannot be written in the field,
+   and the entry equals that key's truncation or rounding to the decimals the
+   field holds. A cut that lands on zero is never an answer. Returns how the
+   entry was reached, or null. */
+function exemptShape(q, entry){
+  const ev = xParse(entry);
+  if(!ev || ev.n === 0n) return null;
+  for(const key of [q.correctAnswer].concat(q.altAnswers || [])){
+    const kv = xParse(key);
+    if(!kv || fitsField(kv)) continue;
+    for(const k of xFieldDecimals(kv)){
+      for(const round of [false, true]){
+        const c = xCut(kv, k, round);
+        if(c.n !== 0n && xEq(ev, c)) return { key: String(key), how: (round ? "rounding" : "truncation") + " to " + k + " place" + (k === 1 ? "" : "s") };
+      }
+    }
+  }
+  return null;
+}
+
+let totalDiffs = 0;
+const diffDetail = [];
+if(!AUDIT_ONLY){
+keys.forEach(k => {
+  const changed = sweepKey(k, G.answerMatches);
   if(changed.length){
     totalDiffs += changed.length;
     diffDetail.push({ k, changed });
@@ -227,21 +304,132 @@ if(!totalDiffs){
   console.log(`\n    well-formed changes: ${realN}   malformed: ${junkN}`);
 }
 
-/* The direction of every change matters: the new rule must never turn a
-   wrong answer into a right one for a shipped key. Anything moving the other
-   way is the fix doing its job, but it still has to be reviewed against
-   stored attempts, which is why the list above is printed in full. */
-const anyNewlyCorrect = diffDetail.some(({ changed }) => changed.some(c => !c.before && c.after));
-check("no shipped key turns a previously-wrong entry into a correct one", anyNewlyCorrect, false);
+/* ---- §4b. The direction of every change: wrong -> right ----
+   The new rule must never turn a wrong answer into a right one for a shipped
+   key. Anything moving the other way is the fix doing its job, but it still
+   has to be reviewed against stored attempts, which is why the list above is
+   printed in full.
+
+   ONE RULED EXCEPTION (item 6, ruled 2026-09-30). The directions' rule for an
+   answer that does not fit: a decimal that doesn't fit in the provided space
+   is entered by truncating OR rounding it, to as many digits as the field
+   holds. 202505usv1 ma2-q10's answer is 297 + 27*sqrt(73) = 527.6877...; its
+   keys 527.69 / 527.68 cannot be written in the field (six characters, and no
+   fraction of five names them), so the field holds ONE decimal and both
+   527.6 (truncation) and 527.7 (rounding) are correct entries. David's ruling
+   R1 (2026-09-12, test-bank-repo/drafts/202505usv1_RULINGS.md) adjudicated
+   that key. The old +/-0.01 band rejected 527.6 (and accepted 527.7 only by
+   float luck: 527.7 - 527.69 is 0.00999... in doubles), so "527.6" flips
+   wrong -> right: the directions working, not a grading bug, and no stored
+   grade moves — the key first shipped 2026-09-24 (8d45238), after the new
+   rule (2026-08-02), so no attempt on it was ever graded the old way. The
+   check had been red since that export.
+
+   HOW NARROW. A wrong -> right flip is excused only when BOTH hold:
+     (1) SHAPE — exemptShape() above: some key for the item cannot be written
+         in the field (strictly: no enterable string of any form has its
+         value) AND the entry equals that key's truncation or rounding to the
+         decimals the field holds; BigInt arithmetic, independent of
+         grading.js;
+     (2) RULED — the flip is listed by name in RULED_EXEMPT.
+   (2) is David's pin: the NEXT key too long for its field fails this check
+   until someone rules on it, instead of passing through the generic shape.
+   And the list must match the sweep EXACTLY, so a pin that stops matching
+   (a re-exported key) is reported rather than silently carried. Add a flip
+   here only on a ruling, and cite it. */
+const RULED_EXEMPT = ["202505usv1 ma2-q10 527.6"];   // R1 (David, 2026-09-12); ruled into this check 2026-09-30
+
+function newlyCorrectVerdicts(detail, ruled){
+  const excused = [], unexcused = [];
+  detail.forEach(({ k, changed }) => changed.forEach(c => {
+    if(c.before || !c.after) return;                   // only wrong -> right
+    const id = k.testId + " " + k.qid + " " + c.e;
+    const shape = exemptShape(k.q, c.e);
+    if(shape && ruled.indexOf(id) !== -1) excused.push(id);
+    else unexcused.push({ id, shape });
+  }));
+  return { excused, unexcused };
+}
+const unexcusedText = u => u.id + (u.shape
+  ? "  — the exempt SHAPE (" + u.shape.how + " of " + u.shape.key + ", which can't be written in the field) but NOT RULED: list it in RULED_EXEMPT only on a ruling"
+  : "  — not the exempt shape: a wrong answer the new rule now credits");
+const V = newlyCorrectVerdicts(diffDetail, RULED_EXEMPT);
+if(V.unexcused.length){
+  console.log("\n    WRONG -> RIGHT, NOT EXCUSED:");
+  V.unexcused.forEach(u => console.log("      " + unexcusedText(u)));
+}
+if(V.excused.length) console.log("\n    wrong -> right, excused by ruling: " + V.excused.join(", "));
+check("no shipped key turns a previously-wrong entry into a correct one (one ruled exception: " + RULED_EXEMPT.join(", ") + ")",
+  V.unexcused.length, 0);
+check("the ruled exception is exactly what the sweep finds — no unruled flip excused, no stale pin",
+  JSON.stringify(V.excused.slice().sort()), JSON.stringify(RULED_EXEMPT.slice().sort()));
+
+/* The exemption's own arithmetic, pinned on values worked by hand. */
+check("independent: 527.69 and 527.68 cannot be written in the field", [xParse("527.69"), xParse("527.68")].some(fitsField), false);
+check("independent: 9.96, 2/3, -1/3, .0138, 1/72, 255 and 62951 can be",
+  ["9.96", "2/3", "-1/3", ".0138", "1/72", "255", "62951"].every(s => fitsField(xParse(s))), true);
+check("independent: the field holds 1 decimal for 527.69 (527.6 / 527.7), 4 or 3 below 1, 0 for 1562.5",
+  [JSON.stringify(xFieldDecimals(xParse("527.69"))), xCanon(xCut(xParse("527.69"), 1, false)), xCanon(xCut(xParse("527.69"), 1, true)),
+   JSON.stringify(xFieldDecimals(xParse("2/3"))), JSON.stringify(xFieldDecimals(xParse("1562.5"))),
+   xCanon(xCut(xParse("-1/3"), 4, true))].join(" "),
+  "[1] 2638/5 5277/10 [4,3] [0] -3333/10000");
+check("the exemption's arithmetic never calls grading.js",
+  [xGcd, xMake, xParse, xCanon, xEq, xAbsN, xFieldDecimals, xCut, fitsField, exemptShape].some(f => /\bG\./.test(String(f))), false);
+
+/* CONTROLS — the narrowed check must still catch a real wrong -> right
+   flip. Each runs the SAME sweep (sweepKey) and verdict code as above. */
+const findKey = (testId, qid) => keys.find(x => x.testId === testId && x.qid === qid) || null;
+const kQ10 = findKey("202505usv1", "ma2-q10"), kQ21 = findKey("202606asiav1", "ma2-q21");
+check("control items are in the library (202505usv1 ma2-q10 = 527.69, 202606asiav1 ma2-q21 = 9.96)",
+  !!(kQ10 && kQ21) && kQ10.q.correctAnswer === "527.69" && kQ21.q.correctAnswer === "9.96", true);
+const plant = (kk, entry) => (q, e) => (q === kk.q && e === entry) || G.answerMatches(q, e);
+const ids = v => JSON.stringify(v.unexcused.map(u => u.id + (u.shape ? " [shape]" : "")).sort());
+let changed97 = null;                                  // the ruled 9.97 control finishes at the moved-entries pin below
+if(kQ10 && kQ21){
+  check("shape on the ruled item: 527.6 (truncation) and 527.7 (rounding) are the shape; 527.5, 527 and 528 are not",
+    ["527.6", "527.7", "527.5", "527", "528"].map(e => !!exemptShape(kQ10.q, e)).join(","), "true,true,false,false,false");
+  /* (a) the ruled control: a grader that accepts 9.97 for the FITTING key
+     9.96. The old band ALREADY accepted 9.97 — 9.97 - 9.96 is 0.00999... in
+     doubles — so such a grader makes no wrong -> right flip for THIS check to
+     see. It is caught by the moved-entries pin below (9.97 must move right ->
+     wrong; under this grader it doesn't): proven there, on this same sweep. */
+  changed97 = sweepKey(kQ21, plant(kQ21, "9.97"));
+  check("control: 9.97 for 9.96 is no wrong -> right flip (the old band already took it: 9.97 - 9.96 = " + Math.abs(9.97 - 9.96) + ") — so the moved-entries pin must catch it",
+    ids(newlyCorrectVerdicts([{ k: kQ21, changed: changed97 }], RULED_EXEMPT)) === "[]" && Math.abs(9.97 - 9.96) < 0.01, true);
+  /* (a') a GENUINE wrong -> right flip on that ordinary, fitting key: 9.98
+     (the old band rejected it — 0.0199...) */
+  const changed98 = sweepKey(kQ21, plant(kQ21, "9.98"));
+  const vA = newlyCorrectVerdicts([{ k: kQ21, changed: changed98 }], RULED_EXEMPT);
+  check("control: a grader accepting 9.98 for the fitting key 9.96 (old band: wrong) FAILS this check — exactly that flip, not the exempt shape",
+    ids(vA), JSON.stringify(["202606asiav1 ma2-q21 9.98"]));
+  /* (b) the ruled item, the wrong number: 527.5 accepted for 527.69 */
+  const vB = newlyCorrectVerdicts([{ k: kQ10, changed: sweepKey(kQ10, plant(kQ10, "527.5")) }], RULED_EXEMPT);
+  check("control: a grader accepting 527.5 for 527.69 FAILS the check (while the ruled 527.6 stays excused)",
+    JSON.stringify({ unexcused: JSON.parse(ids(vB)), excused: vB.excused }),
+    JSON.stringify({ unexcused: ["202505usv1 ma2-q10 527.5"], excused: ["202505usv1 ma2-q10 527.6"] }));
+  /* (c) the NEXT key too long for its field: the REAL grader on an unlisted
+     item — the exact shape the exemption describes, still a failure */
+  const kNext = { testId: "control-unruled", qid: "q1", q: { type: "spr", correctAnswer: "731.48", altAnswers: [] } };
+  const vC = newlyCorrectVerdicts([{ k: kNext, changed: sweepKey(kNext, G.answerMatches) }], RULED_EXEMPT);
+  check("control: an UNLISTED flip of the exempt shape (key 731.48 -> 731.4 / 731.5, the real grader) FAILS the check until ruled on",
+    ids(vC), JSON.stringify(["control-unruled q1 731.4 [shape]", "control-unruled q1 731.5 [shape]"]));
+  /* (d) the list alone excuses nothing: both conditions are required */
+  const vD = newlyCorrectVerdicts([{ k: kQ21, changed: changed98 }], RULED_EXEMPT.concat(["202606asiav1 ma2-q21 9.98"]));
+  check("control: LISTING a flip that is not the exempt shape (9.98 for 9.96) does not excuse it",
+    ids(vD), JSON.stringify(["202606asiav1 ma2-q21 9.98"]));
+}
 
 /* That assertion alone is satisfied whenever old and new AGREE, so it passes
    under a full revert to the tolerance — the 11.4M comparisons above would
    cost a great deal and prove nothing. These pin the sweep's actual content:
    specific entries that must move, and that the two rules must not be the
    same rule. Reverting grading.js turns these red. */
-const movedSet = new Set();
-diffDetail.forEach(({ k, changed }) => changed.forEach(c =>
-  movedSet.add(k.testId + "|" + k.qid + "|" + c.e)));
+const movedIn = detail => {
+  const set = new Set();
+  detail.forEach(({ k, changed }) => changed.forEach(c => set.add(k.testId + "|" + k.qid + "|" + c.e)));
+  return set;
+};
+const movedSet = movedIn(diffDetail);
 const mustMove = [
   ["202606asiav1", "ma2-q21", "9.955"],   // inside the old +/-0.01, not a legal shortening
   ["202606asiav1", "ma2-q21", "9.97"],
@@ -254,6 +442,17 @@ const mustMove = [
 const notMoved = mustMove.filter(m => !movedSet.has(m.join("|")));
 check("the sweep sees the specific entries the fix targets", notMoved.length, 0);
 if(notMoved.length) console.log("    missing: " + notMoved.map(m => m.join(" ")).join(", "));
+/* the ruled control (a) lands here: the whole library's sweep, with 9.96's
+   row swapped for the planted grader's — this pin then fails on exactly 9.97 */
+if(changed97 && kQ21){
+  const planted = diffDetail.some(d => d.k === kQ21)
+    ? diffDetail.map(d => d.k === kQ21 ? { k: kQ21, changed: changed97 } : d)
+    : diffDetail.concat([{ k: kQ21, changed: changed97 }]);
+  const plantedMoved = movedIn(planted);
+  check("control: a grader accepting 9.97 for the fitting key 9.96 FAILS the moved-entries pin — exactly 9.97",
+    JSON.stringify(mustMove.filter(m => !plantedMoved.has(m.join("|"))).map(m => m.join(" "))),
+    JSON.stringify(["202606asiav1 ma2-q21 9.97"]));
+}
 
 /* and entries that must NOT move — valid shortenings and exact values */
 const mustHold = [
