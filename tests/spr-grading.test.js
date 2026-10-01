@@ -373,6 +373,9 @@ check("independent: the field holds 1 decimal for 527.69 (527.6 / 527.7), 4 or 3
    JSON.stringify(xFieldDecimals(xParse("2/3"))), JSON.stringify(xFieldDecimals(xParse("1562.5"))),
    xCanon(xCut(xParse("-1/3"), 4, true))].join(" "),
   "[1] 2638/5 5277/10 [4,3] [0] -3333/10000");
+check("independent: a cut that lands on zero is never the shape (key .00004321 cannot be written; '0' and '.0000' are not its shortening)",
+  [exemptShape({ type: "spr", correctAnswer: ".00004321" }, "0"), exemptShape({ type: "spr", correctAnswer: ".00004321" }, ".0000"),
+   fitsField(xParse(".00004321"))].map(x => x === null ? "null" : String(!!x)).join(","), "null,null,false");
 check("the exemption's arithmetic never calls grading.js",
   [xGcd, xMake, xParse, xCanon, xEq, xAbsN, xFieldDecimals, xCut, fitsField, exemptShape].some(f => /\bG\./.test(String(f))), false);
 
