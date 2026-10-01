@@ -214,8 +214,10 @@ testdata/archive/<testId>@<testVersion>.js
   single-file artifact has no origin to fetch from. The loader checks memory
   before cache before network, so the artifact simply never fetches.
 
-Load order matters: `testdata/manifest.js`, `render.js`, `grading.js`,
-`attempts.js`, `app.js`, `dashboard.js` — plain (non-module) scripts, so
+Load order matters (index.html is the source of truth): `config.js`,
+`testdata/manifest.js`, `testdata/archive/index.js`,
+`testdata/bank-manifest.js`, `testdata/bank-index.js`, `skilldomains.js`,
+`render.js`, `grading.js`, `attempts.js`, `app.js`, `dashboard.js` — plain (non-module) scripts, so
 top-level declarations are globals used across files. Don't wrap
 `render.js`/`grading.js` in IIFEs, and don't redefine `escapeHtml`,
 `fmt`, `answerMatches`, etc. inside `app.js`.
@@ -366,10 +368,13 @@ record-derived value.
   Accepted for launch 2026-07-31.
 - **The live site is an allowlist, not the repo root.** `netlify.toml` builds
   `_site/` via `build-site.js` and publishes that; only the files the
-  running app needs are copied in (`index.html`, `404.html`, `styles.css`,
-  the five app JS files, `testdata/manifest.js` plus every test the manifest
+  running app needs are copied in — `ALLOW` in `build-site.js` is the source
+  of truth: `index.html`, `404.html`, `styles.css`, the six app scripts
+  (`render.js`, `grading.js`, `attempts.js`, `app.js`, `dashboard.js`,
+  `skilldomains.js`), `testdata/manifest.js` plus every test the manifest
   lists, `testdata/archive/index.js` plus every archived build it lists,
-  `config.js`, `_headers`). Everything
+  `testdata/bank-manifest.js` plus every bank it lists, `testdata/bank-index.js`,
+  `testdata/dedup-index.js`, `config.js`, `_headers`. Everything
   else — design docs, specs, `assemble.py`, the build scripts, `reference/`
   (real College Board PDFs), `supabase/`, `tests/` — is simply not deployed.
   **Adding a file the app needs means adding it to `ALLOW` in
