@@ -21,8 +21,8 @@ window.DEDUP_INDEX = {
   "passage_run": 10
  },
  "boilerplate": {
-  "sha256": "bd2599910b1474f7c6091cf53186aade62c2406b6ffaa630fd4f76f6db76c19b",
-  "count": 436
+  "sha256": "b33fe0a3e8587bd4b051c76eb4d1cb4ea811d963581993d2664454e016505a62",
+  "count": 456
  },
  "reference": {
   "forms": [
@@ -199,29 +199,35 @@ window.DEDUP_INDEX = {
     "testVersion": "2026-09-30-c",
     "shippedOrder": 28,
     "itemCount": 97
+   },
+   {
+    "testId": "202609asiav1",
+    "testVersion": "2026-10-02-a",
+    "shippedOrder": 29,
+    "itemCount": 95
    }
   ],
   "banks": [
    {
     "bankId": "bank-david-core",
     "bankVersion": "sha-23154ea489a4",
-    "shippedOrder": 29,
+    "shippedOrder": 30,
     "questionCount": 1
    },
    {
     "bankId": "bank-202608-salvage",
     "bankVersion": "sha-c373526f5b01",
-    "shippedOrder": 30,
+    "shippedOrder": 31,
     "questionCount": 245
    }
   ]
  },
- "itemCount": 3078,
- "canonicalCount": 2922,
- "exactPairCount": 170,
- "skeletonPairCount": 629,
- "relatedPairCount": 152,
- "familyCount": 491,
+ "itemCount": 3173,
+ "canonicalCount": 3014,
+ "exactPairCount": 174,
+ "skeletonPairCount": 672,
+ "relatedPairCount": 156,
+ "familyCount": 509,
  "items": {
   "202606asiav1:re1-q1": {
    "section": "rw",
@@ -1644,11 +1650,21 @@ window.DEDUP_INDEX = {
      "shared": 4,
      "jaccard": 0.267,
      "contain": 0.5
+    },
+    {
+     "ref": "202609asiav1:ma1-q16",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.462,
+     "contain": 0.75
     }
    ],
    "ledger": {
     "202510usv1:ma1-q12": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:ma1-q16": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -2354,7 +2370,22 @@ window.DEDUP_INDEX = {
   "202511asiav1:re2-q24": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202511asiav1:re2-q24"
+   "canonical": "202511asiav1:re2-q24",
+   "family": "fam:202511asiav1:re2-q24",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:re1-q25",
+     "rule": "S",
+     "shared": 23,
+     "jaccard": 0.315,
+     "contain": 0.479
+    }
+   ],
+   "ledger": {
+    "202609asiav1:re1-q25": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202511asiav1:re2-q25": {
    "section": "rw",
@@ -2586,11 +2617,21 @@ window.DEDUP_INDEX = {
      "shared": 5,
      "jaccard": 0.714,
      "contain": 0.833
+    },
+    {
+     "ref": "202609asiav1:ma1-q21",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.625,
+     "contain": 0.833
     }
    ],
    "ledger": {
     "202505usv1:ma2-q12": [
      "skeleton-adjudication (session (skeleton WARN read and recorded), 2026-09-12)"
+    ],
+    "202609asiav1:ma1-q21": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -2642,7 +2683,22 @@ window.DEDUP_INDEX = {
   "202511asiav1:ma2-q5": {
    "section": "math",
    "type": "spr",
-   "canonical": "202511asiav1:ma2-q5"
+   "canonical": "202511asiav1:ma2-q5",
+   "family": "fam:202511asiav1:ma2-q5",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma2-q3",
+     "rule": "S",
+     "shared": 14,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma2-q3": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202511asiav1:ma2-q6": {
    "section": "math",
@@ -2863,7 +2919,22 @@ window.DEDUP_INDEX = {
   "202511asiav1:ma2-q22": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202511asiav1:ma2-q22"
+   "canonical": "202511asiav1:ma2-q22",
+   "family": "fam:202511asiav1:ma2-q22",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma2-q22",
+     "rule": "S",
+     "shared": 7,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma2-q22": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202603asiav1:re1-q1": {
    "section": "rw",
@@ -3164,7 +3235,7 @@ window.DEDUP_INDEX = {
      "ref": "202312intv1:re2-q7",
      "rule": "S",
      "shared": 114,
-     "jaccard": 0.6,
+     "jaccard": 0.613,
      "contain": 0.765
     },
     {
@@ -4535,49 +4606,7 @@ window.DEDUP_INDEX = {
   "202510usv3:ma1-q18": {
    "section": "math",
    "type": "spr",
-   "canonical": "202510usv3:ma1-q18",
-   "family": "fam:202510usv3:ma1-q18",
-   "skeleton": [
-    {
-     "ref": "202406intv1:ma1-q13",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 0.364,
-     "contain": 0.571
-    },
-    {
-     "ref": "202412usv2:ma1-q13",
-     "rule": "S",
-     "shared": 6,
-     "jaccard": 0.667,
-     "contain": 0.857
-    },
-    {
-     "ref": "202503usv1:ma1-q6",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 0.4,
-     "contain": 0.667
-    },
-    {
-     "ref": "202510usv1:ma1-q16",
-     "rule": "S",
-     "shared": 6,
-     "jaccard": 0.667,
-     "contain": 0.857
-    }
-   ],
-   "ledger": {
-    "202406intv1:ma1-q13": [
-     "skeleton-adjudication (session (blind derivation cited), 2026-09-09)"
-    ],
-    "202412usv2:ma1-q13": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-27)"
-    ],
-    "202510usv1:ma1-q16": [
-     "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
-    ]
-   }
+   "canonical": "202510usv3:ma1-q18"
   },
   "202510usv3:ma1-q19": {
    "section": "math",
@@ -4956,43 +4985,50 @@ window.DEDUP_INDEX = {
      "ref": "202406intv1:re2-q5",
      "rule": "S",
      "shared": 60,
-     "jaccard": 0.469,
-     "contain": 0.638
+     "jaccard": 0.484,
+     "contain": 0.667
     },
     {
      "ref": "202408usv2:re2-q5",
      "rule": "S",
-     "shared": 62,
-     "jaccard": 0.5,
+     "shared": 58,
+     "jaccard": 0.492,
      "contain": 0.674
     },
     {
      "ref": "202503asiav2:re1-q7",
      "rule": "S",
-     "shared": 70,
-     "jaccard": 0.593,
-     "contain": 0.745
+     "shared": 66,
+     "jaccard": 0.589,
+     "contain": 0.75
     },
     {
      "ref": "202509asiav2:re1-q7",
      "rule": "S",
-     "shared": 52,
-     "jaccard": 0.394,
-     "contain": 0.578
+     "shared": 48,
+     "jaccard": 0.381,
+     "contain": 0.571
     },
     {
      "ref": "202510usv1:re1-q5",
      "rule": "S",
-     "shared": 60,
-     "jaccard": 0.472,
-     "contain": 0.645
+     "shared": 56,
+     "jaccard": 0.463,
+     "contain": 0.644
+    },
+    {
+     "ref": "202609asiav1:re1-q6",
+     "rule": "S",
+     "shared": 48,
+     "jaccard": 0.378,
+     "contain": 0.565
     },
     {
      "ref": "202609usv1:re1-q6",
      "rule": "S",
      "shared": 56,
-     "jaccard": 0.421,
-     "contain": 0.596
+     "jaccard": 0.441,
+     "contain": 0.622
     }
    ],
    "keys": {
@@ -5010,6 +5046,9 @@ window.DEDUP_INDEX = {
     ],
     "202510usv1:re1-q5": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ],
     "202609usv1:re1-q6": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
@@ -5903,11 +5942,21 @@ window.DEDUP_INDEX = {
      "shared": 56,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "202609asiav1:ma1-q20",
+     "rule": "S",
+     "shared": 56,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
     "202412asiav1:ma1-q22": [
      "skeleton-adjudication (session (renders and live items compared), 2026-09-09)"
+    ],
+    "202609asiav1:ma1-q20": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -6280,7 +6329,25 @@ window.DEDUP_INDEX = {
   "202509asiav4:re2-q1": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202509asiav4:re2-q1"
+   "canonical": "202509asiav4:re2-q1",
+   "family": "fam:202509asiav4:re2-q1",
+   "exact": [
+    {
+     "ref": "202609asiav1:re2-q1",
+     "rule": "E2",
+     "shared": 46,
+     "jaccard": 0.648,
+     "contain": 0.793
+    }
+   ],
+   "keys": {
+    "202609asiav1:re2-q1": "AGREE"
+   },
+   "ledger": {
+    "202609asiav1:re2-q1": [
+     "sibling-reskin (David (class ruling 2026-09-06: sibling reskins accepted where keys agree by text); row written by the conversion session, 2026-10-02)"
+    ]
+   }
   },
   "202509asiav4:re2-q2": {
    "section": "rw",
@@ -6555,14 +6622,24 @@ window.DEDUP_INDEX = {
     {
      "ref": "202403intv2:ma1-q5",
      "rule": "S",
-     "shared": 8,
+     "shared": 7,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "202609asiav1:ma1-q6",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.429,
+     "contain": 0.857
     }
    ],
    "ledger": {
     "202403intv2:ma1-q5": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-28)"
+    ],
+    "202609asiav1:ma1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -8149,7 +8226,25 @@ window.DEDUP_INDEX = {
   "202506asiav2:ma1-q9": {
    "section": "math",
    "type": "spr",
-   "canonical": "202506asiav2:ma1-q9"
+   "canonical": "202506asiav2:ma1-q9",
+   "family": "fam:202506asiav2:ma1-q9",
+   "exact": [
+    {
+     "ref": "202609asiav1:ma1-q13",
+     "rule": "E1",
+     "shared": 10,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "202609asiav1:ma1-q13": "DISAGREE"
+   },
+   "ledger": {
+    "202609asiav1:ma1-q13": [
+     "distinct (session (renders compared), 2026-10-02)"
+    ]
+   }
   },
   "202506asiav2:ma1-q10": {
    "section": "math",
@@ -8528,7 +8623,22 @@ window.DEDUP_INDEX = {
   "202506asiav2:ma2-q20": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202506asiav2:ma2-q20"
+   "canonical": "202506asiav2:ma2-q20",
+   "family": "fam:202506asiav2:ma2-q20",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma2-q21",
+     "rule": "S",
+     "shared": 42,
+     "jaccard": 0.467,
+     "contain": 0.656
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma2-q21": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202506asiav2:ma2-q21": {
    "section": "math",
@@ -8823,6 +8933,16 @@ window.DEDUP_INDEX = {
    "section": "rw",
    "type": "mcq",
    "canonical": "202503usv1:re1-q27",
+   "family": "fam:202503usv1:re1-q27",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:re2-q24",
+     "rule": "S",
+     "shared": 55,
+     "jaccard": 0.437,
+     "contain": 0.64
+    }
+   ],
    "related": [
     {
      "ref": "bank-202608-salvage:q0052",
@@ -8831,7 +8951,12 @@ window.DEDUP_INDEX = {
      "jaccard": 0.23,
      "contain": 0.391
     }
-   ]
+   ],
+   "ledger": {
+    "202609asiav1:re2-q24": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202503usv1:re2-q1": {
    "section": "rw",
@@ -9195,29 +9320,7 @@ window.DEDUP_INDEX = {
   "202503usv1:ma1-q6": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202503usv1:ma1-q6",
-   "family": "fam:202510usv3:ma1-q18",
-   "skeleton": [
-    {
-     "ref": "202406intv1:ma1-q13",
-     "rule": "S",
-     "shared": 6,
-     "jaccard": 0.857,
-     "contain": 1.0
-    },
-    {
-     "ref": "202510usv3:ma1-q18",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 0.4,
-     "contain": 0.667
-    }
-   ],
-   "ledger": {
-    "202406intv1:ma1-q13": [
-     "skeleton-adjudication (session (blind derivation cited), 2026-09-09)"
-    ]
-   }
+   "canonical": "202503usv1:ma1-q6"
   },
   "202503usv1:ma1-q7": {
    "section": "math",
@@ -9918,6 +10021,13 @@ window.DEDUP_INDEX = {
      "shared": 16,
      "jaccard": 0.271,
      "contain": 0.444
+    },
+    {
+     "ref": "202609asiav1:re1-q12",
+     "rule": "R",
+     "shared": 16,
+     "jaccard": 0.271,
+     "contain": 0.444
     }
    ]
   },
@@ -9928,6 +10038,13 @@ window.DEDUP_INDEX = {
    "family": "fam:202503usv2:re1-q14",
    "skeleton": [
     {
+     "ref": "202609asiav1:re1-q13",
+     "rule": "S",
+     "shared": 94,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
      "ref": "202609usv1:re1-q13",
      "rule": "S",
      "shared": 94,
@@ -9936,6 +10053,9 @@ window.DEDUP_INDEX = {
     }
    ],
    "ledger": {
+    "202609asiav1:re1-q13": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
     "202609usv1:re1-q13": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
     ]
@@ -11178,43 +11298,50 @@ window.DEDUP_INDEX = {
      "ref": "202406intv1:re2-q5",
      "rule": "S",
      "shared": 57,
-     "jaccard": 0.449,
-     "contain": 0.633
+     "jaccard": 0.471,
+     "contain": 0.679
     },
     {
      "ref": "202408usv2:re2-q5",
      "rule": "S",
-     "shared": 61,
-     "jaccard": 0.504,
-     "contain": 0.678
+     "shared": 55,
+     "jaccard": 0.478,
+     "contain": 0.655
     },
     {
      "ref": "202503asiav2:re1-q7",
      "rule": "S",
-     "shared": 55,
-     "jaccard": 0.426,
-     "contain": 0.611
+     "shared": 49,
+     "jaccard": 0.398,
+     "contain": 0.583
     },
     {
      "ref": "202508asiav1:re1-q6",
      "rule": "S",
-     "shared": 52,
-     "jaccard": 0.394,
-     "contain": 0.578
+     "shared": 48,
+     "jaccard": 0.381,
+     "contain": 0.571
     },
     {
      "ref": "202510usv1:re1-q5",
      "rule": "S",
-     "shared": 64,
-     "jaccard": 0.538,
-     "contain": 0.711
+     "shared": 58,
+     "jaccard": 0.513,
+     "contain": 0.69
+    },
+    {
+     "ref": "202609asiav1:re1-q6",
+     "rule": "S",
+     "shared": 56,
+     "jaccard": 0.496,
+     "contain": 0.667
     },
     {
      "ref": "202609usv1:re1-q6",
      "rule": "S",
-     "shared": 60,
-     "jaccard": 0.48,
-     "contain": 0.667
+     "shared": 58,
+     "jaccard": 0.487,
+     "contain": 0.69
     }
    ],
    "ledger": {
@@ -11229,6 +11356,9 @@ window.DEDUP_INDEX = {
     ],
     "202510usv1:re1-q5": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ],
     "202609usv1:re1-q6": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
@@ -13178,11 +13308,21 @@ window.DEDUP_INDEX = {
      "shared": 12,
      "jaccard": 0.48,
      "contain": 0.706
+    },
+    {
+     "ref": "202609asiav1:ma1-q11",
+     "rule": "S",
+     "shared": 17,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
     "202512asiav1:ma2-q15": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-15)"
+    ],
+    "202609asiav1:ma1-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -13354,32 +13494,7 @@ window.DEDUP_INDEX = {
   "202512usv2:ma2-q9": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202512usv2:ma2-q9",
-   "family": "fam:202512usv2:ma2-q9",
-   "skeleton": [
-    {
-     "ref": "202412asiav1:ma1-q2",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 1.0,
-     "contain": 1.0
-    },
-    {
-     "ref": "202609usv1:ma1-q2",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 1.0,
-     "contain": 1.0
-    }
-   ],
-   "ledger": {
-    "202412asiav1:ma1-q2": [
-     "skeleton-adjudication (session (renders and live items compared), 2026-09-09)"
-    ],
-    "202609usv1:ma1-q2": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
-    ]
-   }
+   "canonical": "202512usv2:ma2-q9"
   },
   "202512usv2:ma2-q10": {
    "section": "math",
@@ -13420,11 +13535,21 @@ window.DEDUP_INDEX = {
      "shared": 19,
      "jaccard": 0.543,
      "contain": 0.704
+    },
+    {
+     "ref": "202609asiav1:ma1-q9",
+     "rule": "S",
+     "shared": 19,
+     "jaccard": 0.543,
+     "contain": 0.704
     }
    ],
    "ledger": {
     "202403intv2:ma2-q3": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-28)"
+    ],
+    "202609asiav1:ma1-q9": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -14784,11 +14909,21 @@ window.DEDUP_INDEX = {
      "shared": 19,
      "jaccard": 0.543,
      "contain": 0.704
+    },
+    {
+     "ref": "202609asiav1:ma1-q9",
+     "rule": "S",
+     "shared": 18,
+     "jaccard": 0.5,
+     "contain": 0.667
     }
    ],
    "ledger": {
     "202403intv2:ma2-q3": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-28)"
+    ],
+    "202609asiav1:ma1-q9": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -16801,11 +16936,21 @@ window.DEDUP_INDEX = {
      "shared": 4,
      "jaccard": 0.267,
      "contain": 0.5
+    },
+    {
+     "ref": "202609asiav1:ma1-q16",
+     "rule": "S",
+     "shared": 4,
+     "jaccard": 0.333,
+     "contain": 0.5
     }
    ],
    "ledger": {
     "202510usv1:ma1-q12": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:ma1-q16": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -16858,7 +17003,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202412usv2:ma2-q19",
      "rule": "S",
-     "shared": 19,
+     "shared": 18,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -17493,43 +17638,50 @@ window.DEDUP_INDEX = {
      "ref": "202406intv1:re2-q5",
      "rule": "S",
      "shared": 48,
-     "jaccard": 0.348,
-     "contain": 0.522
+     "jaccard": 0.364,
+     "contain": 0.558
     },
     {
      "ref": "202503asiav2:re1-q7",
      "rule": "S",
-     "shared": 64,
-     "jaccard": 0.525,
-     "contain": 0.696
+     "shared": 58,
+     "jaccard": 0.5,
+     "contain": 0.674
     },
     {
      "ref": "202508asiav1:re1-q6",
      "rule": "S",
-     "shared": 62,
-     "jaccard": 0.5,
+     "shared": 58,
+     "jaccard": 0.492,
      "contain": 0.674
     },
     {
      "ref": "202509asiav2:re1-q7",
      "rule": "S",
-     "shared": 61,
-     "jaccard": 0.504,
-     "contain": 0.678
+     "shared": 55,
+     "jaccard": 0.478,
+     "contain": 0.655
     },
     {
      "ref": "202510usv1:re1-q5",
      "rule": "S",
-     "shared": 54,
-     "jaccard": 0.412,
-     "contain": 0.587
+     "shared": 48,
+     "jaccard": 0.384,
+     "contain": 0.558
+    },
+    {
+     "ref": "202609asiav1:re1-q6",
+     "rule": "S",
+     "shared": 55,
+     "jaccard": 0.474,
+     "contain": 0.647
     },
     {
      "ref": "202609usv1:re1-q6",
      "rule": "S",
-     "shared": 50,
-     "jaccard": 0.365,
-     "contain": 0.543
+     "shared": 48,
+     "jaccard": 0.366,
+     "contain": 0.558
     }
    ],
    "ledger": {
@@ -17547,6 +17699,9 @@ window.DEDUP_INDEX = {
     ],
     "202510usv1:re1-q5": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ],
     "202609usv1:re1-q6": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
@@ -18904,8 +19059,8 @@ window.DEDUP_INDEX = {
      "ref": "202312intv1:re2-q7",
      "rule": "S",
      "shared": 114,
-     "jaccard": 0.582,
-     "contain": 0.735
+     "jaccard": 0.594,
+     "contain": 0.755
     },
     {
      "ref": "202603asiav1:re2-q7",
@@ -18960,6 +19115,13 @@ window.DEDUP_INDEX = {
      "shared": 21,
      "jaccard": 0.135,
      "contain": 0.253
+    },
+    {
+     "ref": "202609asiav1:re2-q12",
+     "rule": "R",
+     "shared": 21,
+     "jaccard": 0.136,
+     "contain": 0.256
     }
    ]
   },
@@ -19169,8 +19331,8 @@ window.DEDUP_INDEX = {
      "ref": "202512asiav1:ma1-q21",
      "rule": "S",
      "shared": 5,
-     "jaccard": 0.125,
-     "contain": 0.5
+     "jaccard": 0.128,
+     "contain": 0.556
     }
    ]
   },
@@ -19459,14 +19621,24 @@ window.DEDUP_INDEX = {
    "family": "fam:202506usv1:ma2-q5",
    "skeleton": [
     {
+     "ref": "202609asiav1:ma1-q7",
+     "rule": "S",
+     "shared": 10,
+     "jaccard": 0.417,
+     "contain": 0.625
+    },
+    {
      "ref": "202609usv1:ma1-q5",
      "rule": "S",
      "shared": 10,
-     "jaccard": 0.4,
-     "contain": 0.588
+     "jaccard": 0.417,
+     "contain": 0.625
     }
    ],
    "ledger": {
+    "202609asiav1:ma1-q7": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
     "202609usv1:ma1-q5": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
     ]
@@ -19972,7 +20144,25 @@ window.DEDUP_INDEX = {
   "202412asiav1:re1-q23": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202412asiav1:re1-q23"
+   "canonical": "202412asiav1:re1-q23",
+   "family": "fam:202412asiav1:re1-q23",
+   "exact": [
+    {
+     "ref": "202609asiav1:re2-q23",
+     "rule": "E2",
+     "shared": 43,
+     "jaccard": 0.672,
+     "contain": 0.811
+    }
+   ],
+   "keys": {
+    "202609asiav1:re2-q23": "AGREE"
+   },
+   "ledger": {
+    "202609asiav1:re2-q23": [
+     "sibling-reskin (David (class ruling 2026-09-06: sibling reskins accepted where keys agree by text); row written by the conversion session, 2026-10-02)"
+    ]
+   }
   },
   "202412asiav1:re1-q24": {
    "section": "rw",
@@ -20186,11 +20376,21 @@ window.DEDUP_INDEX = {
      "shared": 99,
      "jaccard": 0.454,
      "contain": 0.627
+    },
+    {
+     "ref": "202609asiav1:re2-q11",
+     "rule": "S",
+     "shared": 87,
+     "jaccard": 0.382,
+     "contain": 0.558
     }
    ],
    "ledger": {
     "202512asiav1:re1-q13": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-15)"
+    ],
+    "202609asiav1:re2-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -20319,7 +20519,22 @@ window.DEDUP_INDEX = {
   "202412asiav1:re2-q19": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202412asiav1:re2-q19"
+   "canonical": "202412asiav1:re2-q19",
+   "family": "fam:202412asiav1:re2-q19",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:re2-q18",
+     "rule": "S",
+     "shared": 21,
+     "jaccard": 0.3,
+     "contain": 0.477
+    }
+   ],
+   "ledger": {
+    "202609asiav1:re2-q18": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202412asiav1:re2-q20": {
    "section": "rw",
@@ -20449,32 +20664,7 @@ window.DEDUP_INDEX = {
   "202412asiav1:ma1-q2": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202412asiav1:ma1-q2",
-   "family": "fam:202512usv2:ma2-q9",
-   "skeleton": [
-    {
-     "ref": "202512usv2:ma2-q9",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 1.0,
-     "contain": 1.0
-    },
-    {
-     "ref": "202609usv1:ma1-q2",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 1.0,
-     "contain": 1.0
-    }
-   ],
-   "ledger": {
-    "202512usv2:ma2-q9": [
-     "skeleton-adjudication (session (renders and live items compared), 2026-09-09)"
-    ],
-    "202609usv1:ma1-q2": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
-    ]
-   }
+   "canonical": "202412asiav1:ma1-q2"
   },
   "202412asiav1:ma1-q3": {
    "section": "math",
@@ -20698,7 +20888,22 @@ window.DEDUP_INDEX = {
   "202412asiav1:ma1-q19": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202412asiav1:ma1-q19"
+   "canonical": "202412asiav1:ma1-q19",
+   "family": "fam:202412asiav1:ma1-q19",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma1-q18",
+     "rule": "S",
+     "shared": 80,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma1-q18": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202412asiav1:ma1-q20": {
    "section": "math",
@@ -20752,11 +20957,21 @@ window.DEDUP_INDEX = {
      "shared": 56,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "202609asiav1:ma1-q20",
+     "rule": "S",
+     "shared": 56,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
     "202508asiav1:ma2-q11": [
      "skeleton-adjudication (session (renders and live items compared), 2026-09-09)"
+    ],
+    "202609asiav1:ma1-q20": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -21407,43 +21622,50 @@ window.DEDUP_INDEX = {
      "ref": "202408usv2:re2-q5",
      "rule": "S",
      "shared": 48,
-     "jaccard": 0.348,
-     "contain": 0.522
+     "jaccard": 0.364,
+     "contain": 0.558
     },
     {
      "ref": "202503asiav2:re1-q7",
      "rule": "S",
      "shared": 56,
-     "jaccard": 0.424,
-     "contain": 0.596
+     "jaccard": 0.444,
+     "contain": 0.636
     },
     {
      "ref": "202508asiav1:re1-q6",
      "rule": "S",
      "shared": 60,
-     "jaccard": 0.469,
-     "contain": 0.638
+     "jaccard": 0.484,
+     "contain": 0.667
     },
     {
      "ref": "202509asiav2:re1-q7",
      "rule": "S",
      "shared": 57,
-     "jaccard": 0.449,
-     "contain": 0.633
+     "jaccard": 0.471,
+     "contain": 0.679
     },
     {
      "ref": "202510usv1:re1-q5",
      "rule": "S",
      "shared": 65,
-     "jaccard": 0.533,
-     "contain": 0.699
+     "jaccard": 0.56,
+     "contain": 0.747
+    },
+    {
+     "ref": "202609asiav1:re1-q6",
+     "rule": "S",
+     "shared": 48,
+     "jaccard": 0.366,
+     "contain": 0.565
     },
     {
      "ref": "202609usv1:re1-q6",
      "rule": "S",
      "shared": 75,
-     "jaccard": 0.658,
-     "contain": 0.798
+     "jaccard": 0.67,
+     "contain": 0.806
     }
    ],
    "keys": {
@@ -21464,6 +21686,9 @@ window.DEDUP_INDEX = {
     ],
     "202510usv1:re1-q5": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ],
     "202609usv1:re1-q6": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
@@ -21910,32 +22135,7 @@ window.DEDUP_INDEX = {
   "202406intv1:ma1-q13": {
    "section": "math",
    "type": "spr",
-   "canonical": "202406intv1:ma1-q13",
-   "family": "fam:202510usv3:ma1-q18",
-   "skeleton": [
-    {
-     "ref": "202503usv1:ma1-q6",
-     "rule": "S",
-     "shared": 6,
-     "jaccard": 0.857,
-     "contain": 1.0
-    },
-    {
-     "ref": "202510usv3:ma1-q18",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 0.364,
-     "contain": 0.571
-    }
-   ],
-   "ledger": {
-    "202503usv1:ma1-q6": [
-     "skeleton-adjudication (session (blind derivation cited), 2026-09-09)"
-    ],
-    "202510usv3:ma1-q18": [
-     "skeleton-adjudication (session (blind derivation cited), 2026-09-09)"
-    ]
-   }
+   "canonical": "202406intv1:ma1-q13"
   },
   "202406intv1:ma1-q14": {
    "section": "math",
@@ -22143,7 +22343,22 @@ window.DEDUP_INDEX = {
   "202406intv1:ma2-q13": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202406intv1:ma2-q13"
+   "canonical": "202406intv1:ma2-q13",
+   "family": "fam:202406intv1:ma2-q13",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma2-q11",
+     "rule": "S",
+     "shared": 34,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma2-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202406intv1:ma2-q14": {
    "section": "math",
@@ -22759,6 +22974,16 @@ window.DEDUP_INDEX = {
    "section": "rw",
    "type": "mcq",
    "canonical": "202412usv1:re2-q8",
+   "family": "fam:202412usv1:re2-q8",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:re2-q12",
+     "rule": "S",
+     "shared": 47,
+     "jaccard": 0.398,
+     "contain": 0.573
+    }
+   ],
    "related": [
     {
      "ref": "202506usv1:re2-q12",
@@ -22767,7 +22992,12 @@ window.DEDUP_INDEX = {
      "jaccard": 0.135,
      "contain": 0.253
     }
-   ]
+   ],
+   "ledger": {
+    "202609asiav1:re2-q12": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202412usv1:re2-q9": {
    "section": "rw",
@@ -23075,11 +23305,21 @@ window.DEDUP_INDEX = {
      "shared": 18,
      "jaccard": 0.692,
      "contain": 0.818
+    },
+    {
+     "ref": "202609asiav1:ma2-q17",
+     "rule": "S",
+     "shared": 18,
+     "jaccard": 0.692,
+     "contain": 0.818
     }
    ],
    "ledger": {
     "202412usv2:ma1-q18": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-27)"
+    ],
+    "202609asiav1:ma2-q17": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -23101,7 +23341,22 @@ window.DEDUP_INDEX = {
   "202412usv1:ma1-q13": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202412usv1:ma1-q13"
+   "canonical": "202412usv1:ma1-q13",
+   "family": "fam:202412usv1:ma1-q13",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma1-q17",
+     "rule": "S",
+     "shared": 8,
+     "jaccard": 0.276,
+     "contain": 0.533
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma1-q17": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202412usv1:ma1-q14": {
    "section": "math",
@@ -23132,7 +23387,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202412usv2:ma1-q15",
      "rule": "E1",
-     "shared": 22,
+     "shared": 20,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -23369,7 +23624,22 @@ window.DEDUP_INDEX = {
   "202412usv1:ma2-q3": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202412usv1:ma2-q3"
+   "canonical": "202412usv1:ma2-q3",
+   "family": "fam:202412usv1:ma2-q3",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma1-q8",
+     "rule": "S",
+     "shared": 28,
+     "jaccard": 0.667,
+     "contain": 0.8
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma1-q8": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202412usv1:ma2-q4": {
    "section": "math",
@@ -24538,11 +24808,21 @@ window.DEDUP_INDEX = {
      "shared": 5,
      "jaccard": 0.714,
      "contain": 0.833
+    },
+    {
+     "ref": "202609asiav1:ma1-q21",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.625,
+     "contain": 0.833
     }
    ],
    "ledger": {
     "202511asiav1:ma1-q20": [
      "skeleton-adjudication (session (skeleton WARN read and recorded), 2026-09-12)"
+    ],
+    "202609asiav1:ma1-q21": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -24833,11 +25113,21 @@ window.DEDUP_INDEX = {
      "shared": 99,
      "jaccard": 0.454,
      "contain": 0.627
+    },
+    {
+     "ref": "202609asiav1:re2-q11",
+     "rule": "S",
+     "shared": 86,
+     "jaccard": 0.377,
+     "contain": 0.551
     }
    ],
    "ledger": {
     "202412asiav1:re2-q10": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-15)"
+    ],
+    "202609asiav1:re2-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -25503,8 +25793,8 @@ window.DEDUP_INDEX = {
      "ref": "202506usv1:ma1-q1",
      "rule": "S",
      "shared": 5,
-     "jaccard": 0.125,
-     "contain": 0.5
+     "jaccard": 0.128,
+     "contain": 0.556
     }
    ]
   },
@@ -25690,11 +25980,21 @@ window.DEDUP_INDEX = {
      "shared": 12,
      "jaccard": 0.48,
      "contain": 0.706
+    },
+    {
+     "ref": "202609asiav1:ma1-q11",
+     "rule": "S",
+     "shared": 12,
+     "jaccard": 0.48,
+     "contain": 0.706
     }
    ],
    "ledger": {
     "202512usv2:ma1-q15": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-15)"
+    ],
+    "202609asiav1:ma1-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -25803,43 +26103,50 @@ window.DEDUP_INDEX = {
      "ref": "202406intv1:re2-q5",
      "rule": "S",
      "shared": 56,
-     "jaccard": 0.424,
-     "contain": 0.596
+     "jaccard": 0.444,
+     "contain": 0.636
     },
     {
      "ref": "202408usv2:re2-q5",
      "rule": "S",
-     "shared": 64,
-     "jaccard": 0.525,
-     "contain": 0.696
+     "shared": 58,
+     "jaccard": 0.5,
+     "contain": 0.674
     },
     {
      "ref": "202508asiav1:re1-q6",
      "rule": "S",
-     "shared": 70,
-     "jaccard": 0.593,
-     "contain": 0.745
+     "shared": 66,
+     "jaccard": 0.589,
+     "contain": 0.75
     },
     {
      "ref": "202509asiav2:re1-q7",
      "rule": "S",
-     "shared": 55,
-     "jaccard": 0.426,
-     "contain": 0.611
+     "shared": 49,
+     "jaccard": 0.398,
+     "contain": 0.583
     },
     {
      "ref": "202510usv1:re1-q5",
      "rule": "S",
-     "shared": 84,
-     "jaccard": 0.816,
-     "contain": 0.903
+     "shared": 78,
+     "jaccard": 0.804,
+     "contain": 0.897
+    },
+    {
+     "ref": "202609asiav1:re1-q6",
+     "rule": "S",
+     "shared": 49,
+     "jaccard": 0.395,
+     "contain": 0.576
     },
     {
      "ref": "202609usv1:re1-q6",
      "rule": "S",
-     "shared": 59,
-     "jaccard": 0.454,
-     "contain": 0.628
+     "shared": 57,
+     "jaccard": 0.46,
+     "contain": 0.648
     }
    ],
    "ledger": {
@@ -25857,6 +26164,9 @@ window.DEDUP_INDEX = {
     ],
     "202510usv1:re1-q5": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ],
     "202609usv1:re1-q6": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
@@ -27153,43 +27463,50 @@ window.DEDUP_INDEX = {
      "ref": "202406intv1:re2-q5",
      "rule": "S",
      "shared": 65,
-     "jaccard": 0.533,
-     "contain": 0.699
+     "jaccard": 0.56,
+     "contain": 0.747
     },
     {
      "ref": "202408usv2:re2-q5",
      "rule": "S",
-     "shared": 54,
-     "jaccard": 0.412,
-     "contain": 0.587
+     "shared": 48,
+     "jaccard": 0.384,
+     "contain": 0.558
     },
     {
      "ref": "202503asiav2:re1-q7",
      "rule": "S",
-     "shared": 84,
-     "jaccard": 0.816,
-     "contain": 0.903
+     "shared": 78,
+     "jaccard": 0.804,
+     "contain": 0.897
     },
     {
      "ref": "202508asiav1:re1-q6",
      "rule": "S",
-     "shared": 60,
-     "jaccard": 0.472,
-     "contain": 0.645
+     "shared": 56,
+     "jaccard": 0.463,
+     "contain": 0.644
     },
     {
      "ref": "202509asiav2:re1-q7",
      "rule": "S",
-     "shared": 64,
-     "jaccard": 0.538,
-     "contain": 0.711
+     "shared": 58,
+     "jaccard": 0.513,
+     "contain": 0.69
+    },
+    {
+     "ref": "202609asiav1:re1-q6",
+     "rule": "S",
+     "shared": 49,
+     "jaccard": 0.398,
+     "contain": 0.576
     },
     {
      "ref": "202609usv1:re1-q6",
      "rule": "S",
-     "shared": 68,
-     "jaccard": 0.567,
-     "contain": 0.731
+     "shared": 66,
+     "jaccard": 0.579,
+     "contain": 0.759
     }
    ],
    "ledger": {
@@ -27207,6 +27524,9 @@ window.DEDUP_INDEX = {
     ],
     "202509asiav2:re1-q7": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ],
     "202609usv1:re1-q6": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
@@ -27972,6 +28292,13 @@ window.DEDUP_INDEX = {
      "shared": 8,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "202609asiav1:ma1-q16",
+     "rule": "S",
+     "shared": 4,
+     "jaccard": 0.333,
+     "contain": 0.5
     }
    ],
    "ledger": {
@@ -27980,6 +28307,9 @@ window.DEDUP_INDEX = {
     ],
     "202608usv0:ma1-q12": [
      "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
+    ],
+    "202609asiav1:ma1-q16": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -28001,32 +28331,7 @@ window.DEDUP_INDEX = {
   "202510usv1:ma1-q16": {
    "section": "math",
    "type": "spr",
-   "canonical": "202510usv1:ma1-q16",
-   "family": "fam:202510usv3:ma1-q18",
-   "skeleton": [
-    {
-     "ref": "202412usv2:ma1-q13",
-     "rule": "S",
-     "shared": 7,
-     "jaccard": 1.0,
-     "contain": 1.0
-    },
-    {
-     "ref": "202510usv3:ma1-q18",
-     "rule": "S",
-     "shared": 6,
-     "jaccard": 0.667,
-     "contain": 0.857
-    }
-   ],
-   "ledger": {
-    "202412usv2:ma1-q13": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-27)"
-    ],
-    "202510usv3:ma1-q18": [
-     "skeleton-adjudication (session (content compared item by item), 2026-09-24)"
-    ]
-   }
+   "canonical": "202510usv1:ma1-q16"
   },
   "202510usv1:ma1-q17": {
    "section": "math",
@@ -28066,7 +28371,22 @@ window.DEDUP_INDEX = {
   "202510usv1:ma1-q21": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202510usv1:ma1-q21"
+   "canonical": "202510usv1:ma1-q21",
+   "family": "fam:202510usv1:ma1-q21",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma2-q9",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.625,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma2-q9": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202510usv1:ma1-q22": {
    "section": "math",
@@ -28422,6 +28742,13 @@ window.DEDUP_INDEX = {
      "rule": "R",
      "shared": 16,
      "jaccard": 0.271,
+     "contain": 0.444
+    },
+    {
+     "ref": "202609asiav1:re1-q12",
+     "rule": "R",
+     "shared": 16,
+     "jaccard": 0.286,
      "contain": 0.444
     }
    ]
@@ -29266,32 +29593,7 @@ window.DEDUP_INDEX = {
   "202412usv2:ma1-q13": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202412usv2:ma1-q13",
-   "family": "fam:202510usv3:ma1-q18",
-   "skeleton": [
-    {
-     "ref": "202510usv1:ma1-q16",
-     "rule": "S",
-     "shared": 7,
-     "jaccard": 1.0,
-     "contain": 1.0
-    },
-    {
-     "ref": "202510usv3:ma1-q18",
-     "rule": "S",
-     "shared": 6,
-     "jaccard": 0.667,
-     "contain": 0.857
-    }
-   ],
-   "ledger": {
-    "202510usv1:ma1-q16": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-27)"
-    ],
-    "202510usv3:ma1-q18": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-27)"
-    ]
-   }
+   "canonical": "202412usv2:ma1-q13"
   },
   "202412usv2:ma1-q14": {
    "section": "math",
@@ -29307,7 +29609,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202412usv1:ma1-q15",
      "rule": "E1",
-     "shared": 22,
+     "shared": 20,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -29368,11 +29670,21 @@ window.DEDUP_INDEX = {
      "shared": 18,
      "jaccard": 0.692,
      "contain": 0.818
+    },
+    {
+     "ref": "202609asiav1:ma2-q17",
+     "rule": "S",
+     "shared": 22,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
     "202412usv1:ma1-q8": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-27)"
+    ],
+    "202609asiav1:ma2-q17": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -29684,7 +29996,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "202608usv0:ma1-q16",
      "rule": "S",
-     "shared": 19,
+     "shared": 18,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -30126,14 +30438,14 @@ window.DEDUP_INDEX = {
      "ref": "202506usv1:re2-q9",
      "rule": "S",
      "shared": 114,
-     "jaccard": 0.582,
-     "contain": 0.735
+     "jaccard": 0.594,
+     "contain": 0.755
     },
     {
      "ref": "202603asiav1:re2-q7",
      "rule": "S",
      "shared": 114,
-     "jaccard": 0.6,
+     "jaccard": 0.613,
      "contain": 0.765
     }
    ],
@@ -31773,14 +32085,24 @@ window.DEDUP_INDEX = {
     {
      "ref": "202509asiav4:ma1-q5",
      "rule": "S",
-     "shared": 8,
+     "shared": 7,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "202609asiav1:ma1-q6",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.429,
+     "contain": 0.857
     }
    ],
    "ledger": {
     "202509asiav4:ma1-q5": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-28)"
+    ],
+    "202609asiav1:ma1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -32075,6 +32397,13 @@ window.DEDUP_INDEX = {
      "shared": 27,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "202609asiav1:ma1-q9",
+     "rule": "S",
+     "shared": 19,
+     "jaccard": 0.543,
+     "contain": 0.704
     }
    ],
    "ledger": {
@@ -32083,6 +32412,9 @@ window.DEDUP_INDEX = {
     ],
     "202512usv2:ma2-q14": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-28)"
+    ],
+    "202609asiav1:ma1-q9": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -33637,43 +33969,50 @@ window.DEDUP_INDEX = {
      "ref": "202406intv1:re2-q5",
      "rule": "S",
      "shared": 75,
-     "jaccard": 0.658,
-     "contain": 0.798
+     "jaccard": 0.67,
+     "contain": 0.806
     },
     {
      "ref": "202408usv2:re2-q5",
      "rule": "S",
-     "shared": 50,
-     "jaccard": 0.365,
-     "contain": 0.543
+     "shared": 48,
+     "jaccard": 0.366,
+     "contain": 0.558
     },
     {
      "ref": "202503asiav2:re1-q7",
      "rule": "S",
-     "shared": 59,
-     "jaccard": 0.454,
-     "contain": 0.628
+     "shared": 57,
+     "jaccard": 0.46,
+     "contain": 0.648
     },
     {
      "ref": "202508asiav1:re1-q6",
      "rule": "S",
      "shared": 56,
-     "jaccard": 0.421,
-     "contain": 0.596
+     "jaccard": 0.441,
+     "contain": 0.622
     },
     {
      "ref": "202509asiav2:re1-q7",
      "rule": "S",
-     "shared": 60,
-     "jaccard": 0.48,
-     "contain": 0.667
+     "shared": 58,
+     "jaccard": 0.487,
+     "contain": 0.69
     },
     {
      "ref": "202510usv1:re1-q5",
      "rule": "S",
-     "shared": 68,
-     "jaccard": 0.567,
-     "contain": 0.731
+     "shared": 66,
+     "jaccard": 0.579,
+     "contain": 0.759
+    },
+    {
+     "ref": "202609asiav1:re1-q6",
+     "rule": "S",
+     "shared": 49,
+     "jaccard": 0.38,
+     "contain": 0.576
     }
    ],
    "ledger": {
@@ -33694,6 +34033,9 @@ window.DEDUP_INDEX = {
     ],
     "202510usv1:re1-q5": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
+    ],
+    "202609asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -33710,7 +34052,22 @@ window.DEDUP_INDEX = {
   "202609usv1:re1-q9": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202609usv1:re1-q9"
+   "canonical": "202609usv1:re1-q9",
+   "family": "fam:202609usv1:re1-q9",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:re1-q10",
+     "rule": "S",
+     "shared": 82,
+     "jaccard": 0.82,
+     "contain": 0.901
+    }
+   ],
+   "ledger": {
+    "202609asiav1:re1-q10": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202609usv1:re1-q10": {
    "section": "rw",
@@ -33764,11 +34121,21 @@ window.DEDUP_INDEX = {
      "shared": 94,
      "jaccard": 1.0,
      "contain": 1.0
+    },
+    {
+     "ref": "202609asiav1:re1-q13",
+     "rule": "S",
+     "shared": 94,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
     "202503usv2:re1-q14": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
+    ],
+    "202609asiav1:re1-q13": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -33920,7 +34287,25 @@ window.DEDUP_INDEX = {
   "202609usv1:re2-q5": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202609usv1:re2-q5"
+   "canonical": "202609usv1:re2-q5",
+   "family": "fam:202609usv1:re2-q5",
+   "exact": [
+    {
+     "ref": "202609asiav1:re2-q5",
+     "rule": "E2",
+     "shared": 85,
+     "jaccard": 0.825,
+     "contain": 0.904
+    }
+   ],
+   "keys": {
+    "202609asiav1:re2-q5": "AGREE"
+   },
+   "ledger": {
+    "202609asiav1:re2-q5": [
+     "sibling-reskin (David (class ruling 2026-09-06: sibling reskins accepted where keys agree by text); row written by the conversion session, 2026-10-02)"
+    ]
+   }
   },
   "202609usv1:re2-q6": {
    "section": "rw",
@@ -33950,7 +34335,22 @@ window.DEDUP_INDEX = {
   "202609usv1:re2-q8": {
    "section": "rw",
    "type": "mcq",
-   "canonical": "202609usv1:re2-q8"
+   "canonical": "202609usv1:re2-q8",
+   "family": "fam:202609usv1:re2-q8",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:re2-q8",
+     "rule": "S",
+     "shared": 108,
+     "jaccard": 0.715,
+     "contain": 0.837
+    }
+   ],
+   "ledger": {
+    "202609asiav1:re2-q8": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202609usv1:re2-q9": {
    "section": "rw",
@@ -34145,6 +34545,13 @@ window.DEDUP_INDEX = {
    "family": "fam:bank-202608-salvage:q0026",
    "skeleton": [
     {
+     "ref": "202609asiav1:ma1-q1",
+     "rule": "S",
+     "shared": 8,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
      "ref": "bank-202608-salvage:q0026",
      "rule": "S",
      "shared": 7,
@@ -34153,6 +34560,9 @@ window.DEDUP_INDEX = {
     }
    ],
    "ledger": {
+    "202609asiav1:ma1-q1": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
     "bank-202608-salvage:q0026": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
     ]
@@ -34161,32 +34571,7 @@ window.DEDUP_INDEX = {
   "202609usv1:ma1-q2": {
    "section": "math",
    "type": "spr",
-   "canonical": "202609usv1:ma1-q2",
-   "family": "fam:202512usv2:ma2-q9",
-   "skeleton": [
-    {
-     "ref": "202412asiav1:ma1-q2",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 1.0,
-     "contain": 1.0
-    },
-    {
-     "ref": "202512usv2:ma2-q9",
-     "rule": "S",
-     "shared": 4,
-     "jaccard": 1.0,
-     "contain": 1.0
-    }
-   ],
-   "ledger": {
-    "202412asiav1:ma1-q2": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
-    ],
-    "202512usv2:ma2-q9": [
-     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
-    ]
-   }
+   "canonical": "202609usv1:ma1-q2"
   },
   "202609usv1:ma1-q3": {
    "section": "math",
@@ -34233,13 +34618,23 @@ window.DEDUP_INDEX = {
      "ref": "202506usv1:ma2-q5",
      "rule": "S",
      "shared": 10,
-     "jaccard": 0.4,
-     "contain": 0.588
+     "jaccard": 0.417,
+     "contain": 0.625
+    },
+    {
+     "ref": "202609asiav1:ma1-q7",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
     }
    ],
    "ledger": {
     "202506usv1:ma2-q5": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
+    ],
+    "202609asiav1:ma1-q7": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -34276,7 +34671,22 @@ window.DEDUP_INDEX = {
   "202609usv1:ma1-q9": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202609usv1:ma1-q9"
+   "canonical": "202609usv1:ma1-q9",
+   "family": "fam:202609usv1:ma1-q9",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma1-q10",
+     "rule": "S",
+     "shared": 24,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609asiav1:ma1-q10": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202609usv1:ma1-q10": {
    "section": "math",
@@ -34361,7 +34771,25 @@ window.DEDUP_INDEX = {
   "202609usv1:ma1-q14": {
    "section": "math",
    "type": "mcq",
-   "canonical": "202609usv1:ma1-q14"
+   "canonical": "202609usv1:ma1-q14",
+   "family": "fam:202609usv1:ma1-q14",
+   "skeleton": [
+    {
+     "ref": "202609asiav1:ma1-q14",
+     "rule": "S",
+     "shared": 67,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "202609asiav1:ma1-q14": "AGREE"
+   },
+   "ledger": {
+    "202609asiav1:ma1-q14": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
   },
   "202609usv1:ma1-q15": {
    "section": "math",
@@ -34620,21 +35048,31 @@ window.DEDUP_INDEX = {
    "family": "fam:bank-202608-salvage:q0176",
    "skeleton": [
     {
+     "ref": "202609asiav1:ma2-q16",
+     "rule": "S",
+     "shared": 15,
+     "jaccard": 0.882,
+     "contain": 0.938
+    },
+    {
      "ref": "bank-202608-salvage:q0176",
      "rule": "S",
-     "shared": 16,
-     "jaccard": 0.889,
-     "contain": 0.941
+     "shared": 15,
+     "jaccard": 0.882,
+     "contain": 0.938
     },
     {
      "ref": "bank-202608-salvage:q0228",
      "rule": "S",
-     "shared": 16,
-     "jaccard": 0.889,
-     "contain": 0.941
+     "shared": 15,
+     "jaccard": 0.882,
+     "contain": 0.938
     }
    ],
    "ledger": {
+    "202609asiav1:ma2-q16": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
     "bank-202608-salvage:q0176": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
     ],
@@ -34680,6 +35118,1260 @@ window.DEDUP_INDEX = {
    "ledger": {
     "202511asiav1:ma2-q16": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
+    ]
+   }
+  },
+  "202609asiav1:re1-q1": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q1"
+  },
+  "202609asiav1:re1-q2": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q2"
+  },
+  "202609asiav1:re1-q3": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q3"
+  },
+  "202609asiav1:re1-q4": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q4"
+  },
+  "202609asiav1:re1-q6": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q6",
+   "family": "fam:202508asiav1:re1-q6",
+   "skeleton": [
+    {
+     "ref": "202406intv1:re2-q5",
+     "rule": "S",
+     "shared": 48,
+     "jaccard": 0.366,
+     "contain": 0.565
+    },
+    {
+     "ref": "202408usv2:re2-q5",
+     "rule": "S",
+     "shared": 55,
+     "jaccard": 0.474,
+     "contain": 0.647
+    },
+    {
+     "ref": "202503asiav2:re1-q7",
+     "rule": "S",
+     "shared": 49,
+     "jaccard": 0.395,
+     "contain": 0.576
+    },
+    {
+     "ref": "202508asiav1:re1-q6",
+     "rule": "S",
+     "shared": 48,
+     "jaccard": 0.378,
+     "contain": 0.565
+    },
+    {
+     "ref": "202509asiav2:re1-q7",
+     "rule": "S",
+     "shared": 56,
+     "jaccard": 0.496,
+     "contain": 0.667
+    },
+    {
+     "ref": "202510usv1:re1-q5",
+     "rule": "S",
+     "shared": 49,
+     "jaccard": 0.398,
+     "contain": 0.576
+    },
+    {
+     "ref": "202609usv1:re1-q6",
+     "rule": "S",
+     "shared": 49,
+     "jaccard": 0.38,
+     "contain": 0.576
+    }
+   ],
+   "ledger": {
+    "202406intv1:re2-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202408usv2:re2-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202503asiav2:re1-q7": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202508asiav1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202509asiav2:re1-q7": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202510usv1:re1-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202609usv1:re1-q6": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re1-q7": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q7"
+  },
+  "202609asiav1:re1-q8": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q8"
+  },
+  "202609asiav1:re1-q9": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q9"
+  },
+  "202609asiav1:re1-q10": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q10",
+   "family": "fam:202609usv1:re1-q9",
+   "skeleton": [
+    {
+     "ref": "202609usv1:re1-q9",
+     "rule": "S",
+     "shared": 82,
+     "jaccard": 0.82,
+     "contain": 0.901
+    }
+   ],
+   "ledger": {
+    "202609usv1:re1-q9": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re1-q11": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q11",
+   "family": "fam:bank-202608-salvage:q0136",
+   "skeleton": [
+    {
+     "ref": "bank-202608-salvage:q0136",
+     "rule": "S",
+     "shared": 59,
+     "jaccard": 0.355,
+     "contain": 0.527
+    },
+    {
+     "ref": "bank-202608-salvage:q0216",
+     "rule": "S",
+     "shared": 63,
+     "jaccard": 0.562,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "bank-202608-salvage:q0136": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "bank-202608-salvage:q0216": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re1-q12": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q12",
+   "related": [
+    {
+     "ref": "202412usv2:re1-q12",
+     "rule": "R",
+     "shared": 16,
+     "jaccard": 0.286,
+     "contain": 0.444
+    },
+    {
+     "ref": "202503usv2:re1-q13",
+     "rule": "R",
+     "shared": 16,
+     "jaccard": 0.271,
+     "contain": 0.444
+    }
+   ]
+  },
+  "202609asiav1:re1-q13": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q13",
+   "family": "fam:202503usv2:re1-q14",
+   "skeleton": [
+    {
+     "ref": "202503usv2:re1-q14",
+     "rule": "S",
+     "shared": 94,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "202609usv1:re1-q13",
+     "rule": "S",
+     "shared": 94,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202503usv2:re1-q14": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202609usv1:re1-q13": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re1-q15": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q15"
+  },
+  "202609asiav1:re1-q16": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q16"
+  },
+  "202609asiav1:re1-q17": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q17"
+  },
+  "202609asiav1:re1-q18": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q18"
+  },
+  "202609asiav1:re1-q19": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q19"
+  },
+  "202609asiav1:re1-q20": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q20"
+  },
+  "202609asiav1:re1-q21": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q21"
+  },
+  "202609asiav1:re1-q22": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q22"
+  },
+  "202609asiav1:re1-q23": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q23"
+  },
+  "202609asiav1:re1-q24": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q24"
+  },
+  "202609asiav1:re1-q25": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q25",
+   "family": "fam:202511asiav1:re2-q24",
+   "skeleton": [
+    {
+     "ref": "202511asiav1:re2-q24",
+     "rule": "S",
+     "shared": 23,
+     "jaccard": 0.315,
+     "contain": 0.479
+    }
+   ],
+   "ledger": {
+    "202511asiav1:re2-q24": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re1-q26": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q26"
+  },
+  "202609asiav1:re1-q27": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re1-q27"
+  },
+  "202609asiav1:re2-q1": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202509asiav4:re2-q1",
+   "family": "fam:202509asiav4:re2-q1",
+   "exact": [
+    {
+     "ref": "202509asiav4:re2-q1",
+     "rule": "E2",
+     "shared": 46,
+     "jaccard": 0.648,
+     "contain": 0.793
+    }
+   ],
+   "keys": {
+    "202509asiav4:re2-q1": "AGREE"
+   },
+   "ledger": {
+    "202509asiav4:re2-q1": [
+     "sibling-reskin (David (class ruling 2026-09-06: sibling reskins accepted where keys agree by text); row written by the conversion session, 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q2": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q2"
+  },
+  "202609asiav1:re2-q3": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q3"
+  },
+  "202609asiav1:re2-q4": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q4"
+  },
+  "202609asiav1:re2-q5": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609usv1:re2-q5",
+   "family": "fam:202609usv1:re2-q5",
+   "exact": [
+    {
+     "ref": "202609usv1:re2-q5",
+     "rule": "E2",
+     "shared": 85,
+     "jaccard": 0.825,
+     "contain": 0.904
+    }
+   ],
+   "keys": {
+    "202609usv1:re2-q5": "AGREE"
+   },
+   "ledger": {
+    "202609usv1:re2-q5": [
+     "sibling-reskin (David (class ruling 2026-09-06: sibling reskins accepted where keys agree by text); row written by the conversion session, 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q6": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q6"
+  },
+  "202609asiav1:re2-q7": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q7"
+  },
+  "202609asiav1:re2-q8": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q8",
+   "family": "fam:202609usv1:re2-q8",
+   "skeleton": [
+    {
+     "ref": "202609usv1:re2-q8",
+     "rule": "S",
+     "shared": 108,
+     "jaccard": 0.715,
+     "contain": 0.837
+    }
+   ],
+   "ledger": {
+    "202609usv1:re2-q8": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q9": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q9"
+  },
+  "202609asiav1:re2-q10": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q10"
+  },
+  "202609asiav1:re2-q11": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q11",
+   "family": "fam:202412asiav1:re2-q10",
+   "skeleton": [
+    {
+     "ref": "202412asiav1:re2-q10",
+     "rule": "S",
+     "shared": 87,
+     "jaccard": 0.382,
+     "contain": 0.558
+    },
+    {
+     "ref": "202512asiav1:re1-q13",
+     "rule": "S",
+     "shared": 86,
+     "jaccard": 0.377,
+     "contain": 0.551
+    }
+   ],
+   "ledger": {
+    "202412asiav1:re2-q10": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202512asiav1:re1-q13": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q12": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q12",
+   "family": "fam:202412usv1:re2-q8",
+   "skeleton": [
+    {
+     "ref": "202412usv1:re2-q8",
+     "rule": "S",
+     "shared": 47,
+     "jaccard": 0.398,
+     "contain": 0.573
+    }
+   ],
+   "related": [
+    {
+     "ref": "202506usv1:re2-q12",
+     "rule": "R",
+     "shared": 21,
+     "jaccard": 0.136,
+     "contain": 0.256
+    }
+   ],
+   "ledger": {
+    "202412usv1:re2-q8": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q13": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q13"
+  },
+  "202609asiav1:re2-q14": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q14"
+  },
+  "202609asiav1:re2-q15": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q15"
+  },
+  "202609asiav1:re2-q16": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q16"
+  },
+  "202609asiav1:re2-q17": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q17"
+  },
+  "202609asiav1:re2-q18": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q18",
+   "family": "fam:202412asiav1:re2-q19",
+   "skeleton": [
+    {
+     "ref": "202412asiav1:re2-q19",
+     "rule": "S",
+     "shared": 21,
+     "jaccard": 0.3,
+     "contain": 0.477
+    }
+   ],
+   "ledger": {
+    "202412asiav1:re2-q19": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q19": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q19"
+  },
+  "202609asiav1:re2-q20": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q20"
+  },
+  "202609asiav1:re2-q21": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q21"
+  },
+  "202609asiav1:re2-q22": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q22"
+  },
+  "202609asiav1:re2-q23": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202412asiav1:re1-q23",
+   "family": "fam:202412asiav1:re1-q23",
+   "exact": [
+    {
+     "ref": "202412asiav1:re1-q23",
+     "rule": "E2",
+     "shared": 43,
+     "jaccard": 0.672,
+     "contain": 0.811
+    }
+   ],
+   "keys": {
+    "202412asiav1:re1-q23": "AGREE"
+   },
+   "ledger": {
+    "202412asiav1:re1-q23": [
+     "sibling-reskin (David (class ruling 2026-09-06: sibling reskins accepted where keys agree by text); row written by the conversion session, 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q24": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q24",
+   "family": "fam:202503usv1:re1-q27",
+   "skeleton": [
+    {
+     "ref": "202503usv1:re1-q27",
+     "rule": "S",
+     "shared": 55,
+     "jaccard": 0.437,
+     "contain": 0.64
+    }
+   ],
+   "related": [
+    {
+     "ref": "bank-202608-salvage:q0052",
+     "rule": "R",
+     "shared": 34,
+     "jaccard": 0.245,
+     "contain": 0.395
+    }
+   ],
+   "ledger": {
+    "202503usv1:re1-q27": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:re2-q25": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q25"
+  },
+  "202609asiav1:re2-q26": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q26"
+  },
+  "202609asiav1:re2-q27": {
+   "section": "rw",
+   "type": "mcq",
+   "canonical": "202609asiav1:re2-q27"
+  },
+  "202609asiav1:ma1-q1": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q1",
+   "family": "fam:bank-202608-salvage:q0026",
+   "skeleton": [
+    {
+     "ref": "202609usv1:ma1-q1",
+     "rule": "S",
+     "shared": 8,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0026",
+     "rule": "S",
+     "shared": 7,
+     "jaccard": 0.778,
+     "contain": 0.875
+    }
+   ],
+   "ledger": {
+    "202609usv1:ma1-q1": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "bank-202608-salvage:q0026": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q2": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma1-q2"
+  },
+  "202609asiav1:ma1-q3": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q3"
+  },
+  "202609asiav1:ma1-q4": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q4"
+  },
+  "202609asiav1:ma1-q5": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma1-q5"
+  },
+  "202609asiav1:ma1-q6": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q6",
+   "family": "fam:202509asiav4:ma1-q5",
+   "skeleton": [
+    {
+     "ref": "202403intv2:ma1-q5",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.429,
+     "contain": 0.857
+    },
+    {
+     "ref": "202509asiav4:ma1-q5",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.429,
+     "contain": 0.857
+    }
+   ],
+   "ledger": {
+    "202403intv2:ma1-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202509asiav4:ma1-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q7": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q7",
+   "family": "fam:202506usv1:ma2-q5",
+   "skeleton": [
+    {
+     "ref": "202506usv1:ma2-q5",
+     "rule": "S",
+     "shared": 10,
+     "jaccard": 0.417,
+     "contain": 0.625
+    },
+    {
+     "ref": "202609usv1:ma1-q5",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202506usv1:ma2-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202609usv1:ma1-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q8": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q8",
+   "family": "fam:202412usv1:ma2-q3",
+   "skeleton": [
+    {
+     "ref": "202412usv1:ma2-q3",
+     "rule": "S",
+     "shared": 28,
+     "jaccard": 0.667,
+     "contain": 0.8
+    }
+   ],
+   "ledger": {
+    "202412usv1:ma2-q3": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q9": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q9",
+   "family": "fam:202512usv2:ma2-q14",
+   "skeleton": [
+    {
+     "ref": "202403intv2:ma2-q3",
+     "rule": "S",
+     "shared": 19,
+     "jaccard": 0.543,
+     "contain": 0.704
+    },
+    {
+     "ref": "202506asiav4:ma2-q3",
+     "rule": "S",
+     "shared": 18,
+     "jaccard": 0.5,
+     "contain": 0.667
+    },
+    {
+     "ref": "202512usv2:ma2-q14",
+     "rule": "S",
+     "shared": 19,
+     "jaccard": 0.543,
+     "contain": 0.704
+    }
+   ],
+   "ledger": {
+    "202403intv2:ma2-q3": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202506asiav4:ma2-q3": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202512usv2:ma2-q14": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q10": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q10",
+   "family": "fam:202609usv1:ma1-q9",
+   "skeleton": [
+    {
+     "ref": "202609usv1:ma1-q9",
+     "rule": "S",
+     "shared": 24,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609usv1:ma1-q9": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q11": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma1-q11",
+   "family": "fam:202512usv2:ma1-q15",
+   "skeleton": [
+    {
+     "ref": "202512asiav1:ma2-q15",
+     "rule": "S",
+     "shared": 12,
+     "jaccard": 0.48,
+     "contain": 0.706
+    },
+    {
+     "ref": "202512usv2:ma1-q15",
+     "rule": "S",
+     "shared": 17,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202512asiav1:ma2-q15": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202512usv2:ma1-q15": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q12": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q12"
+  },
+  "202609asiav1:ma1-q13": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma1-q13",
+   "family": "fam:202506asiav2:ma1-q9",
+   "exact": [
+    {
+     "ref": "202506asiav2:ma1-q9",
+     "rule": "E1",
+     "shared": 10,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "202506asiav2:ma1-q9": "DISAGREE"
+   },
+   "ledger": {
+    "202506asiav2:ma1-q9": [
+     "distinct (session (renders compared), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q14": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q14",
+   "family": "fam:202609usv1:ma1-q14",
+   "skeleton": [
+    {
+     "ref": "202609usv1:ma1-q14",
+     "rule": "S",
+     "shared": 67,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "keys": {
+    "202609usv1:ma1-q14": "AGREE"
+   },
+   "ledger": {
+    "202609usv1:ma1-q14": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q15": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q15"
+  },
+  "202609asiav1:ma1-q16": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q16",
+   "family": "fam:202606asiav2:ma1-q15",
+   "skeleton": [
+    {
+     "ref": "202510usv1:ma1-q12",
+     "rule": "S",
+     "shared": 4,
+     "jaccard": 0.333,
+     "contain": 0.5
+    },
+    {
+     "ref": "202606asiav2:ma1-q15",
+     "rule": "S",
+     "shared": 6,
+     "jaccard": 0.462,
+     "contain": 0.75
+    },
+    {
+     "ref": "202608usv0:ma1-q12",
+     "rule": "S",
+     "shared": 4,
+     "jaccard": 0.333,
+     "contain": 0.5
+    }
+   ],
+   "ledger": {
+    "202510usv1:ma1-q12": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202606asiav2:ma1-q15": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202608usv0:ma1-q12": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q17": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q17",
+   "family": "fam:202412usv1:ma1-q13",
+   "skeleton": [
+    {
+     "ref": "202412usv1:ma1-q13",
+     "rule": "S",
+     "shared": 8,
+     "jaccard": 0.276,
+     "contain": 0.533
+    }
+   ],
+   "ledger": {
+    "202412usv1:ma1-q13": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q18": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q18",
+   "family": "fam:202412asiav1:ma1-q19",
+   "skeleton": [
+    {
+     "ref": "202412asiav1:ma1-q19",
+     "rule": "S",
+     "shared": 80,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202412asiav1:ma1-q19": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q19": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q19"
+  },
+  "202609asiav1:ma1-q20": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma1-q20",
+   "family": "fam:202508asiav1:ma2-q11",
+   "skeleton": [
+    {
+     "ref": "202412asiav1:ma1-q22",
+     "rule": "S",
+     "shared": 56,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "202508asiav1:ma2-q11",
+     "rule": "S",
+     "shared": 56,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202412asiav1:ma1-q22": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202508asiav1:ma2-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q21": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q21",
+   "family": "fam:202511asiav1:ma1-q20",
+   "skeleton": [
+    {
+     "ref": "202505usv1:ma2-q12",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.625,
+     "contain": 0.833
+    },
+    {
+     "ref": "202511asiav1:ma1-q20",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.625,
+     "contain": 0.833
+    }
+   ],
+   "ledger": {
+    "202505usv1:ma2-q12": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202511asiav1:ma1-q20": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma1-q22": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma1-q22"
+  },
+  "202609asiav1:ma2-q1": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q1"
+  },
+  "202609asiav1:ma2-q2": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q2"
+  },
+  "202609asiav1:ma2-q3": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma2-q3",
+   "family": "fam:202511asiav1:ma2-q5",
+   "skeleton": [
+    {
+     "ref": "202511asiav1:ma2-q5",
+     "rule": "S",
+     "shared": 14,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202511asiav1:ma2-q5": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma2-q5": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q5"
+  },
+  "202609asiav1:ma2-q6": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q6"
+  },
+  "202609asiav1:ma2-q7": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma2-q7"
+  },
+  "202609asiav1:ma2-q8": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q8"
+  },
+  "202609asiav1:ma2-q9": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q9",
+   "family": "fam:202510usv1:ma1-q21",
+   "skeleton": [
+    {
+     "ref": "202510usv1:ma1-q21",
+     "rule": "S",
+     "shared": 5,
+     "jaccard": 0.625,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202510usv1:ma1-q21": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma2-q10": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q10"
+  },
+  "202609asiav1:ma2-q11": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q11",
+   "family": "fam:202406intv1:ma2-q13",
+   "skeleton": [
+    {
+     "ref": "202406intv1:ma2-q13",
+     "rule": "S",
+     "shared": 34,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202406intv1:ma2-q13": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma2-q12": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q12"
+  },
+  "202609asiav1:ma2-q13": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma2-q13"
+  },
+  "202609asiav1:ma2-q14": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q14"
+  },
+  "202609asiav1:ma2-q15": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q15"
+  },
+  "202609asiav1:ma2-q16": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q16",
+   "family": "fam:bank-202608-salvage:q0176",
+   "skeleton": [
+    {
+     "ref": "202609usv1:ma2-q17",
+     "rule": "S",
+     "shared": 15,
+     "jaccard": 0.882,
+     "contain": 0.938
+    },
+    {
+     "ref": "bank-202608-salvage:q0176",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "bank-202608-salvage:q0228",
+     "rule": "S",
+     "shared": 16,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202609usv1:ma2-q17": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "bank-202608-salvage:q0176": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "bank-202608-salvage:q0228": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma2-q17": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma2-q17",
+   "family": "fam:202412usv1:ma1-q8",
+   "skeleton": [
+    {
+     "ref": "202412usv1:ma1-q8",
+     "rule": "S",
+     "shared": 18,
+     "jaccard": 0.692,
+     "contain": 0.818
+    },
+    {
+     "ref": "202412usv2:ma1-q18",
+     "rule": "S",
+     "shared": 22,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202412usv1:ma1-q8": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
+    "202412usv2:ma1-q18": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma2-q18": {
+   "section": "math",
+   "type": "spr",
+   "canonical": "202609asiav1:ma2-q18"
+  },
+  "202609asiav1:ma2-q19": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q19"
+  },
+  "202609asiav1:ma2-q20": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q20"
+  },
+  "202609asiav1:ma2-q21": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q21",
+   "family": "fam:202506asiav2:ma2-q20",
+   "skeleton": [
+    {
+     "ref": "202506asiav2:ma2-q20",
+     "rule": "S",
+     "shared": 42,
+     "jaccard": 0.467,
+     "contain": 0.656
+    }
+   ],
+   "ledger": {
+    "202506asiav2:ma2-q20": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
+   }
+  },
+  "202609asiav1:ma2-q22": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q22",
+   "family": "fam:202511asiav1:ma2-q22",
+   "skeleton": [
+    {
+     "ref": "202511asiav1:ma2-q22",
+     "rule": "S",
+     "shared": 7,
+     "jaccard": 1.0,
+     "contain": 1.0
+    }
+   ],
+   "ledger": {
+    "202511asiav1:ma2-q22": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
     ]
    }
   },
@@ -35107,7 +36799,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "bank-202608-salvage:q0195",
      "rule": "E1",
-     "shared": 17,
+     "shared": 16,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -35202,6 +36894,13 @@ window.DEDUP_INDEX = {
    "family": "fam:bank-202608-salvage:q0026",
    "skeleton": [
     {
+     "ref": "202609asiav1:ma1-q1",
+     "rule": "S",
+     "shared": 7,
+     "jaccard": 0.778,
+     "contain": 0.875
+    },
+    {
      "ref": "202609usv1:ma1-q1",
      "rule": "S",
      "shared": 7,
@@ -35210,6 +36909,9 @@ window.DEDUP_INDEX = {
     }
    ],
    "ledger": {
+    "202609asiav1:ma1-q1": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
     "202609usv1:ma1-q1": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
     ]
@@ -35593,6 +37295,13 @@ window.DEDUP_INDEX = {
      "shared": 34,
      "jaccard": 0.23,
      "contain": 0.391
+    },
+    {
+     "ref": "202609asiav1:re2-q24",
+     "rule": "R",
+     "shared": 34,
+     "jaccard": 0.245,
+     "contain": 0.395
     }
    ],
    "retired": false
@@ -36669,6 +38378,13 @@ window.DEDUP_INDEX = {
    "family": "fam:bank-202608-salvage:q0136",
    "skeleton": [
     {
+     "ref": "202609asiav1:re1-q11",
+     "rule": "S",
+     "shared": 59,
+     "jaccard": 0.355,
+     "contain": 0.527
+    },
+    {
      "ref": "bank-202608-salvage:q0216",
      "rule": "S",
      "shared": 57,
@@ -36678,6 +38394,11 @@ window.DEDUP_INDEX = {
    ],
    "keys": {
     "bank-202608-salvage:q0216": "AGREE"
+   },
+   "ledger": {
+    "202609asiav1:re1-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
    },
    "retired": true
   },
@@ -37382,24 +39103,34 @@ window.DEDUP_INDEX = {
     {
      "ref": "bank-202608-salvage:q0228",
      "rule": "E1",
-     "shared": 17,
+     "shared": 16,
      "jaccard": 1.0,
      "contain": 1.0
     }
    ],
    "skeleton": [
     {
-     "ref": "202609usv1:ma2-q17",
+     "ref": "202609asiav1:ma2-q16",
      "rule": "S",
      "shared": 16,
-     "jaccard": 0.889,
-     "contain": 0.941
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "202609usv1:ma2-q17",
+     "rule": "S",
+     "shared": 15,
+     "jaccard": 0.882,
+     "contain": 0.938
     }
    ],
    "keys": {
     "bank-202608-salvage:q0228": "AGREE"
    },
    "ledger": {
+    "202609asiav1:ma2-q16": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
     "202609usv1:ma2-q17": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
     ]
@@ -37882,7 +39613,7 @@ window.DEDUP_INDEX = {
     {
      "ref": "bank-202608-salvage:q0021",
      "rule": "E1",
-     "shared": 17,
+     "shared": 16,
      "jaccard": 1.0,
      "contain": 1.0
     }
@@ -38427,6 +40158,13 @@ window.DEDUP_INDEX = {
    "family": "fam:bank-202608-salvage:q0136",
    "skeleton": [
     {
+     "ref": "202609asiav1:re1-q11",
+     "rule": "S",
+     "shared": 63,
+     "jaccard": 0.562,
+     "contain": 1.0
+    },
+    {
      "ref": "bank-202608-salvage:q0136",
      "rule": "S",
      "shared": 57,
@@ -38436,6 +40174,11 @@ window.DEDUP_INDEX = {
    ],
    "keys": {
     "bank-202608-salvage:q0136": "AGREE"
+   },
+   "ledger": {
+    "202609asiav1:re1-q11": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ]
    },
    "retired": false
   },
@@ -38703,24 +40446,34 @@ window.DEDUP_INDEX = {
     {
      "ref": "bank-202608-salvage:q0176",
      "rule": "E1",
-     "shared": 17,
+     "shared": 16,
      "jaccard": 1.0,
      "contain": 1.0
     }
    ],
    "skeleton": [
     {
-     "ref": "202609usv1:ma2-q17",
+     "ref": "202609asiav1:ma2-q16",
      "rule": "S",
      "shared": 16,
-     "jaccard": 0.889,
-     "contain": 0.941
+     "jaccard": 1.0,
+     "contain": 1.0
+    },
+    {
+     "ref": "202609usv1:ma2-q17",
+     "rule": "S",
+     "shared": 15,
+     "jaccard": 0.882,
+     "contain": 0.938
     }
    ],
    "keys": {
     "bank-202608-salvage:q0176": "AGREE"
    },
    "ledger": {
+    "202609asiav1:ma2-q16": [
+     "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-02)"
+    ],
     "202609usv1:ma2-q17": [
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-09-30)"
     ]
@@ -39347,6 +41100,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202406intv1:ma2-q13": {
+   "canonical": "202406intv1:ma2-q13",
+   "members": [
+    "202406intv1:ma2-q13",
+    "202609asiav1:ma2-q11"
+   ],
+   "exactClasses": [
+    [
+     "202406intv1:ma2-q13"
+    ],
+    [
+     "202609asiav1:ma2-q11"
+    ]
+   ]
+  },
   "fam:202406intv1:ma2-q14": {
    "canonical": "202406intv1:ma2-q14",
    "members": [
@@ -39813,6 +41581,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202412asiav1:ma1-q19": {
+   "canonical": "202412asiav1:ma1-q19",
+   "members": [
+    "202412asiav1:ma1-q19",
+    "202609asiav1:ma1-q18"
+   ],
+   "exactClasses": [
+    [
+     "202412asiav1:ma1-q19"
+    ],
+    [
+     "202609asiav1:ma1-q18"
+    ]
+   ]
+  },
   "fam:202412asiav1:ma1-q20": {
    "canonical": "202412asiav1:ma1-q20",
    "members": [
@@ -39918,6 +41701,19 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202412asiav1:re1-q23": {
+   "canonical": "202412asiav1:re1-q23",
+   "members": [
+    "202412asiav1:re1-q23",
+    "202609asiav1:re2-q23"
+   ],
+   "exactClasses": [
+    [
+     "202412asiav1:re1-q23",
+     "202609asiav1:re2-q23"
+    ]
+   ]
+  },
   "fam:202412asiav1:re1-q6": {
    "canonical": "202412asiav1:re1-q6",
    "members": [
@@ -39958,7 +41754,8 @@ window.DEDUP_INDEX = {
    "canonical": "202412asiav1:re2-q10",
    "members": [
     "202412asiav1:re2-q10",
-    "202512asiav1:re1-q13"
+    "202512asiav1:re1-q13",
+    "202609asiav1:re2-q11"
    ],
    "exactClasses": [
     [
@@ -39966,6 +41763,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202512asiav1:re1-q13"
+    ],
+    [
+     "202609asiav1:re2-q11"
     ]
    ]
   },
@@ -40003,6 +41803,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202412asiav1:re2-q19": {
+   "canonical": "202412asiav1:re2-q19",
+   "members": [
+    "202412asiav1:re2-q19",
+    "202609asiav1:re2-q18"
+   ],
+   "exactClasses": [
+    [
+     "202412asiav1:re2-q19"
+    ],
+    [
+     "202609asiav1:re2-q18"
+    ]
+   ]
+  },
   "fam:202412asiav1:re2-q21": {
    "canonical": "202412asiav1:re2-q21",
    "members": [
@@ -40034,6 +41849,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202311intv1:re2-q2"
+    ]
+   ]
+  },
+  "fam:202412usv1:ma1-q13": {
+   "canonical": "202412usv1:ma1-q13",
+   "members": [
+    "202412usv1:ma1-q13",
+    "202609asiav1:ma1-q17"
+   ],
+   "exactClasses": [
+    [
+     "202412usv1:ma1-q13"
+    ],
+    [
+     "202609asiav1:ma1-q17"
     ]
    ]
   },
@@ -40069,7 +41899,8 @@ window.DEDUP_INDEX = {
    "canonical": "202412usv1:ma1-q8",
    "members": [
     "202412usv1:ma1-q8",
-    "202412usv2:ma1-q18"
+    "202412usv2:ma1-q18",
+    "202609asiav1:ma2-q17"
    ],
    "exactClasses": [
     [
@@ -40077,6 +41908,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202412usv2:ma1-q18"
+    ],
+    [
+     "202609asiav1:ma2-q17"
     ]
    ]
   },
@@ -40105,6 +41939,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202403intv2:ma2-q21"
+    ]
+   ]
+  },
+  "fam:202412usv1:ma2-q3": {
+   "canonical": "202412usv1:ma2-q3",
+   "members": [
+    "202412usv1:ma2-q3",
+    "202609asiav1:ma1-q8"
+   ],
+   "exactClasses": [
+    [
+     "202412usv1:ma2-q3"
+    ],
+    [
+     "202609asiav1:ma1-q8"
     ]
    ]
   },
@@ -40195,6 +42044,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202312intv1:re1-q8"
+    ]
+   ]
+  },
+  "fam:202412usv1:re2-q8": {
+   "canonical": "202412usv1:re2-q8",
+   "members": [
+    "202412usv1:re2-q8",
+    "202609asiav1:re2-q12"
+   ],
+   "exactClasses": [
+    [
+     "202412usv1:re2-q8"
+    ],
+    [
+     "202609asiav1:re2-q12"
     ]
    ]
   },
@@ -40589,6 +42453,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202503usv1:re1-q27": {
+   "canonical": "202503usv1:re1-q27",
+   "members": [
+    "202503usv1:re1-q27",
+    "202609asiav1:re2-q24"
+   ],
+   "exactClasses": [
+    [
+     "202503usv1:re1-q27"
+    ],
+    [
+     "202609asiav1:re2-q24"
+    ]
+   ]
+  },
   "fam:202503usv1:re1-q9": {
    "canonical": "202503usv1:re1-q9",
    "members": [
@@ -40860,7 +42739,8 @@ window.DEDUP_INDEX = {
    "canonical": "202503usv2:re1-q14",
    "members": [
     "202503usv2:re1-q14",
-    "202609usv1:re1-q13"
+    "202609usv1:re1-q13",
+    "202609asiav1:re1-q13"
    ],
    "exactClasses": [
     [
@@ -40868,6 +42748,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202609usv1:re1-q13"
+    ],
+    [
+     "202609asiav1:re1-q13"
     ]
    ]
   },
@@ -41214,6 +43097,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202506asiav2:ma1-q9": {
+   "canonical": "202506asiav2:ma1-q9",
+   "members": [
+    "202506asiav2:ma1-q9",
+    "202609asiav1:ma1-q13"
+   ],
+   "exactClasses": [
+    [
+     "202506asiav2:ma1-q9"
+    ],
+    [
+     "202609asiav1:ma1-q13"
+    ]
+   ]
+  },
   "fam:202506asiav2:ma2-q1": {
    "canonical": "202506asiav2:ma2-q1",
    "members": [
@@ -41294,6 +43192,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202408usv2:ma2-q20"
+    ]
+   ]
+  },
+  "fam:202506asiav2:ma2-q20": {
+   "canonical": "202506asiav2:ma2-q20",
+   "members": [
+    "202506asiav2:ma2-q20",
+    "202609asiav1:ma2-q21"
+   ],
+   "exactClasses": [
+    [
+     "202506asiav2:ma2-q20"
+    ],
+    [
+     "202609asiav1:ma2-q21"
     ]
    ]
   },
@@ -42077,7 +43990,8 @@ window.DEDUP_INDEX = {
    "canonical": "202506usv1:ma2-q5",
    "members": [
     "202506usv1:ma2-q5",
-    "202609usv1:ma1-q5"
+    "202609usv1:ma1-q5",
+    "202609asiav1:ma1-q7"
    ],
    "exactClasses": [
     [
@@ -42085,6 +43999,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202609usv1:ma1-q5"
+    ],
+    [
+     "202609asiav1:ma1-q7"
     ]
    ]
   },
@@ -42367,7 +44284,8 @@ window.DEDUP_INDEX = {
    "canonical": "202508asiav1:ma2-q11",
    "members": [
     "202508asiav1:ma2-q11",
-    "202412asiav1:ma1-q22"
+    "202412asiav1:ma1-q22",
+    "202609asiav1:ma1-q20"
    ],
    "exactClasses": [
     [
@@ -42375,6 +44293,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202412asiav1:ma1-q22"
+    ],
+    [
+     "202609asiav1:ma1-q20"
     ]
    ]
   },
@@ -42577,7 +44498,8 @@ window.DEDUP_INDEX = {
     "202406intv1:re2-q5",
     "202503asiav2:re1-q7",
     "202510usv1:re1-q5",
-    "202609usv1:re1-q6"
+    "202609usv1:re1-q6",
+    "202609asiav1:re1-q6"
    ],
    "exactClasses": [
     [
@@ -42600,6 +44522,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202609usv1:re1-q6"
+    ],
+    [
+     "202609asiav1:re1-q6"
     ]
    ]
   },
@@ -43008,7 +44933,8 @@ window.DEDUP_INDEX = {
    "canonical": "202509asiav4:ma1-q5",
    "members": [
     "202509asiav4:ma1-q5",
-    "202403intv2:ma1-q5"
+    "202403intv2:ma1-q5",
+    "202609asiav1:ma1-q6"
    ],
    "exactClasses": [
     [
@@ -43016,6 +44942,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202403intv2:ma1-q5"
+    ],
+    [
+     "202609asiav1:ma1-q6"
     ]
    ]
   },
@@ -43375,6 +45304,19 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202509asiav4:re2-q1": {
+   "canonical": "202509asiav4:re2-q1",
+   "members": [
+    "202509asiav4:re2-q1",
+    "202609asiav1:re2-q1"
+   ],
+   "exactClasses": [
+    [
+     "202509asiav4:re2-q1",
+     "202609asiav1:re2-q1"
+    ]
+   ]
+  },
   "fam:202509asiav4:re2-q11": {
    "canonical": "202509asiav4:re2-q11",
    "members": [
@@ -43428,6 +45370,21 @@ window.DEDUP_INDEX = {
     ],
     [
      "202412usv2:re1-q10"
+    ]
+   ]
+  },
+  "fam:202510usv1:ma1-q21": {
+   "canonical": "202510usv1:ma1-q21",
+   "members": [
+    "202510usv1:ma1-q21",
+    "202609asiav1:ma2-q9"
+   ],
+   "exactClasses": [
+    [
+     "202510usv1:ma1-q21"
+    ],
+    [
+     "202609asiav1:ma2-q9"
     ]
    ]
   },
@@ -43500,33 +45457,6 @@ window.DEDUP_INDEX = {
     ],
     [
      "202608usv0:ma2-q3"
-    ]
-   ]
-  },
-  "fam:202510usv3:ma1-q18": {
-   "canonical": "202510usv3:ma1-q18",
-   "members": [
-    "202510usv3:ma1-q18",
-    "202503usv1:ma1-q6",
-    "202406intv1:ma1-q13",
-    "202510usv1:ma1-q16",
-    "202412usv2:ma1-q13"
-   ],
-   "exactClasses": [
-    [
-     "202510usv3:ma1-q18"
-    ],
-    [
-     "202503usv1:ma1-q6"
-    ],
-    [
-     "202406intv1:ma1-q13"
-    ],
-    [
-     "202510usv1:ma1-q16"
-    ],
-    [
-     "202412usv2:ma1-q13"
     ]
    ]
   },
@@ -43859,7 +45789,8 @@ window.DEDUP_INDEX = {
    "canonical": "202511asiav1:ma1-q20",
    "members": [
     "202511asiav1:ma1-q20",
-    "202505usv1:ma2-q12"
+    "202505usv1:ma2-q12",
+    "202609asiav1:ma1-q21"
    ],
    "exactClasses": [
     [
@@ -43867,6 +45798,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202505usv1:ma2-q12"
+    ],
+    [
+     "202609asiav1:ma1-q21"
     ]
    ]
   },
@@ -43998,6 +45932,36 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202511asiav1:ma2-q22": {
+   "canonical": "202511asiav1:ma2-q22",
+   "members": [
+    "202511asiav1:ma2-q22",
+    "202609asiav1:ma2-q22"
+   ],
+   "exactClasses": [
+    [
+     "202511asiav1:ma2-q22"
+    ],
+    [
+     "202609asiav1:ma2-q22"
+    ]
+   ]
+  },
+  "fam:202511asiav1:ma2-q5": {
+   "canonical": "202511asiav1:ma2-q5",
+   "members": [
+    "202511asiav1:ma2-q5",
+    "202609asiav1:ma2-q3"
+   ],
+   "exactClasses": [
+    [
+     "202511asiav1:ma2-q5"
+    ],
+    [
+     "202609asiav1:ma2-q3"
+    ]
+   ]
+  },
   "fam:202511asiav1:ma2-q7": {
    "canonical": "202511asiav1:ma2-q7",
    "members": [
@@ -44092,6 +46056,21 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202511asiav1:re2-q24": {
+   "canonical": "202511asiav1:re2-q24",
+   "members": [
+    "202511asiav1:re2-q24",
+    "202609asiav1:re1-q25"
+   ],
+   "exactClasses": [
+    [
+     "202511asiav1:re2-q24"
+    ],
+    [
+     "202609asiav1:re1-q25"
+    ]
+   ]
+  },
   "fam:202512asiav1:ma1-q14": {
    "canonical": "202512asiav1:ma1-q14",
    "members": [
@@ -44165,7 +46144,8 @@ window.DEDUP_INDEX = {
    "canonical": "202512usv2:ma1-q15",
    "members": [
     "202512usv2:ma1-q15",
-    "202512asiav1:ma2-q15"
+    "202512asiav1:ma2-q15",
+    "202609asiav1:ma1-q11"
    ],
    "exactClasses": [
     [
@@ -44173,6 +46153,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202512asiav1:ma2-q15"
+    ],
+    [
+     "202609asiav1:ma1-q11"
     ]
    ]
   },
@@ -44211,7 +46194,8 @@ window.DEDUP_INDEX = {
    "members": [
     "202512usv2:ma2-q14",
     "202506asiav4:ma2-q3",
-    "202403intv2:ma2-q3"
+    "202403intv2:ma2-q3",
+    "202609asiav1:ma1-q9"
    ],
    "exactClasses": [
     [
@@ -44222,6 +46206,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202403intv2:ma2-q3"
+    ],
+    [
+     "202609asiav1:ma1-q9"
     ]
    ]
   },
@@ -44351,25 +46338,6 @@ window.DEDUP_INDEX = {
     ],
     [
      "202609usv1:ma1-q4"
-    ]
-   ]
-  },
-  "fam:202512usv2:ma2-q9": {
-   "canonical": "202512usv2:ma2-q9",
-   "members": [
-    "202512usv2:ma2-q9",
-    "202412asiav1:ma1-q2",
-    "202609usv1:ma1-q2"
-   ],
-   "exactClasses": [
-    [
-     "202512usv2:ma2-q9"
-    ],
-    [
-     "202412asiav1:ma1-q2"
-    ],
-    [
-     "202609usv1:ma1-q2"
     ]
    ]
   },
@@ -45088,7 +47056,8 @@ window.DEDUP_INDEX = {
    "members": [
     "202606asiav2:ma1-q15",
     "202608usv0:ma1-q12",
-    "202510usv1:ma1-q12"
+    "202510usv1:ma1-q12",
+    "202609asiav1:ma1-q16"
    ],
    "exactClasses": [
     [
@@ -45099,6 +47068,9 @@ window.DEDUP_INDEX = {
     ],
     [
      "202510usv1:ma1-q12"
+    ],
+    [
+     "202609asiav1:ma1-q16"
     ]
    ]
   },
@@ -45779,6 +47751,79 @@ window.DEDUP_INDEX = {
     ]
    ]
   },
+  "fam:202609usv1:ma1-q14": {
+   "canonical": "202609usv1:ma1-q14",
+   "members": [
+    "202609usv1:ma1-q14",
+    "202609asiav1:ma1-q14"
+   ],
+   "exactClasses": [
+    [
+     "202609usv1:ma1-q14"
+    ],
+    [
+     "202609asiav1:ma1-q14"
+    ]
+   ]
+  },
+  "fam:202609usv1:ma1-q9": {
+   "canonical": "202609usv1:ma1-q9",
+   "members": [
+    "202609usv1:ma1-q9",
+    "202609asiav1:ma1-q10"
+   ],
+   "exactClasses": [
+    [
+     "202609usv1:ma1-q9"
+    ],
+    [
+     "202609asiav1:ma1-q10"
+    ]
+   ]
+  },
+  "fam:202609usv1:re1-q9": {
+   "canonical": "202609usv1:re1-q9",
+   "members": [
+    "202609usv1:re1-q9",
+    "202609asiav1:re1-q10"
+   ],
+   "exactClasses": [
+    [
+     "202609usv1:re1-q9"
+    ],
+    [
+     "202609asiav1:re1-q10"
+    ]
+   ]
+  },
+  "fam:202609usv1:re2-q5": {
+   "canonical": "202609usv1:re2-q5",
+   "members": [
+    "202609usv1:re2-q5",
+    "202609asiav1:re2-q5"
+   ],
+   "exactClasses": [
+    [
+     "202609usv1:re2-q5",
+     "202609asiav1:re2-q5"
+    ]
+   ]
+  },
+  "fam:202609usv1:re2-q8": {
+   "canonical": "202609usv1:re2-q8",
+   "members": [
+    "202609usv1:re2-q8",
+    "202609asiav1:re2-q8"
+   ],
+   "exactClasses": [
+    [
+     "202609usv1:re2-q8"
+    ],
+    [
+     "202609asiav1:re2-q8"
+    ]
+   ]
+  },
   "fam:bank-202608-salvage:q0003": {
    "canonical": "bank-202608-salvage:q0003",
    "members": [
@@ -46022,11 +48067,15 @@ window.DEDUP_INDEX = {
    "canonical": "bank-202608-salvage:q0026",
    "members": [
     "202609usv1:ma1-q1",
+    "202609asiav1:ma1-q1",
     "bank-202608-salvage:q0026"
    ],
    "exactClasses": [
     [
      "202609usv1:ma1-q1"
+    ],
+    [
+     "202609asiav1:ma1-q1"
     ],
     [
      "bank-202608-salvage:q0026"
@@ -46441,10 +48490,14 @@ window.DEDUP_INDEX = {
   "fam:bank-202608-salvage:q0136": {
    "canonical": "bank-202608-salvage:q0136",
    "members": [
+    "202609asiav1:re1-q11",
     "bank-202608-salvage:q0136",
     "bank-202608-salvage:q0216"
    ],
    "exactClasses": [
+    [
+     "202609asiav1:re1-q11"
+    ],
     [
      "bank-202608-salvage:q0136"
     ],
@@ -46665,12 +48718,16 @@ window.DEDUP_INDEX = {
    "canonical": "bank-202608-salvage:q0176",
    "members": [
     "202609usv1:ma2-q17",
+    "202609asiav1:ma2-q16",
     "bank-202608-salvage:q0176",
     "bank-202608-salvage:q0228"
    ],
    "exactClasses": [
     [
      "202609usv1:ma2-q17"
+    ],
+    [
+     "202609asiav1:ma2-q16"
     ],
     [
      "bank-202608-salvage:q0176",
