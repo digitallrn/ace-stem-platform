@@ -40,6 +40,9 @@ window.Dashboard = (function(){
   let setSaveInFlight = 0;       // set saves running — a PAGE-level lock: Cancel can close the saving
                                  // builder, but Edit/Delete/New set wait until the save (and the reload
                                  // of `sets` it ends with) has settled
+  let pullsInFlight = new Set();  // one Set per Refresh pull still running (loadFromStorage): the keys
+                                  // this page wrote — server-accepted — since that pull's snapshot was
+                                  // taken, which its rows must not put back (tutorPut/tutorDelete add)
   let builderTestId = "";        // which form's questions the builder shows
   let setsMsg = "";              // one-line status inside the Sets tab
   let saMsg = "";                // outcome line under the set-assign form — a
@@ -820,15 +823,29 @@ window.Dashboard = (function(){
     $("dashStatus").textContent = local
       ? "Loading attempts saved on this device…"
       : "Loading attempts from shared storage…";
+    let pullFailed = false;
     /* Remote: pull the server's rows into the local cache first, or the
        dashboard would only ever list what THIS browser happened to write —
        records from students' own devices would be invisible. */
     if(AttemptStore.isRemote() && AttemptStore.hasAuthToken()){
+      /* The pull's snapshot is taken up front and lands row by row; a tutor
+         write this page makes meanwhile (server first) is newer than it, and
+         the row would put the pre-write value back — or revive a deleted one —
+         until the next Refresh (and an Edit-then-Save would write that copy
+         back to the server). So every key written while this pull runs is
+         collected here and the pull leaves those rows alone. Registered
+         before the pull is asked for, released once it has settled either
+         way; two Refreshes in flight each keep their own. */
+      const written = new Set();
+      pullsInFlight.add(written);
       try{
-        const n = await AttemptStore.pullAllForTutor();
+        const n = await AttemptStore.pullAllForTutor(k => written.has(k));
         $("dashStatus").textContent = "Pulled " + n + " row(s) from the server…";
       }catch(e){
+        pullFailed = true;                       // kept in the FINAL status line below, or the tutor reads a success
         $("dashStatus").textContent = "Couldn't reach the server — showing what's cached on this device.";
+      }finally{
+        pullsInFlight.delete(written);
       }
     }
     const keys = await AttemptStore.list("attempt:");
@@ -860,7 +877,8 @@ window.Dashboard = (function(){
     }
     recs = loaded;
     await loadAssignsAndBugs();
-    $("dashStatus").textContent = recs.length +
+    $("dashStatus").textContent = (pullFailed ? "Couldn't reach the server — showing what's cached on this device. " : "") +
+      recs.length +
       (local ? " attempt(s) saved on this device (local mode — not synced)."
              : " attempt(s) in shared storage.") +
       (failed ? " (" + failed + " excluded" +
@@ -1131,6 +1149,17 @@ window.Dashboard = (function(){
     if(!res.ok){
       r.released = !r.released;                 // nothing persisted; the mirror is untouched
       $("dashStatus").textContent = res.message;
+    } else {
+      /* a Refresh that landed while the server call was in flight replaced
+         `recs` from the mirror (the pre-flip copy): the write won on the
+         server and in the mirror, so the record the page holds NOW carries
+         the flip too — this is the one tutor action that does not reload
+         after its write */
+      const cur = recs.find(x => x.attemptId === attemptId);
+      if(cur && cur !== r) cur.released = r.released;
+    }
+    if(!res.ok){
+      /* reported above */
     } else if(AttemptStore.isRemote()){
       $("dashStatus").textContent = (r.released
         ? "Released — the student sees Score Details at their next sign-in or refresh."
@@ -1724,10 +1753,19 @@ window.Dashboard = (function(){
     return "Not " + what + " — " + describeRow(key) + ": " + why +
       ". This browser's copy is unchanged. Sign in again and retry.";
   }
+  /* A Refresh pull in flight took its snapshot before this write: its row for
+     this key is older than what the server now holds, so the pull must leave
+     the key alone (loadFromStorage). Called only once the SERVER has
+     accepted — a rejected write changed nothing, so the pull's row is still
+     the truth there and must land. tutorTombstone deliberately does not call
+     this: a tomb: row is new and permanent, the pull never prunes, and the
+     record it marks is not edited, so no stale row can undo a deletion. */
+  function notePulledWrite(key){ pullsInFlight.forEach(s => s.add(key)); }
   async function tutorPut(key, ownerCode, value){
     if(AttemptStore.isRemote()){
       try{ await AttemptStore.adminUpsert(key, ownerCode, value); }
       catch(e){ return { ok: false, message: rejectedText("saved", key, e) }; }
+      notePulledWrite(key);
       if(await AttemptStore.setLocal(key, value)) return { ok: true };
       return { ok: true, warning: "Saved on the server, but this browser's copy of " +
         describeRow(key) + " couldn't be updated — press Refresh." };
@@ -1739,6 +1777,7 @@ window.Dashboard = (function(){
     if(AttemptStore.isRemote()){
       try{ await AttemptStore.adminDelete(key); }
       catch(e){ return { ok: false, message: rejectedText("deleted", key, e) }; }
+      notePulledWrite(key);
       if(await AttemptStore.remove(key)) return { ok: true };
       return { ok: true, warning: "Deleted on the server, but this browser's copy of " +
         describeRow(key) + " couldn't be removed — press Refresh." };
@@ -1924,9 +1963,11 @@ window.Dashboard = (function(){
     if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
     if(deleted.length){ $("afMsg").textContent = "Deleted — a retired code can't be assigned to: " + deleted.join(", "); return; }
     if(!codes.length){ $("afMsg").textContent = "Pick or enter at least one student code."; return; }
-    // a name typed here is saved as a profile row, separate from the assignment
-    const nameIn = $("afName").value.trim();
-    const prof = nameIn ? await saveProfiles(codes, nameIn) : null;
+    /* every field is read BEFORE the first await (the shape assignSetFromForm
+       uses): a Refresh landing during the profile write below ends in a plain
+       render() that rebuilds this form with its defaults, and the card would
+       land for the wrong test */
+    const nameIn = $("afName").value.trim();     // a name typed here is saved as a profile row, separate from the assignment
     const testId = $("afTest").value;
     const category = $("afCat").value;
     const timingRaw = $("afTiming").value;                       // Phase G §1
@@ -1935,6 +1976,7 @@ window.Dashboard = (function(){
       ? String(Math.floor(100000 + Math.random() * 900000)) : null;
     const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
     const expires = $("afExpires").value ? new Date($("afExpires").value + "T23:59:00").toISOString() : null;
+    const prof = nameIn ? await saveProfiles(codes, nameIn) : null;
     /* Phase H §3: one row per assignment. No read-modify-write, so the
        Phase F clobber is gone — concurrent writers touch different keys.
        Per-code outcome: the server can take some codes and reject the rest
@@ -2103,7 +2145,12 @@ window.Dashboard = (function(){
       "Upload finished — " + sent + " sent, " + skipped + " already on the server" +
       (failed ? ", " + failed + " failed" : "") +
       (retired ? ", " + retired + " belonging to deleted student(s) or marked deleted not sent" : "") + ".";
+    const summary = $("dashStatus").textContent;
     await loadFromStorage();
+    /* the reload ends by writing its own status line; the upload's summary
+       is what the tutor pressed the button for, so it stays in front (the
+       shape deleteStudent uses) */
+    $("dashStatus").textContent = summary + " " + $("dashStatus").textContent;
   }
 
   /* ---------- Question Bank tab (custom practice sets, 2026-08-31) ----------
@@ -2865,6 +2912,11 @@ window.Dashboard = (function(){
           try{ live = await freshAssignmentRow(ak); }
           catch(e){ patchFailed++; patchNotes.push("Couldn't read " + describeRow(ak) + " from the server."); continue; }
           if(!live){
+            /* the one prune of the mirror: a Refresh pull in flight whose
+               snapshot still holds this row must not put it back (the server
+               read above is this page learning the server's state after
+               that snapshot — the same licence the remove has) */
+            notePulledWrite(ak);
             try{ await AttemptStore.remove(ak); }catch(e){}   // heal the stale mirror (server never had it)
             continue;
           }

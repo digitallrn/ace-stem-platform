@@ -22,7 +22,15 @@
      git show <pre-fix-commit>:dashboard.js > <scratch>/dashboard-prefix.js
      DASHBOARD_SRC=<scratch>/dashboard-prefix.js node tests/tutor-writes.test.js
    (functions missing there — tutorPut, dismissBug — fail as "not a function";
-   the rest run their OLD bodies and fail on the mirror/message checks.) */
+   the rest run their OLD bodies and fail on the mirror/message checks.)
+
+   §12 (2026-10-06) is the other half of the contract: a Refresh pull whose
+   server snapshot predates a tutor write must not put the pre-write row
+   back (or revive a deleted one) when it lands. Those cases run the REAL
+   loadFromStorage and the REAL attempts.js pull loop (pullAllForTutor,
+   extracted from attempts.js — ATTEMPTS_SRC=<file> points it elsewhere, as
+   DASHBOARD_SRC does for the dashboard), with the fake server handing the
+   snapshot back only when the case releases it. */
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -34,6 +42,27 @@ const REAL_BANK_INDEX = (() => { const c = { window: {} }; vm.createContext(c);
 
 const SRC_PATH = process.env.DASHBOARD_SRC || "dashboard.js";
 const src = fs.readFileSync(SRC_PATH, "utf8");
+/* The REAL pull loop (attempts.js AttemptStore.pullAllForTutor), so the §12
+   cases exercise the predicate check where it lives rather than a copy of
+   it in this file. It is an object-literal method — `async pullAllForTutor(
+   … ){` — closing over selectAllRows() and backend(), so it is lifted by
+   brace-matching and rebound to a store's snapshot and mirror (realPull). */
+const ATTEMPTS_PATH = process.env.ATTEMPTS_SRC || "attempts.js";
+const attemptsSrc = fs.readFileSync(ATTEMPTS_PATH, "utf8");
+function extractMethod(source, name){
+  const m = new RegExp("async\\s+" + name + "\\s*\\(([^)]*)\\)\\s*\\{").exec(source);
+  if(!m) throw new Error("method not found in " + ATTEMPTS_PATH + ": " + name);
+  let i = m.index + m[0].length, depth = 1;
+  while(depth > 0 && i < source.length){
+    if(source[i] === "{") depth++;
+    else if(source[i] === "}") depth--;
+    i++;
+  }
+  return { params: m[1], body: source.slice(m.index + m[0].length, i - 1) };
+}
+const PULL_SRC = extractMethod(attemptsSrc, "pullAllForTutor");
+const realPull = new Function("selectAllRows", "backend",
+  "return async function pullAllForTutor(" + PULL_SRC.params + "){" + PULL_SRC.body + "\n}");
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -67,8 +96,17 @@ async function run(fn){
     check(v.length === 0, "server-first order held for every key this case touched", v.join("; "));
     const dv = s.divergences();
     check(dv.length === 0, "mirror and server agree on every key they both hold", dv.join(", "));
+    /* a Refresh pull may only ever copy what the server holds at that
+       moment (see pullAllForTutor in makeStore) */
+    if(s.ops.some(o => o[0] === "mirror:pull")){
+      const stale = s.ops.filter(o => o[0] === "mirror:pull" && o[2] === "stale").map(o => o[1]);
+      check(stale.length === 0, "no Refresh pull wrote a row the server did not hold with that value when it landed", stale.join(", "));
+    }
   }
 }
+/* a rejection nothing awaited (a case's unawaited call failing after the
+   case moved on) must not kill the run without its summary */
+process.on("unhandledRejection", e => { check(false, "unhandled rejection — " + (e && e.stack || e)); });
 
 /* ---------- fake storage: a mirror, a server, and a call log ---------- */
 function makeStore(opts){
@@ -77,10 +115,50 @@ function makeStore(opts){
   const clone = v => JSON.parse(JSON.stringify(v));
   const rejecting = (op, key) => typeof opts.reject === "function" ? !!opts.reject(op, key) : !!opts.reject;
   const expired = () => { const e = new Error(opts.errorMessage || "JWT expired"); e.status = opts.errorStatus === undefined ? 401 : opts.errorStatus; return e; };
+  /* the Refresh pull's two moments, for §12: `pullStarted` resolves when the
+     FIRST snapshot has been TAKEN (the rows as they are at that instant);
+     with opts.holdPull every pull's snapshot is handed back only when the
+     case calls releasePull() — one release per pull, in start order, so two
+     pulls in flight settle one after the other, as two page responses do
+     (each tail runs whole in its own macrotask on the page; resuming both
+     from one promise would interleave them at microtask grain, a fake's
+     artifact the page cannot produce) */
+  let pullStartedRes;
+  const pullStarted = new Promise(res => { pullStartedRes = res; });
+  const holds = [];
+  const releasePull = () => { const h = holds.shift(); if(h) h(); };
   const AS = {
     isRemote: () => opts.remote !== false,
     isLocal: () => opts.remote === false && !opts.shared,        // artifact ("shared") mode is neither remote nor local
     hasAuthToken: () => true,
+    /* Refresh's pull (2026-10-06): the REAL attempts.js loop (realPull) over
+       THIS store — selectAllRows is the server snapshot, backend() the
+       mirror. A pull's mirror writes are tagged mirror:pull: a server→mirror
+       copy, which the server-first invariant neither flags (it is not a
+       tutor write) nor treats as a server call that licenses one. Each is
+       also judged by VALUE at the moment it lands — "fresh" when the server
+       holds that key with that exact value right now, "stale" otherwise —
+       and run() fails a case on any stale one: the pull put back a row the
+       server no longer holds, or holds differently. That rule is what
+       catches a revived delete the divergences() check cannot see (it
+       compares only keys both sides hold), and it never trips on an
+       idempotent re-mark of a tombstone. The Map write stays synchronous,
+       as localBackend.set's localStorage.setItem is. */
+    pullAllForTutor: realPull(
+      async () => {
+        calls.push(["selectAll"]);
+        if(opts.pullFail){ pullStartedRes(); throw new Error("network down"); }
+        const snap = [...server.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)
+          .map(([k, r]) => ({ key: k, owner_code: r.owner, value: clone(r.value) }));
+        pullStartedRes();
+        if(opts.holdPull) await new Promise(res => { holds.push(res); });
+        return snap;
+      },
+      () => ({ async set(k, v){
+        const cur = server.get(k);
+        ops.push(["mirror:pull", k, (cur && JSON.stringify(cur.value) === v) ? "fresh" : "stale"]);
+        mirror.set(k, JSON.parse(v));
+      } })),
     async setLocal(k, v){ calls.push(["setLocal", k]); ops.push(["mirror:set", k]); if(opts.localThrow) throw new Error("storage exploded"); if(opts.localFail) return false; mirror.set(k, clone(v)); return true; },
     async remove(k){ calls.push(["remove", k]); ops.push(["mirror:remove", k]); if(opts.localFail) return false; mirror.delete(k); return true; },
     async get(k){ return mirror.has(k) ? clone(mirror.get(k)) : null; },
@@ -187,7 +265,8 @@ function makeStore(opts){
     }
     return out;
   };
-  const store = { AS, mirror, server, calls, ops, seedBoth, snapshot, serverFirstViolations, divergences, remote: opts.remote !== false };
+  const store = { AS, mirror, server, calls, ops, seedBoth, snapshot, serverFirstViolations, divergences, remote: opts.remote !== false,
+                  pullStarted, releasePull: () => releasePull() };
   STORES.push(store);
   return store;
 }
@@ -216,7 +295,9 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   // the kept-as-a-new-set advice (final check, 2026-09-30)
   "keptAsNewSetText", "retiredRefsOf", "refText",
   // the REAL reloads (a counting stub let a check pass on state it seeded — final check, finding 7)
-  "loadSets", "loadAssignsAndBugs"];
+  "loadSets", "loadAssignsAndBugs",
+  // the Refresh pull vs a concurrent write (2026-10-06): the helpers' note to an in-flight pull
+  "notePulledWrite"];
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
@@ -238,9 +319,13 @@ function decl(name){
   const m = src.match(new RegExp("^[ \\t]*(?:let|const)[ \\t]+" + name + "[ \\t]*=[^;\\n]*;", "m"));
   return m ? m[0] : "/* dashboard.js no longer declares " + name + " */";
 }
-const STATE_SRC = [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight")].join("\n");
+const STATE_SRC = [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight"), decl("pullsInFlight")].join("\n");
 const BODY = NAMES.map(tryExtract).join("\n") + "\n" + URL_SRC + "\n" + KEPT_SRC + "\n" + STATE_SRC +
   "\nconst BANK_INDEX_TIMEOUT_MS = 60;\n";
+/* the REAL loadFromStorage, for the §12 cases only (build's opts.realLoad):
+   everywhere else it stays the counting stub, so a case that merely counts
+   reloads does not run a pull it never seeded a server for */
+const REAL_LOAD_SRC = (() => { try{ return "async " + extractFn(src, "loadFromStorage"); }catch(e){ return ""; } })();
 /* The page kinds the re-read decision depends on, built from the REAL
    markup (second review, findings 7/19/24): the split tree's index.html as
    served over http(s) ("origin") and as a file:// copy ("file"), and the
@@ -272,7 +357,8 @@ function selectorQuery(srcs){
 }
 const PRESENT = NAMES.filter(n => tryExtract(n) !== "");
 
-function build(store, win, doc){
+function build(store, win, doc, opts){
+  opts = opts || {};
   const els = {};
   const $ = id => els[id] || (els[id] = { value: "", textContent: "", checked: false, disabled: false,
     selectedOptions: [], classList: { add(){}, remove(){}, toggle(){} } });
@@ -330,7 +416,11 @@ function build(store, win, doc){
        per assigned code so the STATUS-LINE edge is pinned (see the
        createAssignment control case). */
     function overlapNotes(codes, testId){ return codes.map(c => "OVERLAP-NOTE " + c + " " + testId); }
+    function rearmDedup(){}                // the canonical-index retry: nothing to re-arm here
     ${BODY}
+    ${opts.realLoad ? REAL_LOAD_SRC + `
+    /* the real load, declared after the stub so it is the binding; wrapped to keep the count */
+    { const realLoad = loadFromStorage; loadFromStorage = async function(){ loads.storage++; return realLoad(); }; }` : ""}
     /* loadSets / loadAssignsAndBugs are dashboard.js's own (they read the
        fake store like the real one); wrapped only to count the calls and
        record the page lock each ran under */
@@ -338,9 +428,11 @@ function build(store, win, doc){
     if(typeof loadAssignsAndBugs === "function"){ const realLoadAB = loadAssignsAndBugs; loadAssignsAndBugs = async function(){ loads.assigns++; loads.assignsLock.push(inFlightNow()); loads.profilesAtReload.push(JSON.parse(JSON.stringify(profiles))); return realLoadAB(); }; }
     const fns = {};
     ${PRESENT.map(n => `fns[${JSON.stringify(n)}] = ${n};`).join("\n")}
+    ${opts.realLoad ? "fns.loadFromStorage = loadFromStorage;" : ""}
     return {
       fns,
-      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs, paints, setSaveInFlight: inFlightNow() }),
+      state: () => ({ recs, assigns, lastStartCode, profiles, lastExport, sets, builder, setsMsg, saMsg, openAttemptId, loads, tombs, paints, setSaveInFlight: inFlightNow(),
+                      pullsInFlight: typeof pullsInFlight === "undefined" ? undefined : pullsInFlight.size }),
       setTab: t => { tab = t; },
       seed: o => {
         if("recs" in o) recs = o.recs; if("assigns" in o) assigns = o.assigns; if("profiles" in o) profiles = o.profiles;
@@ -1027,8 +1119,11 @@ const noSync = t => !/sync/i.test(t);
   });
   await run(async () => {
     /* a retired code is refused by every form that would create or rename
-       for it, before any write; and the upload button never sends its rows */
-    const s = makeStore({}); const d = build(s);
+       for it, before any write; and the upload button never sends its rows.
+       The REAL loadFromStorage runs here (realLoad): the upload ends with a
+       reload whose own status line used to REPLACE the upload summary, so
+       the counting stub would have hidden exactly that */
+    const s = makeStore({}); const d = build(s, null, null, { realLoad: true });
     const stTomb = { kind: "tombstone", targetKind: "student", target: C2, code: C2, deletedAt: "2026-09-18T00:00:00Z", deletedBy: "tutor@test", attemptsTombstoned: 0, hadProfile: false };
     d.seed({ tombs: { ["tomb:student:" + C2]: stTomb } });
     d.els.afCodes = { selectedOptions: [{ value: C2 }] }; d.$("afFree").value = ""; d.$("afTest").value = "202606asiav1"; d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
@@ -1055,12 +1150,13 @@ const noSync = t => !/sync/i.test(t);
     const t = status(d);
     const sent = s.calls.filter(c => c[0] === "adminUpsert").map(c => c[1]);
     check(sent.join() === "attempt:202606asiav1:2:bb" && !sent.some(k => k.indexOf(C2) !== -1 || k.indexOf("tomb:") === 0)
-      && /^Upload finished — 1 sent, 0 already on the server, 3 belonging to deleted student\(s\) or marked deleted not sent\.$/.test(t),
-      "upload: nothing of a deleted student's and no tomb: row is sent; the count says so", t + " | " + sent.join(","));
+      && /^Upload finished — 1 sent, 0 already on the server, 3 belonging to deleted student\(s\) or marked deleted not sent\. \d+ attempt\(s\) in shared storage\./.test(t)
+      && t.indexOf("Upload finished") === t.lastIndexOf("Upload finished"),
+      "upload: nothing of a deleted student's and no tomb: row is sent; the count says so, in FRONT of the reload's own line, once", t + " | " + sent.join(","));
     /* the retired set comes from the SERVER it just read, not only from this
        browser's last load: a student retired elsewhere is skipped too, and a
        marked attempt never goes up */
-    const s2 = makeStore({}); const d2 = build(s2);
+    const s2 = makeStore({}); const d2 = build(s2, null, null, { realLoad: true });
     s2.server.set("tomb:student:" + C1, { owner: C1, value: stTomb });                        // retired from another browser; d2's tombs is empty
     s2.server.set("tomb:attempt:202606asiav1:9:zz", { owner: C2, value: { kind: "tombstone", targetKind: "attempt", target: "attempt:202606asiav1:9:zz" } });
     s2.mirror.set("attempt:202606asiav1:3:cc", { attemptId: "attempt:202606asiav1:3:cc", student: { key: C1, code: C1 } });
@@ -1948,7 +2044,9 @@ const noSync = t => !/sync/i.test(t);
 
   /* =================== 9e. the upload button: mirror → server, never the other way =================== */
   await run(async () => {
-    const s = makeStore({}); const d = build(s);
+    /* the REAL loadFromStorage (realLoad): the upload's reload must keep the
+       summary in front of its own status line — a counting stub hid that */
+    const s = makeStore({}); const d = build(s, null, null, { realLoad: true });
     /* realistic shapes, so the owner derivation is actually tested: a record
        keeps the code AS TYPED in student.code and the normalised key in
        student.key (the owner); a bug row is keyed bug:<ts>-<rand> and carries
@@ -1967,15 +2065,18 @@ const noSync = t => !/sync/i.test(t);
     check(owner(att.attemptId) === C1 && owner("assign:" + C1 + ":a-1") === C1 && owner("bug:1700000000-abcd") === C1 && owner("pset:pset-1") === null && owner("student:" + C1) === C1,
       "upload: every prefix reaches the server with the right owner (the normalised key, never a timestamp or the code as typed), display names included",
       JSON.stringify({ att: owner(att.attemptId), bug: owner("bug:1700000000-abcd") }));
-    check(s.snapshot() === before && /^Upload finished — 5 sent, 1 already on the server\./.test(t), "upload: the mirror is untouched and the count is honest", t);
+    check(s.snapshot() === before && /^Upload finished — 5 sent, 1 already on the server\. \d+ attempt\(s\) in shared storage\./.test(t) &&
+          t.indexOf("Upload finished") === t.lastIndexOf("Upload finished") && d.state().loads.storage === 1,
+      "upload: the mirror is untouched (the reload's pull copies back exactly what went up), the count is honest, and the summary stays in front of the reload's line, once", t);
   });
   await run(async () => {
-    const s = makeStore({ reject: true }); const d = build(s);
+    const s = makeStore({ reject: true }); const d = build(s, null, null, { realLoad: true });
     s.mirror.set("student:" + C1, { displayName: "Erin K" });
     s.mirror.set("assign:" + C1 + ":a-1", { assignmentId: "a-1" });
     const before = s.snapshot();
     await d.fns.migrateLocalToServer();
-    check(s.snapshot() === before && s.server.size === 0 && /2 failed\./.test(status(d)), "upload rejected: nothing changes anywhere, failures counted", status(d));
+    check(s.snapshot() === before && s.server.size === 0 && /^Upload finished — 0 sent, 0 already on the server, 2 failed\. \d+ attempt\(s\) in shared storage\./.test(status(d)),
+      "upload rejected: nothing changes anywhere, failures counted, summary in front of the reload's line", status(d));
   });
 
   /* =================== 10. assignSetFromForm =================== */
@@ -2022,6 +2123,325 @@ const noSync = t => !/sync/i.test(t);
       JSON.stringify({ form, cardsForC1: mine.length }));
   });
 
+  /* =================== 12. a Refresh pull vs a concurrent tutor write (2026-10-06) =================== */
+  console.log("--- 12. Refresh pull vs a concurrent tutor write: the stale snapshot must not land on the written key ---");
+  /* THE MODEL. Remote mode's mirror is localStorage, so on the page a pull's
+     tail (its row loop, list/get, loadAssignsAndBugs, renderAll) runs whole
+     inside the macrotask of its last page response, and a write's tail
+     (the note, setLocal/remove, the action's own reload) inside its own.
+     Only two orderings exist. A: the snapshot predates the write and its
+     rows land AFTER it — the skip Set's job: the stale row must not land.
+     B: the rows land BEFORE the server accepts — the write's mirror step
+     wins, and the action's own reload repairs the page's lists
+     (toggleRelease, the one action with no reload, re-applies its flip to
+     the record the page holds now). Each case here: Refresh starts and its
+     snapshot is TAKEN (the pre-write rows); the tutor writes; THEN the
+     snapshot lands (A) — or, with the server call gated, the snapshot lands
+     first and the call is opened afterwards (B). The mirror, and the page's
+     lists reloaded from it, must hold the write. Every case also seeds a
+     SERVER-ONLY control row (student:C2) and checks it reached the mirror
+     and the profiles map, so a pull that lands nothing cannot pass; and
+     run()'s stale-pull rule fails any pull write the server does not hold
+     at that moment. On the pre-fix dashboard (DASHBOARD_SRC) the snapshot
+     wins; with the pull ignoring its predicate (ATTEMPTS_SRC=<mutant>) it
+     wins too. The realPull rebinding takes ONE unpaged snapshot; paging is
+     proven in tests/tombstone.test.js. loadFromStorage here is the REAL one
+     (build's realLoad). */
+  const RACE = o => {
+    const s = makeStore(Object.assign({ holdPull: true }, o || {}));
+    const d = build(s, null, null, { realLoad: true });
+    s.server.set("student:" + C2, { owner: C2, value: { displayName: "Other" } });   // the control row: server-only until the pull lands it
+    return { s, d };
+  };
+  /* the pull itself landed: the control row is in the mirror and in the reloaded profiles map */
+  const landed = (s, d) => !!s.mirror.get("student:" + C2) && s.mirror.get("student:" + C2).displayName === "Other" && d.state().profiles[C2] === "Other";
+  const FREF = { type: "form", testId: "202606asiav1", moduleId: "2026-june-asia-v1-rw1", qid: "re1-q1" };
+  const OLD_SET = { setId: "pset-1", name: "Old name", subject: "rw", refs: [FREF], createdAt: "2026-09-01T00:00:00Z" };
+  const OLD_CARD = { assignmentId: "a-1", kind: "set", category: "practice", setId: "pset-1", setName: "Old name", questionCount: 1, holdRelease: true, completedAttemptId: null };
+  const CARD_KEY = "assign:" + C1 + ":a-1";
+  const cl = v => JSON.parse(JSON.stringify(v));
+  /* gate one kind of server call by key prefix: it waits until the case
+     opens the gate (ordering B); the gated call is logged as "gated:<op>"
+     the moment it is made, since the real call (and its log line) only
+     happens once the gate opens */
+  const gatePut = (s, prefix) => { const g = gateOf(); const real = s.AS.adminUpsert;
+    s.AS.adminUpsert = async function(k, o, v){ const body = cl(v); if(k.indexOf(prefix) === 0){ s.calls.push(["gated:adminUpsert", k]); await g.p; } return real.call(this, k, o, body); }; return g; };
+  const gateDelete = (s, prefix) => { const g = gateOf(); const real = s.AS.adminDelete;
+    s.AS.adminDelete = async function(k){ if(k.indexOf(prefix) === 0){ s.calls.push(["gated:adminDelete", k]); await g.p; } return real.call(this, k); }; return g; };
+  const until = async pred => { for(let i = 0; i < 200 && !pred(); i++) await new Promise(r => setTimeout(r, 2)); return pred(); };
+  const inFlight = (s, op, key) => s.calls.some(c => c[0] === "gated:" + op && c[1] === key);
+
+  await run(async () => {
+    /* Save set (a rename, with its assignment-card patch), ordering A: the
+       three harms the limit named — the page SHOWS, then RE-SAVES, the
+       pre-write copy */
+    const { s, d } = RACE();
+    s.seedBoth("pset:pset-1", OLD_SET); s.seedBoth(CARD_KEY, OLD_CARD, C1);
+    d.seed({ sets: [cl(OLD_SET)], assigns: [{ code: C1, list: [cl(OLD_CARD)] }], builder: d.fns.builderFromSet(cl(OLD_SET)) });
+    d.$("sbName").value = "New name";
+    const pull = d.fns.loadFromStorage();                 // Refresh: the snapshot is taken now — Old name
+    await s.pullStarted;
+    check(d.state().pullsInFlight === 1, "while the pull is held, one key set is registered", String(d.state().pullsInFlight));
+    await d.fns.saveSetFromBuilder();                     // server first, then mirror: New name; the card patched
+    check(s.server.get("pset:pset-1").value.name === "New name" && s.mirror.get("pset:pset-1").name === "New name" &&
+          s.server.get(CARD_KEY).value.setName === "New name",
+      "the save landed on the server and the mirror while the pull was in flight");
+    s.releasePull(); await pull;                          // the stale snapshot lands
+    check(landed(s, d), "the pull landed: its server-only control row reached the mirror and the profiles map");
+    check(s.mirror.get("pset:pset-1").name === "New name", "the stale pull did not put the pre-save set back into the mirror", JSON.stringify(s.mirror.get("pset:pset-1")));
+    check(s.mirror.get(CARD_KEY).setName === "New name", "…nor the pre-patch assignment card", JSON.stringify(s.mirror.get(CARD_KEY)));
+    const st = d.state();
+    check(st.sets.length === 1 && st.sets[0].name === "New name", "the Sets list, reloaded after the pull, shows the saved name", JSON.stringify(st.sets));
+    check(st.assigns.length === 1 && st.assigns[0].list[0].setName === "New name", "the assignment card, reloaded after the pull, shows the patched name");
+    check(st.pullsInFlight === 0, "the pull's key set is released once it settled", String(st.pullsInFlight));
+    /* the RE-SAVE harm: Edit from the list, Save unchanged — the server must keep the saved name */
+    check(d.fns.openSetInBuilder("pset-1") === true, "Edit opens the set from the reloaded list");
+    d.$("sbName").value = d.state().builder.name;
+    await d.fns.saveSetFromBuilder();
+    check(s.server.get("pset:pset-1").value.name === "New name", "an Edit-then-Save after the pull keeps the saved name on the server (the revert the limit described)", JSON.stringify(s.server.get("pset:pset-1").value));
+  });
+  await run(async () => {
+    /* Save set, ordering B: the snapshot lands while the server call is in
+       flight; once the server accepts, the write's mirror step wins and the
+       save's own reload shows it */
+    const { s, d } = RACE();
+    s.seedBoth("pset:pset-1", OLD_SET);
+    d.seed({ sets: [cl(OLD_SET)], assigns: [], builder: d.fns.builderFromSet(cl(OLD_SET)) });
+    d.$("sbName").value = "New name";
+    const g = gatePut(s, "pset:");
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    const save = d.fns.saveSetFromBuilder();
+    check(await until(() => inFlight(s, "adminUpsert", "pset:pset-1")), "the set write is in flight");
+    s.releasePull(); await pull;
+    check(s.mirror.get("pset:pset-1").name === "Old name" && landed(s, d),
+      "before the server accepts, the mirror still holds the pre-save copy (the snapshot was the truth then)", JSON.stringify(s.mirror.get("pset:pset-1")));
+    g.open(); await save;
+    check(s.server.get("pset:pset-1").value.name === "New name" && s.mirror.get("pset:pset-1").name === "New name" &&
+          d.state().sets[0].name === "New name" && d.state().pullsInFlight === 0,
+      "once the server accepts, the write's mirror step wins and the save's own reload shows the saved name", JSON.stringify(d.state().sets));
+  });
+  await run(async () => {
+    /* the ASSIGN harm: Assign set after the pull must stamp the SAVED name */
+    const { s, d } = RACE();
+    s.seedBoth("pset:pset-1", OLD_SET);
+    d.seed({ sets: [cl(OLD_SET)], assigns: [], builder: d.fns.builderFromSet(cl(OLD_SET)) });
+    d.$("sbName").value = "New name";
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    await d.fns.saveSetFromBuilder();
+    s.releasePull(); await pull;
+    check(landed(s, d), "the pull landed");
+    d.$("saSet").value = "pset-1"; d.els.saCodes = { selectedOptions: [{ value: C1 }] };
+    d.$("saFree").value = ""; d.$("saLimit").value = ""; d.$("saExpires").value = ""; d.$("saHold").checked = false;
+    await d.fns.assignSetFromForm();
+    const k = [...s.server.keys()].find(x => x.indexOf("assign:" + C1 + ":a-") === 0);
+    check(!!k && s.server.get(k).value.setName === "New name" && s.mirror.get(k).setName === "New name",
+      "Assign set after the pull stamps the saved name on the card, not the snapshot's", k ? JSON.stringify(s.server.get(k).value) : "no card");
+  });
+  await run(async () => {
+    /* set Delete, ordering A: the stale snapshot must not revive it */
+    const { s, d } = RACE();
+    s.seedBoth("pset:pset-2", { setId: "pset-2", name: "Set B", subject: "math", refs: [] });
+    d.seed({ sets: [{ setId: "pset-2", name: "Set B", subject: "math", refs: [] }], assigns: [] });
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    await d.fns.deleteSet("pset-2");
+    check(!s.server.has("pset:pset-2") && !s.mirror.has("pset:pset-2"), "the delete landed while the pull was in flight");
+    s.releasePull(); await pull;
+    check(landed(s, d), "the pull landed");
+    check(!s.mirror.has("pset:pset-2"), "the stale pull did not revive the deleted set in the mirror");
+    check(!d.state().sets.some(x => x.setId === "pset-2"), "the Sets list, reloaded after the pull, does not list it", JSON.stringify(d.state().sets));
+  });
+  await run(async () => {
+    /* set Delete, ordering B: the snapshot lands while the server delete is in flight */
+    const { s, d } = RACE();
+    s.seedBoth("pset:pset-2", { setId: "pset-2", name: "Set B", subject: "math", refs: [] });
+    d.seed({ sets: [{ setId: "pset-2", name: "Set B", subject: "math", refs: [] }], assigns: [] });
+    const g = gateDelete(s, "pset:");
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    const del = d.fns.deleteSet("pset-2");
+    check(await until(() => inFlight(s, "adminDelete", "pset:pset-2")), "the set delete is in flight");
+    s.releasePull(); await pull;
+    check(s.mirror.has("pset:pset-2") && landed(s, d), "before the server accepts, the mirror still holds the set (the snapshot was the truth then)");
+    g.open(); await del;
+    check(!s.server.has("pset:pset-2") && !s.mirror.has("pset:pset-2") && !d.state().sets.some(x => x.setId === "pset-2") && d.state().pullsInFlight === 0,
+      "once the server accepts, the mirror drops the set and the delete's own reload drops it from the list", JSON.stringify(d.state().sets));
+  });
+  await run(async () => {
+    /* an assignment Delete: same, and the sibling row the snapshot carries still lands */
+    const { s, d } = RACE();
+    s.seedBoth(CARD_KEY, { assignmentId: "a-1", testId: "202606asiav1" }, C1);
+    s.seedBoth("assign:" + C1 + ":a-2", { assignmentId: "a-2", testId: "202606asiav1" }, C1);
+    s.mirror.delete("assign:" + C1 + ":a-2");             // only the server has a-2: the pull must still bring it
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    await d.fns.deleteAssignment(C1, "a-1");
+    s.releasePull(); await pull;
+    check(landed(s, d), "the pull landed");
+    check(!s.mirror.has(CARD_KEY) && s.mirror.has("assign:" + C1 + ":a-2"),
+      "the stale pull did not revive the deleted assignment, and its untouched sibling still landed");
+    const mine = (d.state().assigns.find(e => e.code === C1) || { list: [] }).list.map(a => a.assignmentId);
+    check(mine.indexOf("a-1") === -1 && mine.indexOf("a-2") !== -1, "the assignments list, reloaded after the pull, shows the sibling and not the deleted card", mine.join(","));
+  });
+  await run(async () => {
+    /* Clear all assignments: every row it deleted stays gone */
+    const { s, d } = RACE();
+    s.seedBoth(CARD_KEY, { assignmentId: "a-1", testId: "202606asiav1" }, C1);
+    s.seedBoth("assign:" + C1 + ":a-2", { assignmentId: "a-2", testId: "202606asiav1" }, C1);
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    await d.fns.clearAssignments(C1);
+    s.releasePull(); await pull;
+    check(landed(s, d) && !s.mirror.has(CARD_KEY) && !s.mirror.has("assign:" + C1 + ":a-2"),
+      "the stale pull revived neither cleared row");
+    const mine = (d.state().assigns.find(e => e.code === C1) || { list: [] }).list;
+    check(mine.length === 0, "the assignments list, reloaded after the pull, has no card for the code", JSON.stringify(mine));
+  });
+  await run(async () => {
+    /* a release, ordering A: the stale snapshot must not un-release it (or re-release an un-release) */
+    const { s, d } = RACE();
+    const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", released: false, student: { key: C1, code: C1 } };
+    s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [cl(rec)] });
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    await d.fns.toggleRelease(rec.attemptId);
+    check(s.server.get(rec.attemptId).value.released === true && s.mirror.get(rec.attemptId).released === true, "the release landed while the pull was in flight");
+    s.releasePull(); await pull;
+    check(landed(s, d), "the pull landed");
+    check(s.mirror.get(rec.attemptId).released === true, "the stale pull did not un-release the attempt in the mirror");
+    check(d.state().recs.length === 1 && d.state().recs[0].released === true, "the attempts table, reloaded after the pull, shows it released");
+  });
+  await run(async () => {
+    /* a release, ordering B: the snapshot lands while the server call is in
+       flight and replaces `recs` under the toggle — toggleRelease is the one
+       action with no reload after its write, so it re-applies the flip to
+       the record the page holds now */
+    const { s, d } = RACE();
+    const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", released: false, student: { key: C1, code: C1 } };
+    s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [cl(rec)] });
+    const g = gatePut(s, "attempt:");
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    const tog = d.fns.toggleRelease(rec.attemptId);
+    check(await until(() => inFlight(s, "adminUpsert", rec.attemptId)), "the release write is in flight");
+    s.releasePull(); await pull;
+    check(d.state().recs[0].released === false && landed(s, d), "before the server accepts, the reloaded table shows the pre-flip copy (the snapshot was the truth then)");
+    g.open(); await tog;
+    check(s.server.get(rec.attemptId).value.released === true && s.mirror.get(rec.attemptId).released === true && d.state().recs[0].released === true,
+      "once the server accepts, the mirror holds the flip and the record the page holds NOW carries it too", JSON.stringify(d.state().recs[0]));
+    check(/^Released — /.test(status(d)), "…and the status says so", status(d));
+  });
+  await run(async () => {
+    /* createAssignment with a name typed: the profile write is its first
+       await, and a Refresh landing meanwhile ends in a plain render that
+       rebuilds the Assignments form with its defaults — the form must have
+       been read BEFORE that await, or the card lands for the wrong test */
+    const { s, d } = RACE();
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.$("afFree").value = ""; d.$("afName").value = "Erin K";
+    d.$("afTest").value = "202606asiav1"; d.$("afCat").value = "test"; d.$("afTiming").value = "1.5";
+    d.$("afOpens").value = "2026-10-10"; d.$("afExpires").value = "2026-12-31";
+    const g = gatePut(s, "student:");
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    const create = d.fns.createAssignment();
+    check(await until(() => inFlight(s, "adminUpsert", "student:" + C1)), "the profile write is in flight");
+    s.releasePull(); await pull;
+    check(d.$("afTest").value === "" && d.$("afExpires").value === "" && landed(s, d), "the Refresh's render emptied the form while the profile write was in flight");
+    g.open(); await create;
+    const k = [...s.server.keys()].find(x => x.indexOf("assign:" + C1 + ":a-") === 0);
+    const card = k ? s.server.get(k).value : null;
+    check(!!card && card.testId === "202606asiav1" && card.category === "test" && card.timing === 1.5 && /^\d{6}$/.test(String(card.startCode)) &&
+          card.windowOpens === new Date("2026-10-10T00:00:00").toISOString() && card.expiresAt === new Date("2026-12-31T23:59:00").toISOString(),
+      "the card lands with EVERY field as picked BEFORE the write — test, category, timing, start code, window — not the emptied form (createAssignment reads its form before its first await)", JSON.stringify(card));
+    check(/^\d{6}$/.test(String(d.state().lastStartCode)), "…and the start code offered is the card's", String(d.state().lastStartCode));
+  });
+  await run(async () => {
+    /* the save's mirror HEAL — the one prune of the mirror: a card the server
+       no longer has (deleted in another browser after the snapshot) is
+       dropped by the card patch; the stale snapshot must not put it back */
+    const { s, d } = RACE();
+    s.seedBoth("pset:pset-1", OLD_SET); s.seedBoth(CARD_KEY, OLD_CARD, C1);
+    d.seed({ sets: [cl(OLD_SET)], assigns: [{ code: C1, list: [cl(OLD_CARD)] }], builder: d.fns.builderFromSet(cl(OLD_SET)) });
+    d.$("sbName").value = "New name";
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    s.server.delete(CARD_KEY);                             // another browser deleted the card after the snapshot was taken
+    await d.fns.saveSetFromBuilder();                      // the card patch re-reads the server, finds nothing, heals the mirror
+    check(!s.mirror.has(CARD_KEY), "the save's card patch healed the mirror (the server has no such row)");
+    s.releasePull(); await pull;
+    check(landed(s, d), "the pull landed");
+    check(!s.mirror.has(CARD_KEY), "the stale pull did not revive the healed-away card (the heal notes its key like a delete does)");
+    const mine = (d.state().assigns.find(e => e.code === C1) || { list: [] }).list.map(a => a.assignmentId);
+    check(mine.indexOf("a-1") === -1, "the assignments list, reloaded after the pull, does not show it", mine.join(","));
+  });
+  await run(async () => {
+    /* a tombstone under a stale pull: the marker is a NEW row the snapshot
+       lacks and the record row is not edited, so there is nothing to put
+       back — tutorTombstone needs no note (pinned, since it is the one
+       helper left out) */
+    const { s, d } = RACE();
+    const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", released: false, testId: "202606asiav1", student: { key: C1, code: C1 }, answers: {} };
+    s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [cl(rec)] });
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    const r = await d.fns.deleteAttempt(d.state().recs[0]);
+    check(!!r && r.ok !== false && s.mirror.has("tomb:" + rec.attemptId), "the marker landed while the pull was in flight");
+    s.releasePull(); await pull;
+    check(landed(s, d), "the pull landed");
+    check(s.mirror.has("tomb:" + rec.attemptId) && !!d.state().tombs["tomb:" + rec.attemptId] &&
+          JSON.stringify(s.mirror.get(rec.attemptId)) === JSON.stringify(s.server.get(rec.attemptId).value),
+      "the marker survives the stale pull, the reloaded page reads the attempt as deleted, and the record row is byte-identical on both sides");
+  });
+  await run(async () => {
+    /* a REJECTED write shields nothing: the pull's row is still the server's
+       truth there and must land (the key is noted only once the server accepts) */
+    const { s, d } = RACE({ reject: op => op === "put" });
+    s.server.set("pset:pset-3", { owner: null, value: { setId: "pset-3", name: "Server name", subject: "math", refs: [] } });
+    s.mirror.set("pset:pset-3", { setId: "pset-3", name: "Stale mirror copy", subject: "math", refs: [] });
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    const r = await d.fns.tutorPut("pset:pset-3", null, { setId: "pset-3", name: "Mine", subject: "math", refs: [] });
+    check(r.ok === false, "the write was rejected");
+    everyMessage.push(r.message);
+    s.releasePull(); await pull;
+    check(landed(s, d), "the pull landed");
+    check(s.mirror.get("pset:pset-3").name === "Server name", "after a rejected write the pull's row for that key lands (nothing newer exists)", JSON.stringify(s.mirror.get("pset:pset-3")));
+    check(d.state().pullsInFlight === 0, "the key set is released");
+  });
+  await run(async () => {
+    /* two Refreshes in flight: each keeps its own key set; both leave the
+       written row alone; the two tails settle one after the other (two page
+       responses) and the lists hold each row ONCE */
+    const { s, d } = RACE();
+    const SET9 = { setId: "pset-9", name: "Set 9", subject: "math", refs: [] };
+    s.seedBoth("pset:pset-1", OLD_SET); s.seedBoth("pset:pset-9", SET9); s.seedBoth(CARD_KEY, OLD_CARD, C1);
+    d.seed({ sets: [cl(OLD_SET), cl(SET9)], assigns: [{ code: C1, list: [cl(OLD_CARD)] }], builder: d.fns.builderFromSet(cl(OLD_SET)) });
+    const p1 = d.fns.loadFromStorage(); await s.pullStarted;
+    const p2 = d.fns.loadFromStorage();
+    check(d.state().pullsInFlight === 2, "two pulls in flight register two key sets", String(d.state().pullsInFlight));
+    d.$("sbName").value = "New name"; await d.fns.saveSetFromBuilder();
+    s.releasePull(); await p1;
+    s.releasePull(); await p2;
+    const st = d.state();
+    check(s.mirror.get("pset:pset-1").name === "New name" && st.sets.length === 2 && st.sets.find(x => x.setId === "pset-1").name === "New name",
+      "both stale snapshots left the saved row alone, and the Sets list holds each set once", JSON.stringify(st.sets.map(x => [x.setId, x.name])));
+    const cards = (st.assigns.find(e => e.code === C1) || { list: [] }).list;
+    check(cards.length === 1 && cards[0].setName === "New name", "…and the one card once, patched", JSON.stringify(cards));
+    check(st.pullsInFlight === 0 && landed(s, d), "…both key sets are released and the control row landed");
+  });
+  await run(async () => {
+    /* a pull that FAILS (the server unreachable) releases its key set, and
+       the failure stays in the FINAL status line — the reload's own line
+       used to overwrite it, so the tutor read a success */
+    const s = makeStore({ pullFail: true }); const d = build(s, null, null, { realLoad: true });
+    await d.fns.loadFromStorage();
+    const t = status(d);
+    check(/^Couldn't reach the server — showing what's cached on this device\. 0 attempt\(s\) in shared storage\./.test(t),
+      "a failed pull is reported in the final status line, in front of the reload's own", t);
+    check(d.state().pullsInFlight === 0, "a failed pull releases its key set", String(d.state().pullsInFlight));
+  });
+  await run(async () => {
+    /* control: a write AFTER the pull settled lands as always — there is no pull to tell, and nothing is skipped */
+    const { s, d } = RACE({ holdPull: false });
+    s.seedBoth("pset:pset-1", OLD_SET);
+    d.seed({ sets: [cl(OLD_SET)], assigns: [], builder: d.fns.builderFromSet(cl(OLD_SET)) });
+    await d.fns.loadFromStorage();
+    check(d.state().loads.storage === 1 && d.state().sets[0].name === "Old name" && landed(s, d), "control: the pull landed its rows and the list shows them");
+    d.$("sbName").value = "New name"; await d.fns.saveSetFromBuilder();
+    check(s.server.get("pset:pset-1").value.name === "New name" && s.mirror.get("pset:pset-1").name === "New name" && d.state().pullsInFlight === 0,
+      "control: a write after the pull settled lands on server and mirror with no key set left behind");
+  });
+
   /* =================== 11. sweeps =================== */
   console.log("--- 11. sweeps: no tutor message says sync; no path bypasses the helper ---");
   await run(async () => {
@@ -2060,7 +2480,9 @@ const noSync = t => !/sync/i.test(t);
        the remainder, and is flagged */
     const healLine = (rest.match(/^\s*try\{ await AttemptStore\.remove\(ak\); \}catch\(e\)\{\}\s*\/\/ heal the stale mirror \(server never had it\)\r?$/m) || [])[0];
     if(healLine) rest = rest.replace(healLine, "");
-    const pullLine = (rest.match(/^\s*const n = await AttemptStore\.pullAllForTutor\(\);\r?$/m) || [])[0];
+    /* the pull carries the keys-written predicate (2026-10-06); only that
+       exact shape is sanctioned, so a pull without it is flagged here */
+    const pullLine = (rest.match(/^\s*const n = await AttemptStore\.pullAllForTutor\(k => written\.has\(k\)\);\r?$/m) || [])[0];
     if(pullLine) rest = rest.replace(pullLine, "");
     const readRe = new RegExp("^\\.(?:" + READS.join("|") + ")\\(");
     const tokRe = /AttemptStore\b/g;

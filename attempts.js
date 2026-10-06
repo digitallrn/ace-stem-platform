@@ -425,14 +425,31 @@ window.AttemptStore = (function(){
        dashboard shows records from ALL devices, not just this one. Without
        this the dashboard in remote mode only ever listed what this browser
        happened to write. Cached with a direct backend write so nothing is
-       re-queued for upload. */
-    async pullAllForTutor(){
+       re-queued for upload.
+       `skip(key)` (2026-10-06): the snapshot is taken once, up front, and its
+       rows land one by one afterwards. A tutor write this page made in
+       between (server first, then mirror — dashboard.js tutorPut/tutorDelete)
+       is newer than the snapshot, and the row landing after it would put the
+       pre-write value back, or revive a row the tutor just deleted. The
+       dashboard hands in the keys it wrote while this pull ran; those rows
+       are left alone. Asked per row, at the moment of its write, so a write
+       that lands while the loop is running is honoured too — and the check
+       and the write are ONE synchronous step (localBackend.set reaches
+       localStorage.setItem before its first await; remote mode never pulls
+       into the artifact backend), so no tutor write can slip between them.
+       Rows are never pruned here, so a skipped delete simply stays absent. A
+       predicate that throws counts as "not skipped" — the pre-fix behaviour,
+       never a dropped row. */
+    async pullAllForTutor(skip){
       const rows = await selectAllRows();
       const b = backend();
       if(!b || !Array.isArray(rows)) return 0;
       let n = 0;
       for(const r of rows){
         if(!r || !r.key || r.value === undefined) continue;
+        let mine = false;
+        if(typeof skip === "function"){ try{ mine = !!skip(r.key); }catch(e){ mine = false; } }
+        if(mine) continue;
         try{ await b.set(r.key, JSON.stringify(r.value), true); n++; }catch(e){}
       }
       return n;

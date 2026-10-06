@@ -429,13 +429,56 @@ record-derived value.
   REAL `loadSets`/`loadAssignsAndBugs` (a gated case can't hang it silently:
   a drained event loop reports HARNESS HUNG and exits 2), so these checks
   can't lean on hand-seeded state.
-  Not covered, a stated limit (pre-existing since sets shipped, and true of
-  EVERY tutor write, not only sets): a Refresh whose server snapshot was
-  taken before a write can land after it and put the old row back in this
-  browser's mirror (`pullAllForTutor` overwrites and never prunes) — until
-  the next Refresh the page can show, assign or re-save the pre-write copy.
-  Don't press Refresh while a save is running; the real fix is at the
-  mirror (skip keys this page wrote after the pull began), in attempts.js.
+  FIXED 2026-10-06 (a stated limit since sets shipped, true of EVERY tutor
+  write, not only sets): a Refresh whose server snapshot was taken before a
+  write used to land after it and put the old row back in this browser's
+  mirror (`pullAllForTutor` overwrites and never prunes) — until the next
+  Refresh the page could show, assign or re-save the pre-write copy. Now
+  each in-flight pull keeps its own Set of keys (`pullsInFlight` in
+  dashboard.js; `loadFromStorage` registers one before the pull and
+  releases it in a finally), `tutorPut`/`tutorDelete` add the key the
+  moment the SERVER accepts (a rejected write adds nothing, so the pull's
+  row still lands there — it is the truth), the set save's mirror heal (a
+  card the server no longer has) notes its key the same way, and
+  `AttemptStore.pullAllForTutor(skip)` asks the predicate per row at the
+  moment of its write and leaves those keys alone. Only two orderings exist
+  on the page (the mirror is localStorage, so a pull's tail and a write's
+  tail each run whole inside their own response's macrotask): the snapshot
+  predates the write and its rows land after it — the Set's job; or the
+  rows land before the server accepts — the write's mirror step wins and
+  the action's own reload repairs the page (`toggleRelease`, the one action
+  with no reload, re-applies its flip to the record the page holds now;
+  `createAssignment` reads its whole form before its first await, since a
+  Refresh landing meanwhile re-renders the form with defaults). The helpers
+  note the key before their mirror write by convention; the order is not
+  load-bearing. `tutorTombstone` takes no part: a `tomb:` row is new and
+  permanent, the pull never prunes, and the record it marks is not edited,
+  so nothing stale can undo a deletion. Trades, stated: a key written while
+  a pull runs is skipped even when that pull's page was fresh (harmless when
+  the mirror write succeeded; when it FAILED the key stays stale until the
+  next Refresh, which the warning already asks for); a write to the same key
+  from another device inside the pull's window is missed until the next
+  Refresh — never "fix" that by comparing values; "Pulled n row(s)" excludes
+  skipped rows. Residual limits: the registry is per TAB — a second
+  dashboard tab in the same browser shares the mirror and its stale pull is
+  not told about this tab's writes (one dashboard tab per browser); the
+  mirror still never prunes a row deleted from ANOTHER browser
+  (`freshAssignmentRow` re-reads the server before a card patch for exactly
+  that reason); and student-side writes are not tutor writes and are not
+  noted — a sitting in another tab on the same device writes its attempt
+  locally and queues it, and a pull can still write the server's older copy
+  over it until the queue drains (its own item, not built; see the
+  2026-10-06 batch notes). `tests/tutor-writes.test.js` §12 runs the REAL
+  `loadFromStorage` and the REAL attempts.js loop with the snapshot held
+  until after the write, in both orderings (Save set with its card patch, an
+  Edit-then-Save, Assign set after a rename, set Delete, assignment Delete,
+  Clear all, a release, createAssignment under a Refresh, the heal, a
+  tombstone, a rejected write, two pulls, a failed pull); every case proves
+  the pull itself landed a server-only control row, and the store fails any
+  pull write the server did not hold with that value at that moment. The
+  §11 sweep sanctions only the predicate-carrying pull line. A failed pull
+  now stays in the FINAL status line, and the upload button's summary stays
+  in front of its reload's line (both used to be overwritten).
   Limits: a tab loaded BEFORE this code shipped runs the
   old picker (reload open dashboards after a deploy), and the server does not
   check set contents. A set that already holds a retired item — saved before
