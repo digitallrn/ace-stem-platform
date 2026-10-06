@@ -446,20 +446,26 @@ record-derived value.
   tail each run whole inside their own response's macrotask): the snapshot
   predates the write and its rows land after it — the Set's job; or the
   rows land before the server accepts — the write's mirror step wins and
-  the action's own reload repairs the page (`toggleRelease`, the one action
-  with no reload, re-applies its flip to the record the page holds now;
-  `createAssignment` reads its whole form before its first await, since a
-  Refresh landing meanwhile re-renders the form with defaults). The helpers
-  note the key before their mirror write by convention; the order is not
-  load-bearing. `tutorTombstone` takes no part: a `tomb:` row is new and
-  permanent, the pull never prunes, and the record it marks is not edited,
-  so nothing stale can undo a deletion. Trades, stated: a key written while
-  a pull runs is skipped even when that pull's page was fresh (harmless when
-  the mirror write succeeded; when it FAILED the key stays stale until the
-  next Refresh, which the warning already asks for); a write to the same key
-  from another device inside the pull's window is missed until the next
-  Refresh — never "fix" that by comparing values; "Pulled n row(s)" excludes
-  skipped rows. Residual limits: the registry is per TAB — a second
+  the action's own reload repairs the page (`toggleRelease` and
+  `deleteAttempt` are the two actions with no reload: the first re-applies
+  its flip to the record the page holds now, the second writes its marker
+  into the `tombs` map the page holds now; `createAssignment` reads its
+  whole form before its first await, since a Refresh landing meanwhile
+  re-renders the form with defaults). The helpers note the key before their
+  mirror write by convention; the order is not load-bearing.
+  `tutorTombstone` takes no part: a `tomb:` row is new and permanent, the
+  pull never prunes, and the record it marks is not edited, so nothing stale
+  can undo a deletion. Trades, stated: a key written while a pull runs is
+  skipped even when that pull's page was fresh — harmless when the mirror
+  write succeeded; when a mirror PUT failed the key stays stale until the
+  next Refresh re-lands the server's row (the warning asks for one), while a
+  failed mirror REMOVE is not healed by any Refresh (the pull never prunes;
+  the row stays until it is deleted again, or the set save's heal drops it)
+  — unreachable in remote mode, where the mirror delete is a bare
+  localStorage.removeItem; a write to the same key from another device
+  inside the pull's window is missed until the next Refresh — never "fix"
+  that by comparing values; "Pulled n row(s)" excludes skipped rows.
+  Residual limits: the registry is per TAB — a second
   dashboard tab in the same browser shares the mirror and its stale pull is
   not told about this tab's writes (one dashboard tab per browser); the
   mirror still never prunes a row deleted from ANOTHER browser
@@ -472,8 +478,9 @@ record-derived value.
   `loadFromStorage` and the REAL attempts.js loop with the snapshot held
   until after the write, in both orderings (Save set with its card patch, an
   Edit-then-Save, Assign set after a rename, set Delete, assignment Delete,
-  Clear all, a release, createAssignment under a Refresh, the heal, a
-  tombstone, a rejected write, two pulls, a failed pull); every case proves
+  Clear all, a release and an un-release, createAssignment under a Refresh,
+  the heal, a tombstone, a rejected write, a throwing predicate, two pulls,
+  a failed pull); every case proves
   the pull itself landed a server-only control row, and the store fails any
   pull write the server did not hold with that value at that moment. The
   §11 sweep sanctions only the predicate-carrying pull line. A failed pull

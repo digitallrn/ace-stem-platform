@@ -2133,8 +2133,9 @@ const noSync = t => !/sync/i.test(t);
      rows land AFTER it — the skip Set's job: the stale row must not land.
      B: the rows land BEFORE the server accepts — the write's mirror step
      wins, and the action's own reload repairs the page's lists
-     (toggleRelease, the one action with no reload, re-applies its flip to
-     the record the page holds now). Each case here: Refresh starts and its
+     (toggleRelease and deleteAttempt, the two actions with no reload, write
+     into the record / the tombs map the page holds now). Each case here:
+     Refresh starts and its
      snapshot is TAKEN (the pre-write rows); the tutor writes; THEN the
      snapshot lands (A) — or, with the server call gated, the snapshot lands
      first and the call is opened afterwards (B). The mirror, and the page's
@@ -2294,7 +2295,9 @@ const noSync = t => !/sync/i.test(t);
     check(mine.length === 0, "the assignments list, reloaded after the pull, has no card for the code", JSON.stringify(mine));
   });
   await run(async () => {
-    /* a release, ordering A: the stale snapshot must not un-release it (or re-release an un-release) */
+    /* a release, ordering A: the stale snapshot must not un-release it (the
+       key-based skip is direction-blind, so one direction pins it here; the
+       re-apply, which carries a direction, is pinned both ways in B) */
     const { s, d } = RACE();
     const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", released: false, student: { key: C1, code: C1 } };
     s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [cl(rec)] });
@@ -2308,22 +2311,27 @@ const noSync = t => !/sync/i.test(t);
   });
   await run(async () => {
     /* a release, ordering B: the snapshot lands while the server call is in
-       flight and replaces `recs` under the toggle — toggleRelease is the one
-       action with no reload after its write, so it re-applies the flip to
-       the record the page holds now */
-    const { s, d } = RACE();
-    const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", released: false, student: { key: C1, code: C1 } };
-    s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [cl(rec)] });
-    const g = gatePut(s, "attempt:");
-    const pull = d.fns.loadFromStorage(); await s.pullStarted;
-    const tog = d.fns.toggleRelease(rec.attemptId);
-    check(await until(() => inFlight(s, "adminUpsert", rec.attemptId)), "the release write is in flight");
-    s.releasePull(); await pull;
-    check(d.state().recs[0].released === false && landed(s, d), "before the server accepts, the reloaded table shows the pre-flip copy (the snapshot was the truth then)");
-    g.open(); await tog;
-    check(s.server.get(rec.attemptId).value.released === true && s.mirror.get(rec.attemptId).released === true && d.state().recs[0].released === true,
-      "once the server accepts, the mirror holds the flip and the record the page holds NOW carries it too", JSON.stringify(d.state().recs[0]));
-    check(/^Released — /.test(status(d)), "…and the status says so", status(d));
+       flight and replaces `recs` under the toggle — toggleRelease has no
+       reload after its write, so it re-applies the flip to the record the
+       page holds now. Both directions, since the re-apply carries one: a
+       re-apply hard-coded to `true` would pass the release and ship an
+       un-release that shows Released while server and mirror hold false. */
+    for(const from of [false, true]){
+      const { s, d } = RACE();
+      const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", released: from, student: { key: C1, code: C1 } };
+      s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [cl(rec)] });
+      const g = gatePut(s, "attempt:");
+      const pull = d.fns.loadFromStorage(); await s.pullStarted;
+      const tog = d.fns.toggleRelease(rec.attemptId);
+      const word = from ? "un-release" : "release";
+      check(await until(() => inFlight(s, "adminUpsert", rec.attemptId)), "the " + word + " write is in flight");
+      s.releasePull(); await pull;
+      check(d.state().recs[0].released === from && landed(s, d), word + ": before the server accepts, the reloaded table shows the pre-flip copy (the snapshot was the truth then)");
+      g.open(); await tog;
+      check(s.server.get(rec.attemptId).value.released === !from && s.mirror.get(rec.attemptId).released === !from && d.state().recs[0].released === !from,
+        word + ": once the server accepts, the mirror holds the flip and the record the page holds NOW carries it too", JSON.stringify(d.state().recs[0]));
+      check((from ? /^Un-released — / : /^Released — /).test(status(d)), word + ": …and the status says so", status(d));
+    }
   });
   await run(async () => {
     /* createAssignment with a name typed: the profile write is its first
@@ -2382,6 +2390,34 @@ const noSync = t => !/sync/i.test(t);
     check(s.mirror.has("tomb:" + rec.attemptId) && !!d.state().tombs["tomb:" + rec.attemptId] &&
           JSON.stringify(s.mirror.get(rec.attemptId)) === JSON.stringify(s.server.get(rec.attemptId).value),
       "the marker survives the stale pull, the reloaded page reads the attempt as deleted, and the record row is byte-identical on both sides");
+  });
+  await run(async () => {
+    /* a tombstone, ordering B: the snapshot lands while the marker RPC is
+       in flight and rebuilds `tombs` from the mirror (no marker yet);
+       deleteAttempt has no reload after its write, so it writes the marker
+       into the tombs map the page holds now */
+    const { s, d } = RACE();
+    const rec = { attemptId: "attempt:202606asiav1:1:aa", status: "completed", released: false, testId: "202606asiav1", student: { key: C1, code: C1 }, answers: {} };
+    s.seedBoth(rec.attemptId, rec, C1); d.seed({ recs: [cl(rec)] });
+    const g = gateOf(); const realRpc = s.AS.adminRpc;
+    s.AS.adminRpc = async function(fn, args){ if(fn === "fn_tombstone_attempt"){ s.calls.push(["gated:adminRpc", fn]); await g.p; } return realRpc.call(this, fn, args); };
+    const pull = d.fns.loadFromStorage(); await s.pullStarted;
+    const del = d.fns.deleteAttempt(d.state().recs[0]);
+    check(await until(() => s.calls.some(c => c[0] === "gated:adminRpc")), "the marker RPC is in flight");
+    s.releasePull(); await pull;
+    check(!d.state().tombs["tomb:" + rec.attemptId] && landed(s, d), "before the server answers, the reloaded page has no marker (the snapshot was the truth then)");
+    g.open(); const r = await del;
+    check(!!r && r.ok !== false && s.mirror.has("tomb:" + rec.attemptId) && !!d.state().tombs["tomb:" + rec.attemptId] && d.state().recs.length === 1,
+      "once the server answers, the marker is in the mirror AND in the tombs map the page holds now; the record stays listed, marked");
+  });
+  await run(async () => {
+    /* the pull's own contract for a predicate that THROWS: the row is not
+       skipped (the pre-fix behaviour), never dropped — pinned at the store,
+       since no page predicate can throw today (Set.has) */
+    const s = makeStore({});
+    s.server.set("pset:px", { owner: null, value: { setId: "px", name: "P", subject: "math", refs: [] } });
+    const n = await s.AS.pullAllForTutor(k => { throw new Error("boom"); });
+    check(n === 1 && !!s.mirror.get("pset:px") && s.mirror.get("pset:px").name === "P", "a predicate that throws counts as not skipped: the row lands and is counted", String(n));
   });
   await run(async () => {
     /* a REJECTED write shields nothing: the pull's row is still the server's

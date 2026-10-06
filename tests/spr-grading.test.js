@@ -25,6 +25,7 @@ new Function("exports", gradingSrc + `
   exports.sprParseExact = sprParseExact;
   exports.sprCapacities = sprCapacities;
   exports.sprFitsExactly = sprFitsExactly;   // §4b cross-checks its own independent reading against this
+  exports.hasKey = hasKey;                   // §5: a keyed SPR answer must carry a boolean stored verdict
 `)(G);
 
 /* the rule this replaces, verbatim, so the comparison is against what
@@ -533,18 +534,27 @@ check("the two rules genuinely differ (guards against a silent revert)", totalDi
 
    SCOPE (2026-10-06). The old-rule-vs-new comparison is a STORED-GRADE
    question only for attempts sat BEFORE the new rule landed (7173765,
-   2026-08-02T21:45:03Z): an attempt sat after it was graded by the new rule
-   from its first answer, so "the old rule would have said otherwise" moves
-   no grade of its own — it flagged AS-FEX9DNU3's 202412asiav1 ma2-q15
-   "0.24" (sat 2026-09-10, stored wrong, recomputed wrong) and would flag
-   any "527.6" on 202505usv1 ma2-q10 (key shipped 2026-09-24). Post-rule
-   differences are still PRINTED, as information, never asserted on. "Sat
-   before" is startedAt (a sitting that began on the old build kept its
-   grading.js until submit), then submittedAt, then lastSavedAt; a record
-   with no readable date is compared, never skipped. The stored-verdict
-   check below is the gate for EVERY record regardless of date: a post-rule
-   attempt that was somehow graded the old way disagrees with the recompute
-   and fails there.
+   2026-08-02T21:45:03Z — the commit that ended the tolerance band; 16130c4
+   the same evening finished the rule, and the stored-verdict gate below
+   covers that hour as it covers everything): an attempt sat after it was
+   graded by the new rule from its first answer, so "the old rule would
+   have said otherwise" moves no grade of its own — it flagged
+   AS-FEX9DNU3's 202412asiav1 ma2-q15 "0.24" (sat 2026-09-10, stored wrong,
+   recomputed wrong) and would flag any "527.6" on 202505usv1 ma2-q10 (key
+   shipped 2026-09-24). "Sat before" is startedAt (then submittedAt, then
+   lastSavedAt; an undated record is compared, never skipped) and is
+   deliberately OVER-inclusive: a resume re-grades every answer under the
+   build it loads (attempts.js buildAnswers stamps `correct` on every
+   save), so a sitting that began before the cutoff and was reloaded after
+   it carries NEW-rule verdicts under a pre-rule date. Such an answer is
+   told apart by its stored verdict: when the stored grade already equals
+   the new rule's, nothing moves and it is printed as "re-graded"; only an
+   answer whose stored grade is the OLD rule's (or is unreadable) counts as
+   a change. Post-rule differences are PRINTED with their stored value, as
+   information, never asserted on. Two gates cover EVERY record regardless
+   of date: the stored verdict must equal the recompute, and every keyed
+   SPR answer must carry a boolean verdict — an unreadable one is an
+   unaudited answer and fails, like a question not in the library.
 
        node tests/spr-grading.test.js path/to/attempts-export.json           */
 const archivePath = process.argv[2];
@@ -606,8 +616,12 @@ if(!archivePath){
   let skippedTomb = 0;
   let audited = 0, sprSeen = 0, moved = [], unknown = 0, storedDisagree = [];
   /* post-rule: the differences the two rules show on attempts sat AFTER the
-     new rule landed — information, not stored-grade changes (see SCOPE) */
-  let preRule = 0, postRule = 0, postRuleDiffs = [];
+     new rule landed — information, not stored-grade changes (see SCOPE);
+     regraded: pre-rule answers whose stored grade is already the new
+     rule's (a resume re-graded them) — information too;
+     badVerdict: keyed SPR answers whose stored verdict is not a boolean —
+     unaudited, and the gate fails on them */
+  let preRule = 0, postRule = 0, postRuleDiffs = [], regraded = [], badVerdict = [];
   /* Practice-set records (kind:"set", 2026-08-31) are handled EXPLICITLY:
      their answers key by fully-qualified refs and resolve through the
      record's own frozen snapshot (setQuestions provenance) — bank refs into
@@ -657,14 +671,19 @@ if(!archivePath){
       const before = [q.correctAnswer].concat(q.altAnswers || [])
         .some(key => oldSprValueMatches(a.given, key));
       const after = G.answerMatches(q, a.given);
+      const storedOk = typeof a.correct === "boolean";
+      const who = (r.student && r.student.key) || "?";
+      if(G.hasKey(q) && !storedOk) badVerdict.push({ code: who, testId: r.testId, qid, given: a.given, stored: a.correct });
       if(before !== after){
-        (pre ? moved : postRuleDiffs).push({ code: (r.student && r.student.key) || "?", testId: r.testId, qid,
-          given: a.given, key: q.correctAnswer, before, after, satAt: r.startedAt || r.submittedAt || r.lastSavedAt || "undated" });
+        const entry = { code: who, testId: r.testId, qid, given: a.given, key: q.correctAnswer, before, after,
+          stored: a.correct, satAt: r.startedAt || r.submittedAt || r.lastSavedAt || "undated" };
+        if(!pre) postRuleDiffs.push(entry);                        // graded by the new rule from the start
+        else if(storedOk && a.correct === after) regraded.push(entry);   // a resume re-graded it under a later build: nothing moves
+        else moved.push(entry);                                    // the stored grade is the old rule's (or unreadable): it moves
       }
       /* the record's own stored verdict vs what review recomputes today */
-      if(typeof a.correct === "boolean" && a.correct !== after){
-        storedDisagree.push({ code: (r.student && r.student.key) || "?", testId: r.testId, qid,
-          given: a.given, stored: a.correct, recomputed: after });
+      if(storedOk && a.correct !== after){
+        storedDisagree.push({ code: who, testId: r.testId, qid, given: a.given, stored: a.correct, recomputed: after });
       }
     });
   });
@@ -680,16 +699,26 @@ if(!archivePath){
   }
   console.log(`    old-vs-new compared on ${preRule} record(s) sat before the new rule (${NEW_RULE_AT}); ` +
     `${postRule} record(s) sat after it were graded by the new rule from the start and are not compared`);
+  const verdict = v => v === true ? "correct" : v === false ? "wrong" : JSON.stringify(v);
   if(!moved.length) console.log("    no stored SPR answer changes grade");
   else {
     console.log(`    ${moved.length} STORED ANSWER(S) CHANGE GRADE:`);
     moved.forEach(m => console.log(`      ${m.code} ${m.testId} ${m.qid}: entered ${JSON.stringify(m.given)} ` +
-      `vs key ${JSON.stringify(m.key)} — ${m.before ? "correct" : "wrong"} -> ${m.after ? "correct" : "wrong"} (sat ${m.satAt})`));
+      `vs key ${JSON.stringify(m.key)} — stored ${verdict(m.stored)} (the old rule's: ${verdict(m.before)}) -> recomputed ${verdict(m.after)} (sat ${m.satAt})`));
+  }
+  if(regraded.length){
+    console.log(`    ${regraded.length} pre-rule answer(s) the two rules grade differently whose stored grade is ALREADY the new rule's — re-graded by a later build on resume; information only, nothing moves:`);
+    regraded.forEach(m => console.log(`      ${m.code} ${m.testId} ${m.qid}: entered ${JSON.stringify(m.given)} ` +
+      `vs key ${JSON.stringify(m.key)} — old rule ${verdict(m.before)}, stored ${verdict(m.stored)}, recomputed ${verdict(m.after)} (sat ${m.satAt})`));
   }
   if(postRuleDiffs.length){
     console.log(`    ${postRuleDiffs.length} post-rule answer(s) where the old rule would have graded differently — information only, no stored grade moved:`);
     postRuleDiffs.forEach(m => console.log(`      ${m.code} ${m.testId} ${m.qid}: entered ${JSON.stringify(m.given)} ` +
-      `vs key ${JSON.stringify(m.key)} — old rule ${m.before ? "correct" : "wrong"}, stored and recomputed ${m.after ? "correct" : "wrong"} (sat ${m.satAt})`));
+      `vs key ${JSON.stringify(m.key)} — old rule ${verdict(m.before)}, stored ${verdict(m.stored)}, recomputed ${verdict(m.after)} (sat ${m.satAt})`));
+  }
+  if(badVerdict.length){
+    console.log(`    ${badVerdict.length} keyed SPR answer(s) whose STORED verdict is not a boolean — unaudited:`);
+    badVerdict.forEach(b => console.log(`      ${b.code} ${b.testId} ${b.qid}: entered ${JSON.stringify(b.given)}, stored ${JSON.stringify(b.stored)}`));
   }
   if(storedDisagree.length){
     console.log(`    ${storedDisagree.length} record(s) where the STORED verdict and the recomputed one differ:`);
@@ -697,8 +726,9 @@ if(!archivePath){
   } else if(sprSeen){
     console.log("    every stored SPR verdict still matches what Review Mode recomputes");
   }
-  check("no stored SPR answer changes grade (attempts sat before the new rule)", moved.length, 0);
+  check("no stored SPR answer changes grade (attempts sat before the new rule, stored grade the old rule's)", moved.length, 0);
   check("stored verdicts agree with recomputed ones (every record, any date)", storedDisagree.length, 0);
+  check("every keyed SPR answer carries a boolean stored verdict (an unreadable one is unaudited)", badVerdict.length, 0);
   /* An answer whose test is not in the library was counted and printed but
      never asserted on — so an export for a test this checkout does not carry
      audited nothing and still passed. It cannot be graded here, so it is an

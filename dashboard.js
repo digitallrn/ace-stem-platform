@@ -1153,8 +1153,9 @@ window.Dashboard = (function(){
       /* a Refresh that landed while the server call was in flight replaced
          `recs` from the mirror (the pre-flip copy): the write won on the
          server and in the mirror, so the record the page holds NOW carries
-         the flip too — this is the one tutor action that does not reload
-         after its write */
+         the flip too — this and deleteAttempt are the two tutor actions
+         that do not reload after their write (deleteAttempt writes its
+         marker into the `tombs` map the page holds now, the same way) */
       const cur = recs.find(x => x.attemptId === attemptId);
       if(cur && cur !== r) cur.released = r.released;
     }

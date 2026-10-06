@@ -187,8 +187,9 @@ function choiceBodyHtml(c, idx, savedC){
   Score Details, whose Questions Overview prints LETTERS from the stored
   index (`answerLetter` / `correctLabel`, app.js:4543-4550), which is what
   College Board's own report prints for every MCQ.
-- **Dashboard**: letters everywhere (`givenLabel` dashboard.js:803-807, item
-  analysis :1304, attempt detail :3184-3197); it renders no choice content.
+- **Dashboard**: letters everywhere (`givenLabel`; the `wrongLbl` block in
+  `viewItems`; the `correctLbl` / `givenLabel` lines of the attempt detail
+  pane); it renders no choice content.
 - **Grading**: untouched. `answerMatches` for `mcq` is index equality;
   records store `given: idx`; nothing on the scoring path reads choice
   content — which is also why the renderer can ship first and the converter
