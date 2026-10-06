@@ -322,8 +322,8 @@ if(!totalDiffs){
    answer that does not fit: a decimal that doesn't fit in the provided space
    is entered by truncating OR rounding it, to as many digits as the field
    holds. 202505usv1 ma2-q10's answer is 297 + 27*sqrt(73) = 527.6881...
-   (R1 and build_202505usv1.py print "527.68766…" — their steps are right,
-   the final addition slipped; pinned below), and its keys 527.69 / 527.68
+   (R1 — corrected 2026-10-02, it had read 527.68766… — and
+   build_202505usv1.py both print 527.6881…; pinned below), and its keys 527.69 / 527.68
    are that answer's rounding and truncation to two places. Neither can be
    written in the field (six characters), so the field holds ONE decimal and both
    527.6 (truncation) and 527.7 (rounding) are correct entries. David's ruling
@@ -531,8 +531,29 @@ check("the two rules genuinely differ (guards against a silent revert)", totalDi
    change", and to whether Review Mode's recomputed correctness still agrees
    with the score stored on the record.
 
+   SCOPE (2026-10-06). The old-rule-vs-new comparison is a STORED-GRADE
+   question only for attempts sat BEFORE the new rule landed (7173765,
+   2026-08-02T21:45:03Z): an attempt sat after it was graded by the new rule
+   from its first answer, so "the old rule would have said otherwise" moves
+   no grade of its own — it flagged AS-FEX9DNU3's 202412asiav1 ma2-q15
+   "0.24" (sat 2026-09-10, stored wrong, recomputed wrong) and would flag
+   any "527.6" on 202505usv1 ma2-q10 (key shipped 2026-09-24). Post-rule
+   differences are still PRINTED, as information, never asserted on. "Sat
+   before" is startedAt (a sitting that began on the old build kept its
+   grading.js until submit), then submittedAt, then lastSavedAt; a record
+   with no readable date is compared, never skipped. The stored-verdict
+   check below is the gate for EVERY record regardless of date: a post-rule
+   attempt that was somehow graded the old way disagrees with the recompute
+   and fails there.
+
        node tests/spr-grading.test.js path/to/attempts-export.json           */
 const archivePath = process.argv[2];
+const NEW_RULE_AT = "2026-08-02T21:45:03Z";            // commit 7173765's timestamp
+const NEW_RULE_MS = Date.parse(NEW_RULE_AT);
+function satBeforeNewRule(r){
+  const at = [r.startedAt, r.submittedAt, r.lastSavedAt].find(v => typeof v === "string" && !isNaN(Date.parse(v)));
+  return at === undefined ? true : Date.parse(at) < NEW_RULE_MS;   // undated: audited, never skipped
+}
 console.log("\n--- 5. stored-attempt audit ---");
 if(!archivePath){
   console.log("    no archive given — run with a dashboard export to audit real records:");
@@ -584,6 +605,9 @@ if(!archivePath){
     tombCodes.has(String((r.student && r.student.key) || "").toUpperCase());
   let skippedTomb = 0;
   let audited = 0, sprSeen = 0, moved = [], unknown = 0, storedDisagree = [];
+  /* post-rule: the differences the two rules show on attempts sat AFTER the
+     new rule landed — information, not stored-grade changes (see SCOPE) */
+  let preRule = 0, postRule = 0, postRuleDiffs = [];
   /* Practice-set records (kind:"set", 2026-08-31) are handled EXPLICITLY:
      their answers key by fully-qualified refs and resolve through the
      record's own frozen snapshot (setQuestions provenance) — bank refs into
@@ -597,6 +621,8 @@ if(!archivePath){
     if(!r || !r.answers || !r.testId) return;
     if(isTombstoned(r)){ skippedTomb++; return; }     // deleted: not audited, counted below
     audited++;
+    const pre = satBeforeNewRule(r);
+    if(pre) preRule++; else postRule++;
     const isSet = r.kind === "set";
     const provByRef = {};
     if(isSet){
@@ -632,8 +658,8 @@ if(!archivePath){
         .some(key => oldSprValueMatches(a.given, key));
       const after = G.answerMatches(q, a.given);
       if(before !== after){
-        moved.push({ code: (r.student && r.student.key) || "?", testId: r.testId, qid,
-          given: a.given, key: q.correctAnswer, before, after });
+        (pre ? moved : postRuleDiffs).push({ code: (r.student && r.student.key) || "?", testId: r.testId, qid,
+          given: a.given, key: q.correctAnswer, before, after, satAt: r.startedAt || r.submittedAt || r.lastSavedAt || "undated" });
       }
       /* the record's own stored verdict vs what review recomputes today */
       if(typeof a.correct === "boolean" && a.correct !== after){
@@ -652,11 +678,18 @@ if(!archivePath){
     console.log(`    ${setUnresolved} SET answer(s) whose snapshot ref could not be resolved:`);
     setUnresolvedDetail.forEach(d => console.log("      " + d));
   }
+  console.log(`    old-vs-new compared on ${preRule} record(s) sat before the new rule (${NEW_RULE_AT}); ` +
+    `${postRule} record(s) sat after it were graded by the new rule from the start and are not compared`);
   if(!moved.length) console.log("    no stored SPR answer changes grade");
   else {
     console.log(`    ${moved.length} STORED ANSWER(S) CHANGE GRADE:`);
     moved.forEach(m => console.log(`      ${m.code} ${m.testId} ${m.qid}: entered ${JSON.stringify(m.given)} ` +
-      `vs key ${JSON.stringify(m.key)} — ${m.before ? "correct" : "wrong"} -> ${m.after ? "correct" : "wrong"}`));
+      `vs key ${JSON.stringify(m.key)} — ${m.before ? "correct" : "wrong"} -> ${m.after ? "correct" : "wrong"} (sat ${m.satAt})`));
+  }
+  if(postRuleDiffs.length){
+    console.log(`    ${postRuleDiffs.length} post-rule answer(s) where the old rule would have graded differently — information only, no stored grade moved:`);
+    postRuleDiffs.forEach(m => console.log(`      ${m.code} ${m.testId} ${m.qid}: entered ${JSON.stringify(m.given)} ` +
+      `vs key ${JSON.stringify(m.key)} — old rule ${m.before ? "correct" : "wrong"}, stored and recomputed ${m.after ? "correct" : "wrong"} (sat ${m.satAt})`));
   }
   if(storedDisagree.length){
     console.log(`    ${storedDisagree.length} record(s) where the STORED verdict and the recomputed one differ:`);
@@ -664,8 +697,8 @@ if(!archivePath){
   } else if(sprSeen){
     console.log("    every stored SPR verdict still matches what Review Mode recomputes");
   }
-  check("no stored SPR answer changes grade", moved.length, 0);
-  check("stored verdicts agree with recomputed ones", storedDisagree.length, 0);
+  check("no stored SPR answer changes grade (attempts sat before the new rule)", moved.length, 0);
+  check("stored verdicts agree with recomputed ones (every record, any date)", storedDisagree.length, 0);
   /* An answer whose test is not in the library was counted and printed but
      never asserted on — so an export for a test this checkout does not carry
      audited nothing and still passed. It cannot be graded here, so it is an
