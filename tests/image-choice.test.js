@@ -74,6 +74,8 @@ console.log("--- 1. text choices render as before ---");
   const plainText = '<span class="ctext">' + fmt("text", { bigInline: true }) + "</span>";
   check(choiceBodyHtml("text", 1, { 1: null }) === plainText, "a null saved slot means 'no blob' for a text choice");
   check(choiceBodyHtml("text", 1, { 0: HOSTILE, 2: HOSTILE }) === plainText, "a blob in ANOTHER choice's slot is not this choice's");
+  check(choiceBodyHtml("text", 1, { 1: "" }) === plainText && choiceBodyHtml("text", 1, { 1: 7 }) === plainText,
+    "an EMPTY saved slot (or a non-string one) is 'no blob' — a crafted record cannot blank a text choice");
   check(choiceBodyHtml("text", 1, undefined) === plainText && choiceBodyHtml("text", 1, null) === plainText && choiceBodyHtml("text", 1, "nope") === plainText,
     "no map, a null map, or a non-object map all mean 'no blob'");
 }
@@ -149,12 +151,22 @@ console.log("--- 5. the seam is where the choice markup lives ---");
   check(branch.indexOf("choiceBodyHtml(c, idx, savedMap)") !== -1, "buildQuestionHtml's choice branch renders every choice through choiceBodyHtml, handing it the whole saved map");
   check(branch.indexOf("fmt(") === -1 && branch.indexOf('class="ctext"') === -1 && branch.indexOf("sanitizeSavedHtml(") === -1,
     "…and no longer calls fmt(), sanitizeSavedHtml() or writes .ctext itself (one render site, one rule)");
-  /* the branch must never HOLD a blob: no indexing of the map, no savedC, and
-     ${body} the only interpolation between the letter badge and the mark */
-  check(!/savedMap\s*\[|choiceHtml\s*\[[^\]]*\]\s*\[|\bsavedC\b/.test(branch), "…never indexes the saved map or names a slot itself (a crafted blob has nowhere to land in the branch)");
-  const between = branch.split("</span>").slice(1).join("</span>");     // after the first clabel span
-  const interps = (between.match(/\$\{[^}]*\}/g) || []).filter(s => !/^\$\{(idx|letter|elim|sel|mark|kind|isKey)\b/.test(s) && !/\? "[^"]*" : ""\}$/.test(s));
-  check(interps.every(s => s === "${body}" || /^\$\{(idx|letter)\}$/.test(s)), "…and ${body} is the only markup interpolated into the choice box after the letter badge", interps.join(" | "));
+  /* the branch must never HOLD a blob. An EXACT-SET pin, not a prefix test:
+     every `${…}` the branch interpolates must be one of the eleven literal
+     strings it uses today (a `${sel ? blob : ""}` or `${letter + blob}`
+     would pass a prefix check and would never render in the browser proof,
+     whose hostile slots can sit on an unselected choice); the map name
+     appears exactly once (the call), and neither choiceHtml nor savedC is
+     named anywhere in it. Seam-level mutants are the seam checks' business. */
+  const ALLOWED = ['${idx}', '${letter}', '${body}', '${mark}', '${kind}',
+    '${elim ? " is-elim" : ""}', '${isKey ? "rv-key" : ""}', '${sel && !isKey ? "rv-wrong" : ""}',
+    '${elim ? "eliminated" : ""}', '${sel?"selected":""}', '${elim?"eliminated":""}'];
+  const interps = branch.match(/\$\{[^}]*\}/g) || [];
+  const stray = interps.filter(s => ALLOWED.indexOf(s) === -1);
+  check(interps.length >= 11 && stray.length === 0, "every interpolation in the branch is one of its eleven known literals — nothing else can reach the markup", stray.join(" | "));
+  check((branch.match(/\bsavedMap\b/g) || []).length === 1 && !/\bchoiceHtml\b|\bsavedC\b/.test(branch),
+    "the branch names the saved map exactly once (handing it to the seam) and never choiceHtml or a slot");
+  check(ALLOWED.every(s => interps.indexOf(s) !== -1), "…and still uses each of the eleven (the pin is not stale)", ALLOWED.filter(s => interps.indexOf(s) === -1).join(" | "));
   const bqHead = bq.slice(0, bq.indexOf("q.choices.map("));
   check(/const savedMap = \(ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(bqHead), "the saved map is looked up once per question, by question id only");
   check(/choice-img/.test(branch), "an image choice's .choice carries choice-img");

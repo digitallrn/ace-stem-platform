@@ -2948,7 +2948,10 @@
        the way in like every stored-markup path — a choice blob is
        record-derived and therefore untrusted (ATTEMPTS-SPEC 7). */
     const savedC = (saved && typeof saved === "object") ? saved[idx] : undefined;
-    const inner = (savedC !== undefined && savedC !== null) ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
+    /* only a non-empty STRING is a blob: restoreAnnotations keeps strings
+       alone, and the UI never saves an empty .ctext (it always holds fmt
+       output), so an empty slot is "no blob", never a blanked choice */
+    const inner = (typeof savedC === "string" && savedC !== "") ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
     return `<span class="ctext">${inner}</span>`;
   }
 

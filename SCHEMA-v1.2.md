@@ -183,10 +183,12 @@ A row reaches the clean JSON only if **all** hold; otherwise it lands in
 4. No raw newlines/tabs in any text cell.
 5. All tokens known, properly paired/nested; `{{row}}` only inside tables.
 6. Every `{{m}}`/`{{mm}}` segment non-empty with balanced braces and no `$`.
-7. `needs_figure=1` ⇒ `figure` present AND matching
-   `^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*$` (2026-10-07:
-   the row gate refuses what the renderer refuses; every shipped figure
-   already matches).
+7. `needs_figure=1` ⇒ `figure` non-blank; and ANY non-blank `figure` must
+   match `^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*$`
+   (2026-10-07: the renderer refuses anything else with a "Figure
+   unavailable" frame; every shipped figure already matches). The grammar
+   half is not in the converter yet — it checks presence only — and lands
+   with the converter commit, like rule 8's gates.
 8. **Image choices (2026-10-07).** A picture choice comes from the
    `choice_a_img` … `choice_d_img` columns (never the `choice_*` text cells, so
    no prose gate ever sees base64) and is emitted as `{"image": s}` with `s`

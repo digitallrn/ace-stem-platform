@@ -28,7 +28,12 @@
    in progress?" panel, whose wording is asserted both ways (gate asserted,
    never confirmed — the proof writes no marker of its own).
    NOTE: run this with local mode active (no config.js beside the page), since
-   it uses the acestem-admin route, which a remote deployment removes.
+   it uses the acestem-admin route, which a remote deployment removes — and
+   open the page WITHOUT ?devstorage=1: the proof installs its own
+   window.storage shim, and that switch takes precedence over it
+   (attempts.js mode()), so the app would read devstore: keys while the proof
+   plants as: keys and it would throw "no Past card rendered". The dist
+   carries no config.js (assemble.py SKIP_INLINE), so it is local already.
    4. Reload the page afterwards (the script cleans its own storage keys).   */
 (function(){
   "use strict";
@@ -235,6 +240,10 @@
     }
 
     const { rec, sprCount } = poisonedRecord(test, { annotations: hostileAnnotations });
+    /* the image item gets a SELECTED answer on a hostile slot: poisonedRecord
+       nulls every fourth question's `given`, and a blob interpolation gated
+       on the student's pick would otherwise have no render site here */
+    if(imgQ && rec.answers[imgQ.id]){ rec.answers[imgQ.id].given = 1; rec.answers[imgQ.id].firstGiven = null; rec.answers[imgQ.id].blankReason = null; }
     localStorage.setItem("as:" + rec.attemptId, JSON.stringify(rec));
 
     /* display-name profile row (student:<CODE>) — a NEW untrusted string that
@@ -445,9 +454,10 @@
         results.push({ surface: "Hostile choiceHtml on an image choice has no render site (blob neither shown nor sanitized, nothing fired)",
           pass: payload === 0 && handlers === 0 && urlAttrs === 0 && !window.__XSS_FIRED,
           note: payload || handlers || urlAttrs ? `survived: ${payload} payload element(s), ${handlers} handler(s), ${urlAttrs} url attr(s)` : "no trace of the blob in any image choice" });
-        const marks = document.querySelectorAll("#paneRight .choice .rv-mark").length;
-        results.push({ surface: "Review marks render beside image choices as beside text",
-          pass: marks >= 1, note: `${marks} .rv-mark element(s) on the image item` });
+        const marks = [...document.querySelectorAll("#paneRight .choice .rv-mark")];
+        const pickMarked = !!document.querySelector('#paneRight .choice[data-idx="1"] .rv-mark');
+        results.push({ surface: "Review marks render beside image choices as beside text (the student's pick on a hostile slot is marked)",
+          pass: marks.length >= 1 && pickMarked, note: `${marks.length} .rv-mark element(s); choice B (selected, hostile slot) marked: ${pickMarked}` });
         const AH = window.AppSanitize && window.AppSanitize.annotationHost;
         const imgHost = AH && imgs[0] ? AH(imgs[0]) : "no-fn";
         const cimgHost = AH ? AH(choices[0].querySelector(".cimg")) : "no-fn";

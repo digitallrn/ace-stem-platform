@@ -139,7 +139,11 @@ function isImageChoice(c){ return !!c && typeof c === "object" && !Array.isArray
 function choiceImageSrc(c){
   return (isImageChoice(c) && typeof c.image === "string" && CHOICE_IMAGE_RE.test(c.image)) ? c.image : null;
 }
-function choiceBodyHtml(c, idx, savedC){
+/* `saved` is the record's per-question map of highlighted-choice markup
+   (ms.choiceHtml[q.id]) — record-derived, untrusted. It is handed in whole
+   and indexed HERE, on the text path only, so the caller never holds a
+   blob and an image choice's slot is never read at all. */
+function choiceBodyHtml(c, idx, saved){
   const letter = String.fromCharCode(65 + idx);
   if(typeof c !== "string"){
     const src = choiceImageSrc(c);
@@ -148,16 +152,21 @@ function choiceBodyHtml(c, idx, savedC){
       ? `<span class="cimg"><img class="choice-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" draggable="false"></span>`
       : `<span class="cimg cimg-missing" role="img" aria-label="Choice ${letter} image unavailable">Image unavailable</span>`;
   }
-  const inner = (savedC !== undefined && savedC !== null) ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
+  const savedC = (saved && typeof saved === "object") ? saved[idx] : undefined;
+  /* only a non-empty STRING is a blob: an empty slot is "no blob", never a blanked choice */
+  const inner = (typeof savedC === "string" && savedC !== "") ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
   return `<span class="ctext">${inner}</span>`;
 }
 ```
 
-- `buildQuestionHtml`'s choice branch renders every choice through
-  `choiceBodyHtml` and adds `choice-img` to an image choice's `.choice`; the
-  `clabel`, the review marks and the row's `elim-btn` / `elim-undo` are
-  unchanged. No `id="figImg"` and no `.fig-imgwrap` on a choice image — those
-  are the stem figure's singletons.
+- `buildQuestionHtml` looks the per-question `choiceHtml` map up ONCE, by
+  question id, and hands it whole to `choiceBodyHtml` for every choice; the
+  branch itself never indexes the map or interpolates anything but the
+  seam's `${body}` (pinned by an exact-set check on its interpolations). It
+  adds `choice-img` to an image choice's `.choice`; the `clabel`, the review
+  marks and the row's `elim-btn` / `elim-undo` are unchanged. No
+  `id="figImg"` and no `.fig-imgwrap` on a choice image — those are the stem
+  figure's singletons.
 - CSS: `.choice .cimg{flex:0 1 auto;min-width:0;position:relative;display:inline-flex}`,
   `.choice .cimg img{display:block;width:auto;max-width:min(100%,320px);max-height:220px;-webkit-user-drag:none;user-select:none}`,
   `.choice.eliminated .cimg img{opacity:.35}` (the edge-to-edge strike still
@@ -267,7 +276,7 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
 
 | Where | Change |
 |---|---|
-| app.js `choiceBodyHtml` + `buildQuestionHtml` choice branch | the seam above; `choice-img`; the `choiceHtml` lookup stays, ignored for a non-string |
+| app.js `choiceBodyHtml` + `buildQuestionHtml` choice branch | the seam above; `choice-img`; the per-question `choiceHtml` map is looked up once in the branch and handed whole to the seam, which indexes it only for a text choice |
 | app.js `annotationHost` | NO change; exposed on `window.AppSanitize` for the proof |
 | app.js DROP_ELEMENTS comment | one clause |
 | styles.css after `.choice.eliminated .hl` | the `.cimg` rules; the 2×2 grid commented beside them |
@@ -282,26 +291,33 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
 
 ## 7. Tests
 
-- `node tests/image-choice.test.js`: 58 checks — text path byte-for-byte
-  (the saved map indexed only on the text path, only at this choice's slot);
+- `node tests/image-choice.test.js`: 60 checks — text path byte-for-byte
+  (the saved map indexed only on the text path, only at this choice's slot;
+  an empty or non-string slot is "no blob");
   image path with the exact source, no `.ctext`, identical output with a
   hostile blob in every slot, and a trapping Proxy proving the map is never
   even indexed; the reserved alt; the grammar (13 rejections); ten
   malformed entries → placeholder, no throw (including an array holding a
   valid URI, which only the typeof guard keeps out); the seam is the one
-  render site and the branch never indexes the map or interpolates anything
-  but `${body}`; render.js emits no `img`; the proof embeds the fixture
+  render site and the branch's interpolations are pinned as an EXACT SET of
+  its eleven literals (the tripwire for the branch; a prefix test would let
+  a `${sel ? blob : ""}` through, and the proof's hostile slots can sit on
+  an unselected choice — so the proof now also selects a hostile slot on
+  the image item); render.js emits no `img`; the proof embeds the fixture
   verbatim; and (0792fe7) the stem-figure guard — `figureSrc` accepts a
   data URI and refuses the rest, `figureFrameHtml` renders the guarded
   source or the placeholder frame without toolbar, the handlers and the
   overlay use it, and every shipped figure passes unchanged: 585 across
   current builds (195), banks (63) and archived builds (327); ruling 9.4's
   "258" is the student-servable subset, current forms plus banks.
-  Mutants that fail it: the typeof guard dropped; the regex loosened to
-  `^data:`; the saved slot read before the type branch; `<img>` inside
-  `.ctext`; `draggable` dropped; alt unescaped; the branch rendering text
-  choices itself; the branch interpolating a blob itself; the branch
-  looking a slot up by index.
+  Mutants that fail it (sixteen): the typeof guard dropped; the regex
+  loosened to `^data:`; the saved slot read before the type branch; `<img>`
+  inside `.ctext`; `draggable` dropped; alt unescaped; the branch rendering
+  text choices itself; the branch interpolating a blob itself; the branch
+  looking a slot up by index; a `sel`-gated blob before `${body}`; a
+  comma-expression blob after it; the map's values appended to the body,
+  unconditionally and `sel`-gated; a blob folded into `${letter}`; a slot
+  re-wrapped as a one-entry map; an empty slot treated as a blob.
 - `node tests/keep-classes.test.js`: every image choice in every form and
   bank (Math included) matches the renderer's grammar inside a 4-entry MCQ,
   and no choices array anywhere holds a null, number or array entry; the
