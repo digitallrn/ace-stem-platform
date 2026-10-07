@@ -449,7 +449,6 @@
         results.push({ surface: "Review marks render beside image choices as beside text",
           pass: marks >= 1, note: `${marks} .rv-mark element(s) on the image item` });
         const AH = window.AppSanitize && window.AppSanitize.annotationHost;
-        const textChoice = (() => { for(const c of [...root.querySelectorAll("#sdQuestions")]){ } return null; })();
         const imgHost = AH && imgs[0] ? AH(imgs[0]) : "no-fn";
         const cimgHost = AH ? AH(choices[0].querySelector(".cimg")) : "no-fn";
         results.push({ surface: "annotationHost refuses an image choice as a region (the real function)",
@@ -488,6 +487,39 @@
           note: svgImg ? "svg+xml through <img>; __XSS_FIRED=" + window.__XSS_FIRED : "no <img> rendered for the svg source" });
         imgQ.choices = IMG_URIS.map(u => ({ image: u }));
         $("rvBackBtn").click(); await wait(350);
+
+        /* THE STEM FIGURE GUARD (0792fe7): q.figure goes through the same
+           grammar. A bad source must render the "Figure unavailable" frame —
+           no #figImg, no toolbar, no request — and review must still have
+           been ENTERED (a render that threw would bounce back to Score
+           Details with a misattributed note); a good source renders the
+           image with its toolbar. Planted on the synthetic item (a Math
+           question, so the frame sits in the right pane). */
+        const hadFigure = Object.prototype.hasOwnProperty.call(imgQ, "figure") ? imgQ.figure : undefined;
+        const BAD_FIGS = ["https://evil.example/figure.png", "javascript:window.__XSS_FIRED=true", "data:text/html;base64,PHNjcmlwdD4=", "data:image/png;base64, " + IMG_URIS[0].slice(22), 5];
+        const figOutcomes = [];
+        for(const bad of BAD_FIGS){
+          imgQ.figure = bad;
+          root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
+          await wait(450);
+          const entered = !$("screen-test").classList.contains("hidden");
+          figOutcomes.push({ bad: String(bad).slice(0, 24), entered, missing: !!document.querySelector("#paneRight .fig-missing"),
+            img: !!$("figImg"), toolbar: !!document.querySelector("#paneRight .fig-toolbar") });
+          $("rvBackBtn").click(); await wait(300);
+        }
+        const figFetched = performance.getEntriesByType("resource").filter(e => /evil\.example/.test(e.name)).length;
+        results.push({ surface: "Bad stem-figure sources render the placeholder frame (review entered, no #figImg, no toolbar, no request)",
+          pass: figOutcomes.length === BAD_FIGS.length && figOutcomes.every(o => o.entered && o.missing && !o.img && !o.toolbar) && figFetched === 0 && !window.__XSS_FIRED,
+          note: JSON.stringify(figOutcomes) + " requests=" + figFetched });
+        imgQ.figure = IMG_URIS[0];
+        root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
+        await wait(450);
+        const goodImg = $("figImg");
+        results.push({ surface: "A grammar-valid stem figure renders with its toolbar through the guard",
+          pass: !!goodImg && goodImg.getAttribute("src") === IMG_URIS[0] && !!document.querySelector("#paneRight .fig-toolbar") && !document.querySelector("#paneRight .fig-missing"),
+          note: goodImg ? "figImg src is the planted data URI; toolbar present" : "no #figImg rendered" });
+        $("rvBackBtn").click(); await wait(300);
+        if(hadFigure === undefined) delete imgQ.figure; else imgQ.figure = hadFigure;
       }
       root.querySelector(`.sd-chip[data-mi="${annMi}"][data-qi="${annQi}"]`).click();
       await wait(450);

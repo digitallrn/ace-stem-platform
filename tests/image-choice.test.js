@@ -21,8 +21,12 @@
    choices by .ctext.
 
    Mutants that must fail it (APP_SRC=<file> points at a scratch copy):
-     drop the `typeof c.image === "string"` check; loosen the regex to ^data:;
-     read savedC before the type branch; put the <img> inside .ctext.          */
+     drop the `typeof c.image === "string"` check (an array whose String()
+     is a valid URI would then render); loosen the regex to ^data:; read the
+     saved slot before the type branch; put the <img> inside .ctext; have
+     buildQuestionHtml's branch index the saved map or interpolate a blob
+     itself (the map is handed to the seam whole; only the seam's text path
+     indexes it).                                                              */
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -64,11 +68,14 @@ console.log("--- 1. text choices render as before ---");
   const plain = choiceBodyHtml("the {{i}}only{{/i}} answer", 1);
   check(plain === '<span class="ctext">' + fmt("the {{i}}only{{/i}} answer", { bigInline: true }) + "</span>",
     "a text choice is fmt(c, {bigInline:true}) inside .ctext", plain);
-  const saved = choiceBodyHtml("text", 1, HOSTILE);
+  const saved = choiceBodyHtml("text", 1, { 1: HOSTILE });
   check(saved === '<span class="ctext"><sanitized>' + HOSTILE + "</sanitized></span>",
-    "a text choice with a saved blob renders the SANITIZED blob instead (today's replay path)", saved);
-  check(choiceBodyHtml("text", 1, null) === plain.replace(fmt("the {{i}}only{{/i}} answer", { bigInline: true }), fmt("text", { bigInline: true })),
-    "a null saved slot means 'no blob' for a text choice");
+    "a text choice with a saved blob in ITS slot renders the SANITIZED blob instead (today's replay path)", saved);
+  const plainText = '<span class="ctext">' + fmt("text", { bigInline: true }) + "</span>";
+  check(choiceBodyHtml("text", 1, { 1: null }) === plainText, "a null saved slot means 'no blob' for a text choice");
+  check(choiceBodyHtml("text", 1, { 0: HOSTILE, 2: HOSTILE }) === plainText, "a blob in ANOTHER choice's slot is not this choice's");
+  check(choiceBodyHtml("text", 1, undefined) === plainText && choiceBodyHtml("text", 1, null) === plainText && choiceBodyHtml("text", 1, "nope") === plainText,
+    "no map, a null map, or a non-object map all mean 'no blob'");
 }
 
 console.log("--- 2. image choices render from test data only ---");
@@ -78,8 +85,14 @@ console.log("--- 2. image choices render from test data only ---");
   check(out.every((h, i) => h === `<span class="cimg"><img class="choice-image" src="${F.URIS[i]}" alt="Choice ${String.fromCharCode(65 + i)} (image)" draggable="false"></span>`),
     "an image choice is one <img> with the EXACT fixture source, the app's neutral alt, draggable off, inside .cimg", out[0]);
   check(out.every(h => h.indexOf("ctext") === -1), "…and no .ctext anywhere in it (so it is never an annotation region)");
-  const withBlob = q.choices.map((c, i) => choiceBodyHtml(c, i, HOSTILE));
-  check(withBlob.every((h, i) => h === out[i]), "a hostile blob in the saved slot changes NOTHING: the slot is never read for an image choice");
+  const hostileMap = { 0: HOSTILE, 1: HOSTILE, 2: HOSTILE, 3: HOSTILE };
+  const withBlob = q.choices.map((c, i) => choiceBodyHtml(c, i, hostileMap));
+  check(withBlob.every((h, i) => h === out[i]), "a hostile blob in every saved slot changes NOTHING: the slot is never read for an image choice");
+  /* a map that TRAPS reads proves the slot is never touched, not merely ignored */
+  let touched = 0;
+  const trap = new Proxy({}, { get(){ touched++; return HOSTILE; }, has(){ touched++; return true; } });
+  q.choices.forEach((c, i) => choiceBodyHtml(c, i, trap));
+  check(touched === 0, "…and the map is never even indexed for an image choice (a trapping Proxy sees no read)", String(touched));
   check(withBlob.every(h => h.indexOf("PWN") === -1 && h.indexOf("onerror") === -1 && h.indexOf("sanitized") === -1),
     "…no payload, and not even the sanitizer runs for it");
   const alt = choiceBodyHtml({ image: F.URIS[0], alt: ' a <rising> "line" ' }, 0);
@@ -115,7 +128,11 @@ console.log("--- 3. the grammar ---");
 console.log("--- 4. malformed entries: placeholder, never a throw ---");
 {
   const junk = { "null": null, "number": 5, "array": ["data:image/png;base64,iVBORw0KGgo="], "empty object": {}, "image not a string": { image: 5 },
-    "image fails the grammar": { image: "https://evil.example/x.png" }, "undefined": undefined, "boolean": true };
+    "image fails the grammar": { image: "https://evil.example/x.png" }, "undefined": undefined, "boolean": true,
+    /* an array whose String() is a grammar-valid URI: RegExp.test coerces, so
+       only the typeof guard keeps this from rendering a real <img> */
+    "image is an array holding a valid URI": { image: [F.URIS[0]] },
+    "image is a String object": { image: new String(F.URIS[0]) } };
   Object.keys(junk).forEach(k => {
     let html = null, threw = null;
     try{ html = choiceBodyHtml(junk[k], 1); }catch(e){ threw = e; }
@@ -129,9 +146,17 @@ console.log("--- 5. the seam is where the choice markup lives ---");
 {
   const bq = extractFn(appSrc, "buildQuestionHtml");
   const branch = bq.slice(bq.indexOf("q.choices.map("), bq.indexOf("}).join(\"\") + '</div>'"));
-  check(branch.indexOf("choiceBodyHtml(c, idx, savedC)") !== -1, "buildQuestionHtml's choice branch renders every choice through choiceBodyHtml");
+  check(branch.indexOf("choiceBodyHtml(c, idx, savedMap)") !== -1, "buildQuestionHtml's choice branch renders every choice through choiceBodyHtml, handing it the whole saved map");
   check(branch.indexOf("fmt(") === -1 && branch.indexOf('class="ctext"') === -1 && branch.indexOf("sanitizeSavedHtml(") === -1,
     "…and no longer calls fmt(), sanitizeSavedHtml() or writes .ctext itself (one render site, one rule)");
+  /* the branch must never HOLD a blob: no indexing of the map, no savedC, and
+     ${body} the only interpolation between the letter badge and the mark */
+  check(!/savedMap\s*\[|choiceHtml\s*\[[^\]]*\]\s*\[|\bsavedC\b/.test(branch), "…never indexes the saved map or names a slot itself (a crafted blob has nowhere to land in the branch)");
+  const between = branch.split("</span>").slice(1).join("</span>");     // after the first clabel span
+  const interps = (between.match(/\$\{[^}]*\}/g) || []).filter(s => !/^\$\{(idx|letter|elim|sel|mark|kind|isKey)\b/.test(s) && !/\? "[^"]*" : ""\}$/.test(s));
+  check(interps.every(s => s === "${body}" || /^\$\{(idx|letter)\}$/.test(s)), "…and ${body} is the only markup interpolated into the choice box after the letter badge", interps.join(" | "));
+  const bqHead = bq.slice(0, bq.indexOf("q.choices.map("));
+  check(/const savedMap = \(ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(bqHead), "the saved map is looked up once per question, by question id only");
   check(/choice-img/.test(branch), "an image choice's .choice carries choice-img");
   const ah = extractFn(appSrc, "annotationHost");
   check(ah.indexOf('closest(".ctext")') !== -1 && ah.indexOf("cimg") === -1, "annotationHost resolves a choice by .ctext and knows nothing of .cimg — an image choice is no region");

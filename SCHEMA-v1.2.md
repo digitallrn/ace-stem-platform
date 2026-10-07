@@ -71,7 +71,7 @@ literally (LaTeX); never escape them.
 | `answer` | ✓ | MCQ: single letter `A`–`D`. SPR: the primary printed key (number or fraction) |
 | `alt_answers` |  | SPR only: additional acceptable values, pipe-separated, e.g. `4\|5` for "one possible value" questions. Leave blank if the key is single-valued |
 | `needs_figure` |  | `1` if the question or passage references a visual (graph, figure, diagram, table-as-image) that must be shown. Blank otherwise |
-| `figure` |  | URL or data-URI of the captured figure image (may be blank even when `needs_figure=1` — the converter will route that to review) |
+| `figure` |  | data URI of the captured figure image, matching §5 rule 8's grammar — no URLs (may be blank even when `needs_figure=1` — the converter will route that to review) |
 | `figure_caption` |  | caption line printed under the figure, if any |
 | `needs_review` |  | extractor's own doubt flag: brief reason text. Non-blank ⇒ row goes to review. **When unsure, flag — never guess.** |
 
@@ -136,7 +136,9 @@ Example table:
   "difficulty": null,              // reserved; never fabricated
   "skill": string | null,
   "tags": [strings],               // [] when untagged (v1.2)
-  "figure": string,                // optional; URL or data-URI
+  "figure": string,                // optional; a data URI matching the grammar in §5 rule 8
+                                   // (2026-10-07: the app refuses anything else and shows a
+                                   // "Figure unavailable" frame — no URL figures)
   "figureCaption": string          // optional
 }
 ```
@@ -181,22 +183,33 @@ A row reaches the clean JSON only if **all** hold; otherwise it lands in
 4. No raw newlines/tabs in any text cell.
 5. All tokens known, properly paired/nested; `{{row}}` only inside tables.
 6. Every `{{m}}`/`{{mm}}` segment non-empty with balanced braces and no `$`.
-7. `needs_figure=1` ⇒ `figure` present.
+7. `needs_figure=1` ⇒ `figure` present AND matching
+   `^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*$` (2026-10-07:
+   the row gate refuses what the renderer refuses; every shipped figure
+   already matches).
 8. **Image choices (2026-10-07).** A picture choice comes from the
    `choice_a_img` … `choice_d_img` columns (never the `choice_*` text cells, so
    no prose gate ever sees base64) and is emitted as `{"image": s}` with `s`
    matching exactly `^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*$`;
    the base64 decodes and its magic matches the subtype (an SVG parses with
    root `<svg>`, no `<script`, no `on*=`, no `<foreignObject`, no external
-   href); decoded width and height ≤ 600 px; each image ≤ 96 KB as a URI and
-   the four together ≤ 320 KB. Rule 3 becomes: all four choices are non-empty
-   strings, OR all four are valid image objects — a mixed item fails the row
-   (`mixed text/image choices`). The key is still a letter A–D. Dedup keys an
-   image choice by `[image:<sha256 of the decoded bytes, 16 hex>]`, never by
-   the base64 text. The exporter refuses to emit the shape unless the platform
-   checkout's app.js carries `choiceImageSrc`. An item is never held FOR being
-   an image item once the shape exists; fewer than four decodable images
-   still fails this rule. Full contract: IMAGE-CHOICES-SPEC.md.
+   href); longest side ≤ 600 px, checked as max(width, height) after decode;
+   each image ≤ 96 KB as a URI and the four together ≤ 320 KB. Rule 3
+   becomes: all four choices are non-empty strings, OR all four are valid
+   image objects — a mixed item fails the row (`mixed text/image choices`);
+   the same rule applies in `bank_lib.validate_payload_shape` (the
+   payload-level gate every `load_bank` runs — today strings-only, so it must
+   change BEFORE the first image item is minted or every later bank load
+   aborts) and in `bank_lib.mcq_answerability_problems`. The key is still a
+   letter A–D. Dedup keys an image choice by `[image:<sha256 of the decoded
+   bytes, 16 hex>]`, never by the base64 text. The exporter refuses to emit
+   the shape unless the platform checkout's app.js carries `choiceImageSrc`.
+   An item is never held FOR being an image item once the shape exists; fewer
+   than four decodable images still fails this rule. Full contract:
+   IMAGE-CHOICES-SPEC.md §5. **Canonical copies:** the test-bank repo's
+   SCHEMA-v1.2.md and SCHEMA-BANKS-v1.md §3 still read `[4 strings]` until
+   the converter commit mirrors this section; until then IMAGE-CHOICES-SPEC.md
+   §5 is authoritative for the converter.
 
 `tags` never fails a row on content — it is split on `|`, entries trimmed,
 empties dropped — but like every cell it must not contain raw newlines/tabs.

@@ -2928,7 +2928,11 @@
   function figureSrc(q){
     return (q && typeof q.figure === "string" && CHOICE_IMAGE_RE.test(q.figure)) ? q.figure : null;
   }
-  function choiceBodyHtml(c, idx, savedC){
+  /* `saved` is the record's per-question map of highlighted-choice markup
+     (ms.choiceHtml[q.id]) — record-derived, untrusted. It is handed in whole
+     and indexed HERE, on the text path only, so the caller never holds a
+     blob and an image choice's slot is never read at all. */
+  function choiceBodyHtml(c, idx, saved){
     const letter = String.fromCharCode(65 + idx);
     if(typeof c !== "string"){
       const src = choiceImageSrc(c);
@@ -2943,6 +2947,7 @@
     /* A highlighted choice replays the student's own markup. Sanitized on
        the way in like every stored-markup path — a choice blob is
        record-derived and therefore untrusted (ATTEMPTS-SPEC 7). */
+    const savedC = (saved && typeof saved === "object") ? saved[idx] : undefined;
     const inner = (savedC !== undefined && savedC !== null) ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
     return `<span class="ctext">${inner}</span>`;
   }
@@ -2998,16 +3003,17 @@
         </div>`);
     } else {
       const elimSet = ms.eliminated[q.id] || new Set();
+      /* the record's saved-markup map for this question is handed to the seam
+         whole; choiceBodyHtml decides each choice's KIND from test data first
+         and indexes the map only for a text choice — this branch never holds
+         a blob, so there is nothing here a crafted record could reach */
+      const savedMap = (ms.choiceHtml && ms.choiceHtml[q.id]) || undefined;
       body = '<div class="choices' + (abcOn ? ' elim-mode' : '') + '" id="choicesWrap">' +
         q.choices.map((c,idx)=>{
           const letter = String.fromCharCode(65+idx);
           const sel = ms.answers[q.id] === idx;
           const elim = elimSet.has(idx);
-          /* the saved slot is looked up here and handed over; choiceBodyHtml
-             decides the choice's KIND from test data first and reads it only
-             for a text choice (an image choice has no render site for it) */
-          const savedC = (ms.choiceHtml && ms.choiceHtml[q.id]) ? ms.choiceHtml[q.id][idx] : undefined;
-          const body = choiceBodyHtml(c, idx, savedC);
+          const body = choiceBodyHtml(c, idx, savedMap);
           const kind = typeof c === "string" ? "" : " choice-img";
           /* Review marks: the key and the student's pick, on the choices
              themselves. A crossed-out choice keeps its strikethrough (that is

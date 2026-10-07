@@ -163,7 +163,10 @@ function choiceBodyHtml(c, idx, savedC){
   `.choice.eliminated .cimg img{opacity:.35}` (the edge-to-edge strike still
   runs across it), `.cimg-missing` dashed placeholder. One choice per row,
   stacked (ruling 9.1, provisional until a real Bluebook capture); the 2×2
-  grid is held ready as one commented rule beside them.
+  grid is held ready as a commented `.choices:has(.choice-img)` rule beside
+  them — literally CSS-only, keyed on the class the renderer already emits.
+  The cap buys a predictable per-choice height and never-wider-than-the-
+  column, not a no-scroll fit: four capped choices still scroll the pane.
 - **Click to select**: unchanged — the handler is on `.choice` and the click
   bubbles from the image; `draggable="false"` keeps a native image drag from
   eating the mousedown. Un-cross by clicking a crossed-out choice unchanged.
@@ -207,20 +210,35 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
    ruled in).
 3. The base64 decodes and the bytes' magic matches the subtype (PNG
    `\x89PNG`, JPEG `\xFF\xD8`; svg+xml parses as XML with root `<svg>`, no
-   `<script`, no `on*=`, no `<foreignObject`, no external `href`/`xlink:href`)
-   — `bank_gate.py` already decodes figure headers this way.
-4. Decoded width and height ≤ 600 px (2× the 320×220 display cap), through
-   `figure_util.encode_figure(max_width=600)`; grayscale unless colour carries
-   meaning for that form, which the build records.
+   `<script`, no `on*=`, no `<foreignObject`, no external `href`/`xlink:href`).
+   The precedent is `bank_gate._png_width`, which reads a PNG IHDR only; the
+   JPEG SOF / SVG parse checks and the pass over the choice columns are to be
+   written. (The renderer checks the grammar only: a grammar-valid payload
+   that does not decode shows the browser's broken-image glyph beside the
+   label, not the placeholder — decodability is the converter's gate.)
+4. Longest side ≤ 600 px — checked as max(width, height) after decode (PIL
+   size, or IHDR / SOF / svg viewBox), independent of `encode_figure`, which
+   caps WIDTH only (≈2× the 320 px display width keeps a 2× DPR render
+   sharp); grayscale unless colour carries meaning for that form, which the
+   build records.
 5. Size: each image ≤ 96 KB as a URI, the four together ≤ 320 KB — measured
    against the first exported form's file and its test-cache footprint before
    the numbers are set in stone.
 6. Rule 3 ("MCQ ⇒ all 4 choices present") becomes: all four choices are
    non-empty strings, OR all four are valid image objects; a mixed item fails
-   the row with reason `mixed text/image choices`. Both counting gates — the
-   converter's four-choice gate and `bank_lib.mcq_answerability_problems` —
-   and `is_mcq_row` / `bank_row_to_question` count an image column as
-   present.
+   the row with reason `mixed text/image choices`. Every gate that counts
+   choices learns the rule: the converter's four-choice gate,
+   `bank_lib.mcq_answerability_problems`, `is_mcq_row` /
+   `bank_row_to_question`, AND `bank_lib.validate_payload_shape` — the
+   payload-level gate `load_bank` runs, today strings-only, which must change
+   BEFORE the first image item is minted (a minted image ledger line is
+   append-only, and every later `load_bank`, `bank_gate`, `export_bank` and
+   mint would abort on it). `bank_gate.payload_texts` already skips
+   non-strings and needs nothing.
+6b. The stem figure takes the SAME grammar: `figure` is a data URI matching
+   rule 2's regex (no URLs); the converter's rule 7 refuses what the renderer
+   now refuses (`figureSrc`: a figure outside the grammar renders a "Figure
+   unavailable" frame). Every shipped figure already matches.
 7. The key is still a letter A–D selecting an index; nothing about the bytes
    participates in keying. `choices` remains an ARRAY of length 4; `type`
    stays `"mcq"`.
@@ -255,7 +273,7 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
 | styles.css after `.choice.eliminated .hl` | the `.cimg` rules; the 2×2 grid commented beside them |
 | render.js, grading.js, attempts.js, dashboard.js, assemble.py, build-site.js, archive-testdata.js | NO change |
 | tests/image-choice-fixture.js | NEW — the shared four-image item (four distinct 4×3 PNGs) |
-| tests/image-choice.test.js | NEW — the seam, the grammar, the placeholder, the fixture, the proof's copy of it |
+| tests/image-choice.test.js | NEW — the seam, the grammar, the placeholder, the fixture, the proof's copy of it, and (0792fe7) the stem-figure guard with every shipped figure |
 | tests/keep-classes.test.js | explicit image-choice audit over every form and bank against `CHOICE_IMAGE_RE`, with a planted-fixture control |
 | tests/injection-proof.js | synthesises the item in memory, plants the blob in all four slots, asserts the surfaces in §7 |
 | tests/set-flow.test.js §6 | a bank item with image choices resolves intact |
@@ -264,17 +282,30 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
 
 ## 7. Tests
 
-- `node tests/image-choice.test.js`: 44 checks — text path byte-for-byte;
+- `node tests/image-choice.test.js`: 58 checks — text path byte-for-byte
+  (the saved map indexed only on the text path, only at this choice's slot);
   image path with the exact source, no `.ctext`, identical output with a
-  hostile blob; the reserved alt; the grammar (13 rejections); eight
-  malformed entries → placeholder, no throw; the seam is the one render
-  site; render.js emits no `img`; the proof embeds the fixture verbatim.
-  Mutants that fail it: regex loosened to `^data:`; saved blob read before
-  the type branch; `<img>` inside `.ctext`; `draggable` dropped; alt
-  unescaped; the branch rendering text choices itself.
+  hostile blob in every slot, and a trapping Proxy proving the map is never
+  even indexed; the reserved alt; the grammar (13 rejections); ten
+  malformed entries → placeholder, no throw (including an array holding a
+  valid URI, which only the typeof guard keeps out); the seam is the one
+  render site and the branch never indexes the map or interpolates anything
+  but `${body}`; render.js emits no `img`; the proof embeds the fixture
+  verbatim; and (0792fe7) the stem-figure guard — `figureSrc` accepts a
+  data URI and refuses the rest, `figureFrameHtml` renders the guarded
+  source or the placeholder frame without toolbar, the handlers and the
+  overlay use it, and every shipped figure passes unchanged: 585 across
+  current builds (195), banks (63) and archived builds (327); ruling 9.4's
+  "258" is the student-servable subset, current forms plus banks.
+  Mutants that fail it: the typeof guard dropped; the regex loosened to
+  `^data:`; the saved slot read before the type branch; `<img>` inside
+  `.ctext`; `draggable` dropped; alt unescaped; the branch rendering text
+  choices itself; the branch interpolating a blob itself; the branch
+  looking a slot up by index.
 - `node tests/keep-classes.test.js`: every image choice in every form and
-  bank (Math included) matches the renderer's grammar inside a 4-entry MCQ;
-  the control passes the fixture and fails seven planted defects.
+  bank (Math included) matches the renderer's grammar inside a 4-entry MCQ,
+  and no choices array anywhere holds a null, number or array entry; the
+  control passes the fixture and fails nine planted defects.
 - `tests/injection-proof.js` against `dist/index-live.html`: the synthetic
   item is counted among the surfaces; one `<img>` per choice with the EXACT
   fixture source and no `.ctext`; the hostile blob has no render site;
@@ -282,7 +313,9 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
   image and resolves a text choice (control); https / javascript: /
   data:text/html / whitespace sources render the placeholder with no `<img>`
   and no request to evil.example; a scripted SVG renders through `<img>`
-  and executes nothing.
+  and executes nothing; five bad stem-figure sources render the "Figure
+  unavailable" frame with review still entered, no `#figImg`, no toolbar and
+  no request, and a grammar-valid figure renders with its toolbar.
 - Regression: local-mode, tutor-writes, set-flow, tombstone, spr-grading
   green; `archive-testdata.js --verify` clean (no testdata changed).
 
@@ -303,6 +336,19 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
   later if a "graph plus equation" item appears.
 - Accessibility stays weak: choices are divs with click handlers and the
   default alt is neutral (9.2).
+- **Undecodable payload**: the renderer checks the grammar only; a
+  grammar-valid payload that does not decode shows the browser's
+  broken-image glyph (visible, labelled, but not the loud placeholder).
+  Decodability is the converter's gate (§5.3); keep-classes' audit is
+  grammar-only today — extend it with a magic-bytes check when the first
+  image item is exported.
+- **Narrow review panes**: `.cimg` is the only flexible item in a review
+  choice, so under ~515 px the image yields to the nowrap `.rv-mark`
+  (unreachable on target devices for Math-only v1); fold into the
+  capture-driven layout pass (9.1).
+- **Canonical schema copies**: the test-bank repo's SCHEMA-v1.2.md and
+  SCHEMA-BANKS-v1.md §3 still read `[4 strings]`; §5 here is authoritative
+  for the converter until that commit mirrors the shape and rules.
 
 ## 9. Rulings (David, 2026-10-07)
 

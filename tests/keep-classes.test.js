@@ -136,20 +136,27 @@ check(fields > 3000, "fmt() ran over every RW field of " + manifest.length + " t
    every form and bank (Math included; the fmt sweep is RW-only) must match
    the renderer's own grammar, CHOICE_IMAGE_RE extracted from app.js, sit in
    a 4-entry choices array of an MCQ, and carry nothing the renderer would
-   render as a placeholder. No shipped item has the shape yet (the converter
-   emits it later), so a planted-fixture CONTROL proves the audit can fail —
-   a gate that is green over zero items has proven nothing. */
+   render as a placeholder; and ANY non-string, non-object entry in any
+   choices array (a null, a number, an array — the renderer shows "Image
+   unavailable" for each) is a problem whether or not an image sits beside
+   it. Not covered, by contract: mixed text/image items and a bare
+   data:-prefixed STRING (the converter's rules; the renderer tolerates the
+   first and treats the second as prose). No shipped item has the shape yet
+   (the converter emits it later), so a planted-fixture CONTROL proves the
+   audit can fail — a gate that is green over zero items has proven nothing. */
 const CHOICE_IMAGE_RE = new Function(extractConst(appSrc, "CHOICE_IMAGE_RE") + "\nreturn CHOICE_IMAGE_RE;")();
 function auditChoices(where, q){
   const out = [];
-  const ch = Array.isArray(q.choices) ? q.choices : [];
+  if(!Array.isArray(q.choices)) return out;           // SPRs carry no choices key
+  const ch = q.choices;
   const objs = ch.filter(c => c && typeof c === "object" && !Array.isArray(c));
-  if(!objs.length) return out;
-  if(q.type !== "mcq") out.push(where + ": image choices on a non-MCQ (" + q.type + ")");
-  if(ch.length !== 4) out.push(where + ": " + ch.length + " choices, not 4");
+  if(objs.length){
+    if(q.type !== "mcq") out.push(where + ": image choices on a non-MCQ (" + q.type + ")");
+    if(ch.length !== 4) out.push(where + ": " + ch.length + " choices, not 4");
+  }
   ch.forEach((c, i) => {
     if(typeof c === "string") return;
-    if(!c || typeof c !== "object" || Array.isArray(c)){ out.push(where + "#" + i + ": entry is " + (c === null ? "null" : typeof c)); return; }
+    if(!c || typeof c !== "object" || Array.isArray(c)){ out.push(where + "#" + i + ": entry is " + (c === null ? "null" : Array.isArray(c) ? "array" : typeof c)); return; }
     if(typeof c.image !== "string") out.push(where + "#" + i + ": image is " + typeof c.image);
     else if(!CHOICE_IMAGE_RE.test(c.image)) out.push(where + "#" + i + ": image fails the grammar (" + c.image.slice(0, 32) + "…)");
     if("alt" in c && typeof c.alt !== "string") out.push(where + "#" + i + ": alt is " + typeof c.alt);
@@ -185,6 +192,8 @@ const planted = {
   "https source": Object.assign(FIX.question(), { choices: [{ image: "https://evil.example/x.png" }].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) }),
   "an SPR carrying images": Object.assign(FIX.question(), { type: "spr", correctAnswer: "3" }),
   "a number entry": Object.assign(FIX.question(), { choices: [5].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) }),
+  "a null entry in an all-text item": Object.assign(FIX.question(), { choices: [null, "a", "b", "c"] }),
+  "an array entry in an all-text item": Object.assign(FIX.question(), { choices: ["a", ["b"], "c", "d"] }),
   "image not a string": Object.assign(FIX.question(), { choices: [{ image: 5 }].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) }),
   "non-string alt": Object.assign(FIX.question(), { choices: [{ image: FIX.URIS[0], alt: 7 }].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) })
 };

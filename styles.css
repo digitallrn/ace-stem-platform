@@ -542,12 +542,16 @@
   .choice.eliminated .hl{ color:var(--ink); }
   /* ---- image answer choices (2026-10-07, IMAGE-CHOICES-SPEC.md) ----
      One choice per row, stacked, like every Bluebook choice list; the image
-     sits where the text would, capped so four graphs fit the column without
-     scrolling. The 320×220 cap is a judgement — none of the reference
-     captures shows a graph-choice item — provisional until a real capture
-     settles it. The letter badge centres on the image through .choice's
-     align-items; .rv-mark lands to its right because .cimg is flex:0 1 auto.
-     Not .fig-imgwrap: that is the stem figure's zoom contract. */
+     sits where the text would, capped so it is never wider than the stem
+     column and every choice has a predictable height (four capped choices
+     still scroll the pane — the cap buys consistency, not a no-scroll fit).
+     The 320×220 cap is a judgement — none of the reference captures shows a
+     graph-choice item — provisional until a real capture settles it. The
+     letter badge centres on the image through .choice's align-items; .rv-mark
+     lands to its right because .cimg is flex:0 1 auto (in a review pane
+     narrower than ~515px the image, the only flexible item, yields to the
+     nowrap mark — revisit with the capture-driven layout pass). Not
+     .fig-imgwrap: that is the stem figure's zoom contract. */
   .choice .cimg{ flex:0 1 auto; min-width:0; position:relative; display:inline-flex; }
   .choice .cimg img{ display:block; width:auto; max-width:min(100%, 320px); max-height:220px;
     -webkit-user-drag:none; user-select:none; }
@@ -557,9 +561,11 @@
   .choice .cimg-missing{ font-family:var(--sans); font-size:13px; color:#8a6d00; background:#FFF6D6;
     border:1px dashed #c9a300; border-radius:6px; padding:10px 14px; }
   /* held ready, NOT applied: the 2×2 grid, should a Bluebook capture show
-     graph choices two per row — add .img-grid to #choicesWrap and nothing else.
-  .choices.img-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-  .choices.img-grid .choice-row{ min-width:0; }  */
+     graph choices two per row. Literally CSS-only — the :has() keys on the
+     choice-img class buildQuestionHtml already puts on an image choice, so
+     uncommenting these two lines flips image items (and only them).
+  .choices:has(.choice-img){ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .choices:has(.choice-img) .choice-row{ min-width:0; }  */
   .elim-btn{
     width:30px; height:30px; border-radius:50%; border:1.5px solid var(--ink); background:#fff;
     font-size:12px; font-weight:700; position:relative; flex-shrink:0; display:none;
