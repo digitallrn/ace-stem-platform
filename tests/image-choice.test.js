@@ -75,7 +75,7 @@ console.log("--- 1. text choices render as before ---");
   check(choiceBodyHtml("text", 1, { 1: null }) === plainText, "a null saved slot means 'no blob' for a text choice");
   check(choiceBodyHtml("text", 1, { 0: HOSTILE, 2: HOSTILE }) === plainText, "a blob in ANOTHER choice's slot is not this choice's");
   check(choiceBodyHtml("text", 1, { 1: "" }) === plainText && choiceBodyHtml("text", 1, { 1: 7 }) === plainText,
-    "an EMPTY saved slot (or a non-string one) is 'no blob' — a crafted record cannot blank a text choice");
+    "an EMPTY or non-string saved slot is 'no blob': it falls back to fmt(c) rather than rendering an empty .ctext (a non-empty blob still replaces the text by design — the student's own record)");
   check(choiceBodyHtml("text", 1, undefined) === plainText && choiceBodyHtml("text", 1, null) === plainText && choiceBodyHtml("text", 1, "nope") === plainText,
     "no map, a null map, or a non-object map all mean 'no blob'");
 }
@@ -163,10 +163,18 @@ console.log("--- 5. the seam is where the choice markup lives ---");
     '${elim ? "eliminated" : ""}', '${sel?"selected":""}', '${elim?"eliminated":""}'];
   const interps = branch.match(/\$\{[^}]*\}/g) || [];
   const stray = interps.filter(s => ALLOWED.indexOf(s) === -1);
-  check(interps.length >= 11 && stray.length === 0, "every interpolation in the branch is one of its eleven known literals — nothing else can reach the markup", stray.join(" | "));
-  check((branch.match(/\bsavedMap\b/g) || []).length === 1 && !/\bchoiceHtml\b|\bsavedC\b/.test(branch),
-    "the branch names the saved map exactly once (handing it to the seam) and never choiceHtml or a slot");
-  check(ALLOWED.every(s => interps.indexOf(s) !== -1), "…and still uses each of the eleven (the pin is not stale)", ALLOWED.filter(s => interps.indexOf(s) === -1).join(" | "));
+  check(interps.length >= 11 && stray.length === 0, "no interpolation other than the branch's eleven known literals reaches the markup", stray.join(" | "));
+  check(ALLOWED.every(s => interps.indexOf(s) !== -1), "…and the branch still uses each of the eleven (the pin is not stale)", ALLOWED.filter(s => interps.indexOf(s) === -1).join(" | "));
+  /* the whole function, not only the branch slice: a blob could also arrive
+     by concatenation through an alias declared above the branch, so the map
+     and the record field may each be named exactly where they belong — the
+     map twice (its declaration and the one call, pinned as a full statement),
+     the field twice (both on the declaration line) — and nowhere else */
+  check((bq.match(/\bsavedMap\b/g) || []).length === 2 && bq.indexOf("const body = choiceBodyHtml(c, idx, savedMap);") !== -1,
+    "in all of buildQuestionHtml the saved map is named exactly twice: its declaration and the full `const body = choiceBodyHtml(c, idx, savedMap);` statement");
+  const chLines = bq.split("\n").filter(l => /\bchoiceHtml\b/.test(l));
+  check((bq.match(/\bchoiceHtml\b/g) || []).length === 2 && chLines.length === 1 && /const savedMap = \(ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(chLines[0]) && !/\bsavedC\b/.test(bq),
+    "…and the record's choiceHtml field is named only on that declaration line (no alias, no second lookup, no savedC anywhere in the function)", chLines.join(" || "));
   const bqHead = bq.slice(0, bq.indexOf("q.choices.map("));
   check(/const savedMap = \(ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(bqHead), "the saved map is looked up once per question, by question id only");
   check(/choice-img/.test(branch), "an image choice's .choice carries choice-img");

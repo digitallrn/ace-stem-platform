@@ -317,7 +317,11 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
   looking a slot up by index; a `sel`-gated blob before `${body}`; a
   comma-expression blob after it; the map's values appended to the body,
   unconditionally and `sel`-gated; a blob folded into `${letter}`; a slot
-  re-wrapped as a one-entry map; an empty slot treated as a blob.
+  re-wrapped as a one-entry map; an empty slot treated as a blob; and three
+  that reach the markup by CONCATENATION through an alias declared above
+  the branch (appended to the body, folded into the class attribute, folded
+  into the review mark) — caught because the whole function may name the
+  map and the record field exactly twice each.
 - `node tests/keep-classes.test.js`: every image choice in every form and
   bank (Math included) matches the renderer's grammar inside a 4-entry MCQ,
   and no choices array anywhere holds a null, number or array entry; the

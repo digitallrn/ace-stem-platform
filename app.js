@@ -2950,7 +2950,9 @@
     const savedC = (saved && typeof saved === "object") ? saved[idx] : undefined;
     /* only a non-empty STRING is a blob: restoreAnnotations keeps strings
        alone, and the UI never saves an empty .ctext (it always holds fmt
-       output), so an empty slot is "no blob", never a blanked choice */
+       output), so an empty slot falls back to fmt(c) rather than rendering
+       an empty .ctext. A non-empty blob replaces the text by design — it is
+       the student's own record, sanitized; the threat model is execution */
     const inner = (typeof savedC === "string" && savedC !== "") ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
     return `<span class="ctext">${inner}</span>`;
   }
