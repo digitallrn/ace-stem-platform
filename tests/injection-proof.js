@@ -149,11 +149,20 @@
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGN4tkoEjhhwcgCJ9hOxCBph0wAAAABJRU5ErkJggg=="
     ];
     let imgQ = null, imgMi = -1, imgQi = -1;
+    /* and a Math TEXT item right after it (ruling 2026-10-07 §9.7): Math
+       modules replay no annotations, so blobs planted on its stem, stimulus
+       and choices must have no render site at all — a different mechanism
+       from the image item's type branch, asserted separately */
+    let mathQ = null, mathMi = -1, mathQi = -1;
     test.modules.forEach((m, mi) => m.questions.forEach((q, qi) => {
       if(!imgQ && m.section === "Math" && q.type === "mcq" && Array.isArray(q.choices) && q.choices.length === 4 && !(mi === 0 && qi < 2)){
         imgQ = q; imgMi = mi; imgQi = qi;
         q.choices = IMG_URIS.map(u => ({ image: u }));
         if(typeof q.correctAnswer !== "number") q.correctAnswer = 3;
+        return;
+      }
+      if(imgQ && !mathQ && m.section === "Math" && q.type === "mcq" && Array.isArray(q.choices) && q.choices.every(c => typeof c === "string")){
+        mathQ = q; mathMi = mi; mathQi = qi;
       }
     }));
 
@@ -237,6 +246,17 @@
       hostileAnnotations[mid] = hostileAnnotations[mid] || {};
       hostileAnnotations[mid].choiceHtml = hostileAnnotations[mid].choiceHtml || {};
       hostileAnnotations[mid].choiceHtml[imgQ.id] = { 0: HOSTILE_HTML, 1: HOSTILE_HTML, 2: HOSTILE_HTML, 3: HOSTILE_HTML };
+    }
+    /* the Math TEXT item: stem, stimulus and every choice slot — the Math
+       gate must leave none of it a render site (not even a sanitized one:
+       the planted "kept highlight" span must NOT survive here, where on the
+       RW item it must) */
+    if(mathQ && hostileAnnotations){
+      const mid = test.modules[mathMi].moduleId;
+      hostileAnnotations[mid] = hostileAnnotations[mid] || {};
+      hostileAnnotations[mid].stemHtml = Object.assign(hostileAnnotations[mid].stemHtml || {}, { [mathQ.id]: HOSTILE_HTML });
+      hostileAnnotations[mid].passageHtml = Object.assign(hostileAnnotations[mid].passageHtml || {}, { [mathQ.id]: HOSTILE_HTML });
+      hostileAnnotations[mid].choiceHtml = Object.assign(hostileAnnotations[mid].choiceHtml || {}, { [mathQ.id]: { 0: HOSTILE_HTML, 1: HOSTILE_HTML, 2: HOSTILE_HTML, 3: HOSTILE_HTML } });
     }
 
     const { rec, sprCount } = poisonedRecord(test, { annotations: hostileAnnotations });
@@ -530,6 +550,36 @@
           note: goodImg ? "figImg src is the planted data URI; toolbar present" : "no #figImg rendered" });
         $("rvBackBtn").click(); await wait(300);
         if(hadFigure === undefined) delete imgQ.figure; else imgQ.figure = hadFigure;
+      }
+      /* MATH REPLAYS NO ANNOTATIONS (ruling 2026-10-07 §9.7): the Math text
+         item carries the hostile blob in its stem, stimulus and all four
+         choice slots. The RW item above proves the SANITIZER keeps the real
+         highlight span; here the GATE must drop everything, so the kept
+         span itself is the discriminator: present on the RW item, absent
+         here, with the choices showing their own text. */
+      results.push({ surface: "Synthetic Math text item present for the replay gate",
+        pass: !!mathQ, note: mathQ ? `${mathQ.id} (module ${mathMi}, question ${mathQi})` : "no Math text MCQ found after the image item" });
+      if(mathQ){
+        root.querySelector(`.sd-chip[data-mi="${mathMi}"][data-qi="${mathQi}"]`).click();
+        await wait(450);
+        const pane = $("paneRight");
+        const kept = pane.querySelectorAll("span.hl").length;
+        /* counted inside the content regions only: the header band carries
+           the app's own inline SVG (the Mark for Review bookmark) */
+        const regions = [...pane.querySelectorAll(".q-stimulus, .q-lead, .q-text, .choices")];
+        const payload = regions.reduce((n, r) => n + r.querySelectorAll('img[src="x"], b[data-x], style, svg, plaintext').length, 0) +
+                        (pane.textContent.indexOf("PWN") !== -1 ? 1 : 0) + (pane.textContent.indexOf("kept highlight") !== -1 ? 1 : 0);
+        const stem = pane.querySelector(".q-text");
+        const stemText = stem ? stem.textContent.replace(/\s+/g, " ").trim() : "";
+        const expectedStem = (() => { const d = document.createElement("div"); d.innerHTML = fmt(mathQ.questionText); return d.textContent.replace(/\s+/g, " ").trim(); })();
+        const choiceTexts = [...pane.querySelectorAll(".choice .ctext")].map(e => e.textContent.replace(/\s+/g, " ").trim());
+        const expectedChoices = mathQ.choices.map(c => { const d = document.createElement("div"); d.innerHTML = fmt(c, { bigInline: true }); return d.textContent.replace(/\s+/g, " ").trim(); });
+        const stemOk = stemText.length > 0 && (expectedStem.indexOf(stemText) !== -1 || stemText.indexOf(expectedStem.slice(0, 40)) !== -1);
+        const choicesOk = choiceTexts.length === 4 && choiceTexts.every((t, i) => t === expectedChoices[i]);
+        results.push({ surface: "Math modules replay no annotations: planted stem, stimulus and choice blobs on a Math text item have no render site (not even sanitized)",
+          pass: kept === 0 && payload === 0 && stemOk && choicesOk && !window.__XSS_FIRED,
+          note: `kept highlight spans ${kept}, payload traces ${payload}, stem matches test data ${stemOk}, four choices match test data ${choicesOk}` });
+        $("rvBackBtn").click(); await wait(300);
       }
       root.querySelector(`.sd-chip[data-mi="${annMi}"][data-qi="${annQi}"]`).click();
       await wait(450);

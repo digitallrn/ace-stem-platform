@@ -199,7 +199,8 @@
          level and compounding, which silently inflates every em-based cap
          below it — a "6em" box the filter scores as 120px rendered 532px.
      The measured answer is much smaller than either. Annotations are
-     Reading-and-Writing ONLY (Math is annotation-free on every path), and
+     Reading-and-Writing ONLY (Math is annotation-free on every path — created
+     on none, and since 2026-10-07 replayed on none: replaysAnnotations), and
      across all six shipped tests fmt() over every RW passage, stem and choice
      — 1944 fields — emits exactly SEVEN class tokens, all fmt-* block
      containers, and ZERO KaTeX classes, because no RW field contains {{m}} or
@@ -2843,7 +2844,7 @@
     } else if(isMath && isSpr){
       left.innerHTML = sprDirectionsHtml();
     } else if(q.passage || figLeft){
-      const saved = ms.passageHtml[q.id];
+      const saved = replaysAnnotations(mod) ? ms.passageHtml[q.id] : undefined;
       left.innerHTML = (figLeft ? figureFrameHtml(q) : "") +
         (q.passage
           ? '<div class="passage-text" id="passageText">' +
@@ -2888,6 +2889,17 @@
      {{table}} lead-in is re-rendered from the source either way, because the
      lead is not annotatable and its saved copy would otherwise be the only
      record of it. Sanitized here like every other stored-markup path. */
+  /* Annotations (highlights, notes) are Reading-and-Writing only: every
+     creation path refuses them in Math (handleSelection, the pane click
+     handlers). Since 2026-10-07 every REPLAY site refuses them too — the
+     passage pane, the stacked stimulus, the stem and the choices ask this
+     before reading a saved blob — so a crafted record's passageHtml /
+     stemHtml / choiceHtml for a Math question has no render site at all,
+     and the sanitizer is the second net there, not the first. The notes rail
+     already keys on the section. */
+  function replaysAnnotations(mod){
+    return !!mod && mod.section !== "Math";
+  }
   function stemHtml(questionText, saved){
     const inner = (saved !== undefined && saved !== null) ? sanitizeSavedHtml(saved) : null;
     const qt = String(questionText == null ? "" : questionText);
@@ -2970,9 +2982,11 @@
        second pane and Math SPR gives its left column to the directions
        document (reference 35). */
     const isMath = mod.section === "Math";
+    /* a Math set-up never replays a saved blob (replaysAnnotations): the
+       lookup is gated, not only the sanitizer */
     const stackedHtml = (isMath && q.passage)
       ? '<div class="q-stimulus"><div class="passage-text" id="passageText">' +
-        (ms.passageHtml[q.id] !== undefined
+        ((replaysAnnotations(mod) && ms.passageHtml[q.id] !== undefined)
           ? sanitizeSavedHtml(ms.passageHtml[q.id]) : fmt(q.passage)) + '</div></div>'
       : "";
 
@@ -3012,7 +3026,7 @@
          whole; choiceBodyHtml decides each choice's KIND from test data first
          and indexes the map only for a text choice — this branch never holds
          a blob, so there is nothing here a crafted record could reach */
-      const savedMap = (ms.choiceHtml && ms.choiceHtml[q.id]) || undefined;
+      const savedMap = (replaysAnnotations(mod) && ms.choiceHtml && ms.choiceHtml[q.id]) || undefined;
       body = '<div class="choices' + (abcOn ? ' elim-mode' : '') + '" id="choicesWrap">' +
         q.choices.map((c,idx)=>{
           const letter = String.fromCharCode(65+idx);
@@ -3082,7 +3096,7 @@
       ${noticeHtml}
       ${figHtml}
       ${stackedHtml}
-      ${stemHtml(q.questionText, ms.stemHtml ? ms.stemHtml[q.id] : undefined)}
+      ${stemHtml(q.questionText, (replaysAnnotations(mod) && ms.stemHtml) ? ms.stemHtml[q.id] : undefined)}
       ${body}
       ${omittedHtml}
       ${rationaleHtml}`;

@@ -123,11 +123,17 @@ invariants, each pinned by a test:
 (`choice-img`, `cimg`, `choice-image`, `cimg-missing`) are NOT in
 `KEEP_CLASSES` and none is a hook `annotationHost` resolves on.
 
-Companion hardening, its own reviewed commit after the renderer lands (ruling
-9.7): Math is annotation-free on every creation path but every replay site
-honours planted blobs on a Math module; skipping
-`passageHtml/stemHtml/choiceHtml` when `mod.section === "Math"` closes the
-same crafted-record exposure for TEXT choices.
+Companion hardening, DONE 2026-10-07 as its own reviewed commit (ruling
+9.7): Math was annotation-free on every creation path but every replay site
+honoured planted blobs on a Math module; `replaysAnnotations(mod)` now gates
+the passage pane, the stacked stimulus, the stem and the choices' saved map
+(`false` for a Math module), so a crafted record's `passageHtml` /
+`stemHtml` / `choiceHtml` for a Math question has no render site at all —
+the same closure for TEXT choices that the type branch gives image choices.
+Pinned in tests/image-choice.test.js §8 (the gate and every call site) and in
+the proof (a Math text item carrying the blob in its stem, stimulus and all
+four choice slots renders only its own test data — the kept-highlight span
+that must survive on the RW item must NOT appear here).
 
 ## 3. Renderer (built)
 

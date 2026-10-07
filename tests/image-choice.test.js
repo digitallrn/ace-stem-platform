@@ -173,10 +173,10 @@ console.log("--- 5. the seam is where the choice markup lives ---");
   check((bq.match(/\bsavedMap\b/g) || []).length === 2 && bq.indexOf("const body = choiceBodyHtml(c, idx, savedMap);") !== -1,
     "in all of buildQuestionHtml the saved map is named exactly twice: its declaration and the full `const body = choiceBodyHtml(c, idx, savedMap);` statement");
   const chLines = bq.split("\n").filter(l => /\bchoiceHtml\b/.test(l));
-  check((bq.match(/\bchoiceHtml\b/g) || []).length === 2 && chLines.length === 1 && /const savedMap = \(ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(chLines[0]) && !/\bsavedC\b/.test(bq),
-    "…and the record's choiceHtml field is named only on that declaration line (no alias, no second lookup, no savedC anywhere in the function)", chLines.join(" || "));
+  check((bq.match(/\bchoiceHtml\b/g) || []).length === 2 && chLines.length === 1 && /const savedMap = \(replaysAnnotations\(mod\) && ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(chLines[0]) && !/\bsavedC\b/.test(bq),
+    "…and the record's choiceHtml field is named only on that declaration line, behind the Math gate (no alias, no second lookup, no savedC anywhere in the function)", chLines.join(" || "));
   const bqHead = bq.slice(0, bq.indexOf("q.choices.map("));
-  check(/const savedMap = \(ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(bqHead), "the saved map is looked up once per question, by question id only");
+  check(/const savedMap = \(replaysAnnotations\(mod\) && ms\.choiceHtml && ms\.choiceHtml\[q\.id\]\) \|\| undefined;/.test(bqHead), "the saved map is looked up once per question, by question id only, behind the Math gate");
   check(/choice-img/.test(branch), "an image choice's .choice carries choice-img");
   const ah = extractFn(appSrc, "annotationHost");
   check(ah.indexOf('closest(".ctext")') !== -1 && ah.indexOf("cimg") === -1, "annotationHost resolves a choice by .ctext and knows nothing of .cimg — an image choice is no region");
@@ -215,6 +215,30 @@ console.log("--- 7. the stem figure goes through the same guard (ruling 2026-10-
     const id = f.split("@")[0]; const t = loadData("testdata/archive/" + f).__TESTDATA__[id]; t.modules.forEach(m => sweep(f, m.questions)); });
   banks.forEach(b => { const bank = loadData("testdata/" + b.bankId + ".js").__BANKDATA__[b.bankId]; sweep(b.bankId, bank.questions || []); });
   check(figures >= 500 && rejected.length === 0, "LIBRARY: every shipped figure (" + figures + " across current builds, archived builds and banks) passes the guard unchanged", rejected.slice(0, 8).join(", "));
+}
+
+console.log("--- 8. Math modules replay no annotations (ruling 2026-10-07 §9.7) ---");
+{
+  const replaysAnnotations = new Function(extractFn(appSrc, "replaysAnnotations") + "\nreturn replaysAnnotations;")();
+  check(replaysAnnotations({ section: "Reading and Writing" }) === true, "a Reading and Writing module replays its saved highlights");
+  check(replaysAnnotations({ section: "Math" }) === false && replaysAnnotations(null) === false && replaysAnnotations(undefined) === false && replaysAnnotations({}) === true,
+    "a Math module replays none; a missing module replays none; a module with no section is treated as annotatable (the pre-existing RW default)");
+  /* every replay site asks the gate before reading a saved blob */
+  const rqv = extractFn(appSrc, "renderQuestionView");
+  check(/const saved = replaysAnnotations\(mod\) \? ms\.passageHtml\[q\.id\] : undefined;/.test(rqv), "the passage pane reads passageHtml only behind the gate");
+  check(/\(replaysAnnotations\(mod\) && ms\.passageHtml\[q\.id\] !== undefined\)/.test(bqAll()), "the stacked Math stimulus reads passageHtml only behind the gate");
+  check(/stemHtml\(q\.questionText, \(replaysAnnotations\(mod\) && ms\.stemHtml\) \? ms\.stemHtml\[q\.id\] : undefined\)/.test(bqAll()), "the stem reads stemHtml only behind the gate");
+  /* every mention of a saved-markup field in buildQuestionHtml sits on one of
+     the three gated statements — two mentions each (the test and the read);
+     the stimulus statement wraps onto a second line, whose read is inside
+     the gated ternary */
+  const mentions = bqAll().split("\n").filter(l => /ms\.(passageHtml|stemHtml|choiceHtml)\b/.test(l));
+  const gatedLines = mentions.filter(l => /replaysAnnotations\(mod\)/.test(l));
+  const stimulusRead = mentions.filter(l => /^\s*\? sanitizeSavedHtml\(ms\.passageHtml\[q\.id\]\) : fmt\(q\.passage\)\)/.test(l));
+  check(mentions.length === 4 && gatedLines.length === 3 && stimulusRead.length === 1 && (bqAll().match(/ms\.(passageHtml|stemHtml|choiceHtml)\b/g) || []).length === 6,
+    "buildQuestionHtml mentions the three saved-markup fields six times on four lines: three gated statements plus the stimulus ternary's read line (nothing ungated)", mentions.map(l => l.trim().slice(0, 80)).join(" || "));
+  check((rqv.match(/ms\.(passageHtml|stemHtml|choiceHtml)\b/g) || []).length === 1, "renderQuestionView reads a saved-markup field at exactly its one gated place");
+  function bqAll(){ return extractFn(appSrc, "buildQuestionHtml"); }
 }
 
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);

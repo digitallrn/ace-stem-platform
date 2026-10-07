@@ -292,6 +292,12 @@ Three rules:
    URI, which can fetch nothing); anything else renders a placeholder.
    `tests/image-choice.test.js` pins the seam; keep-classes audits every
    shipped image choice against the grammar with a planted control.
+5. **Math modules replay no annotations (2026-10-07).** Annotations are
+   created in Reading and Writing only, and `replaysAnnotations(mod)` now
+   gates every replay site (passage pane, stacked stimulus, stem, the
+   choices' saved map), so a record's `passageHtml` / `stemHtml` /
+   `choiceHtml` for a Math question has no render site; the sanitizer is the
+   second net there. Keep that gate on any new replay site.
 
 `tests/injection-proof.js` is a paste-into-the-console regression proof —
 run it against `dist/index-live.html` after touching any render surface.
