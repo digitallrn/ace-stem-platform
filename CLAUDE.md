@@ -284,6 +284,14 @@ Three rules:
    `dashboard.js` also has `escAttr()` as defense-in-depth; keep both.
 3. Never interpolate a raw record value into markup. Numbers computed from a
    record (counts, indices) are fine.
+4. **Image choices (2026-10-07)** render from TEST DATA only — `choiceBodyHtml`
+   in app.js, never through `fmt()` (so fmt() still emits no `<img>`, the
+   reason IMG is in DROP_ELEMENTS), never inside `.ctext` (so they are never
+   an annotation region), and a record's saved `choiceHtml` slot is never read
+   for one. The source must match `CHOICE_IMAGE_RE` (a `data:image/…;base64`
+   URI, which can fetch nothing); anything else renders a placeholder.
+   `tests/image-choice.test.js` pins the seam; keep-classes audits every
+   shipped image choice against the grammar with a planted control.
 
 `tests/injection-proof.js` is a paste-into-the-console regression proof —
 run it against `dist/index-live.html` after touching any render surface.

@@ -143,7 +143,9 @@
   /* IMG is dropped rather than merely defanged: figures render in the QUESTION
      pane (buildQuestionHtml), and fmt() emits no <img> at all, so an image can
      never legitimately appear in a saved passage — one there came from a
-     crafted record. */
+     crafted record. An image CHOICE (2026-10-07, choiceBodyHtml) keeps that
+     true: its <img> is emitted from test data outside every annotatable
+     region (no .ctext), so saveAnnotation can never capture it either. */
   /* STYLE is dropped for the same reason SCRIPT is: this filters ATTRIBUTES,
      and a <style> element carries its payload in its TEXT, which no attribute
      check can see. Injected via innerHTML its sheet applies to the WHOLE
@@ -2890,6 +2892,46 @@
            '<div class="q-text">' + (inner !== null ? inner : fmt(rest)) + '</div>';
   }
 
+  /* ---- image answer choices (2026-10-07, IMAGE-CHOICES-SPEC.md) ----
+     A choice is EITHER a string (fmt(), today's path) OR an object
+     {image: data URI, alt?}. The kind is decided structurally, from TEST
+     DATA, before anything record-derived is looked at: an image choice is
+     rendered by this function alone — never through fmt() (so fmt() still
+     emits no <img>, the reason IMG is in DROP_ELEMENTS), never inside .ctext
+     (so annotationHost never resolves it and saveAnnotation can never capture
+     it), and its saved choiceHtml slot is never read (so a crafted record has
+     no render site to replace or blank the picture). The source must match
+     CHOICE_IMAGE_RE — a data: URI can fetch nothing, whatever path the
+     content arrived by (the single-file build, a bank file, the device-
+     writable test cache) — and is escaped into the attribute like q.figure.
+     SVG is allowed only because the render path is <img>, which runs no
+     script and fetches nothing; do not reuse this grammar for an inline path.
+     Anything that is neither a string nor a valid image object renders a
+     visible placeholder: never a throw, never a blank box. */
+  const CHOICE_IMAGE_RE = /^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/;
+  function isImageChoice(c){ return !!c && typeof c === "object" && !Array.isArray(c); }
+  function choiceImageSrc(c){
+    return (isImageChoice(c) && typeof c.image === "string" && CHOICE_IMAGE_RE.test(c.image)) ? c.image : null;
+  }
+  function choiceBodyHtml(c, idx, savedC){
+    const letter = String.fromCharCode(65 + idx);
+    if(typeof c !== "string"){
+      const src = choiceImageSrc(c);
+      /* `alt` is reserved for an authored description (none shipped yet);
+         the app's own neutral label otherwise — never a data field that
+         could leak the discriminating feature */
+      const alt = (isImageChoice(c) && typeof c.alt === "string" && c.alt.trim()) ? c.alt.trim() : "Choice " + letter + " (image)";
+      return src
+        ? `<span class="cimg"><img class="choice-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" draggable="false"></span>`
+        : `<span class="cimg cimg-missing" role="img" aria-label="Choice ${letter} image unavailable">Image unavailable</span>`;
+    }
+    /* A highlighted choice replays the student's own markup. Sanitized on
+       the way in like every stored-markup path — a choice blob is
+       record-derived and therefore untrusted (ATTEMPTS-SPEC 7). */
+    const inner = (savedC !== undefined && savedC !== null) ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
+    return `<span class="ctext">${inner}</span>`;
+  }
+
   function buildQuestionHtml(q, ms){
     const isSpr = q.type === "spr";
     const review = !!state.reviewMode;
@@ -2946,12 +2988,12 @@
           const letter = String.fromCharCode(65+idx);
           const sel = ms.answers[q.id] === idx;
           const elim = elimSet.has(idx);
-          /* A highlighted choice replays the student's own markup. Sanitized
-             on the way in like every stored-markup path — a choice blob is
-             record-derived and therefore untrusted (ATTEMPTS-SPEC 7). */
+          /* the saved slot is looked up here and handed over; choiceBodyHtml
+             decides the choice's KIND from test data first and reads it only
+             for a text choice (an image choice has no render site for it) */
           const savedC = (ms.choiceHtml && ms.choiceHtml[q.id]) ? ms.choiceHtml[q.id][idx] : undefined;
-          const ctext = (savedC !== undefined && savedC !== null)
-            ? sanitizeSavedHtml(savedC) : fmt(c, {bigInline:true});
+          const body = choiceBodyHtml(c, idx, savedC);
+          const kind = typeof c === "string" ? "" : " choice-img";
           /* Review marks: the key and the student's pick, on the choices
              themselves. A crossed-out choice keeps its strikethrough (that is
              their work), but the cross-out buttons don't render — nothing on
@@ -2964,18 +3006,18 @@
                        : "";
             return `
               <div class="choice-row${elim ? " is-elim" : ""}">
-                <div class="choice rv ${isKey ? "rv-key" : ""} ${sel && !isKey ? "rv-wrong" : ""} ${elim ? "eliminated" : ""}" data-idx="${idx}">
+                <div class="choice rv${kind} ${isKey ? "rv-key" : ""} ${sel && !isKey ? "rv-wrong" : ""} ${elim ? "eliminated" : ""}" data-idx="${idx}">
                   <span class="clabel">${letter}</span>
-                  <span class="ctext">${ctext}</span>
+                  ${body}
                   ${mark}
                 </div>
               </div>`;
           }
           return `
             <div class="choice-row${elim ? " is-elim" : ""}">
-              <div class="choice ${sel?"selected":""} ${elim?"eliminated":""}" data-idx="${idx}">
+              <div class="choice${kind} ${sel?"selected":""} ${elim?"eliminated":""}" data-idx="${idx}">
                 <span class="clabel">${letter}</span>
-                <span class="ctext">${ctext}</span>
+                ${body}
               </div>
               <button class="elim-btn" data-elim="${idx}" title="Cross out choice ${letter}">${letter}</button>
               <button class="elim-undo" data-undo="${idx}">Undo</button>
@@ -4230,6 +4272,9 @@
     }
     return null;
   }
+  /* exposed read-only so tests/injection-proof.js can ask THE function
+     whether an image choice is a region (it is not: no .ctext) */
+  window.AppSanitize.annotationHost = annotationHost;
 
   /* Persist a region's markup into its own keyed slot. Each region is stored
      separately (rather than one blob per question) so a restore can put each

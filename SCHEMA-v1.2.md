@@ -126,7 +126,11 @@ Example table:
   "type": "mcq" | "spr",
   "passage": string | null,        // tokens intact
   "questionText": string,          // tokens intact
-  "choices": [4 strings],          // MCQ only, tokens intact
+  "choices": [4 × string | {image, alt?}],   // MCQ only; a string carries tokens intact;
+                                   // {image: "data:image/png|jpeg|svg+xml;base64,…"} is a
+                                   // PICTURE choice (2026-10-07, IMAGE-CHOICES-SPEC.md):
+                                   // rendered from test data, never through fmt(); `alt`
+                                   // reserved (optional plain string), unused by the converter
   "correctAnswer": int 0-3 | string | null,   // null = no key yet
   "altAnswers": [strings],         // SPR only, optional
   "difficulty": null,              // reserved; never fabricated
@@ -178,6 +182,21 @@ A row reaches the clean JSON only if **all** hold; otherwise it lands in
 5. All tokens known, properly paired/nested; `{{row}}` only inside tables.
 6. Every `{{m}}`/`{{mm}}` segment non-empty with balanced braces and no `$`.
 7. `needs_figure=1` ⇒ `figure` present.
+8. **Image choices (2026-10-07).** A picture choice comes from the
+   `choice_a_img` … `choice_d_img` columns (never the `choice_*` text cells, so
+   no prose gate ever sees base64) and is emitted as `{"image": s}` with `s`
+   matching exactly `^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*$`;
+   the base64 decodes and its magic matches the subtype (an SVG parses with
+   root `<svg>`, no `<script`, no `on*=`, no `<foreignObject`, no external
+   href); decoded width and height ≤ 600 px; each image ≤ 96 KB as a URI and
+   the four together ≤ 320 KB. Rule 3 becomes: all four choices are non-empty
+   strings, OR all four are valid image objects — a mixed item fails the row
+   (`mixed text/image choices`). The key is still a letter A–D. Dedup keys an
+   image choice by `[image:<sha256 of the decoded bytes, 16 hex>]`, never by
+   the base64 text. The exporter refuses to emit the shape unless the platform
+   checkout's app.js carries `choiceImageSrc`. An item is never held FOR being
+   an image item once the shape exists; fewer than four decodable images
+   still fails this rule. Full contract: IMAGE-CHOICES-SPEC.md.
 
 `tags` never fails a row on content — it is split on `|`, entries trimmed,
 empties dropped — but like every cell it must not contain raw newlines/tabs.

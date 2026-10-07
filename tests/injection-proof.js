@@ -129,6 +129,29 @@
     }
     const test = await window.AppTestLoader.load(window.TEST_MANIFEST[0]);
 
+    /* IMAGE CHOICES (2026-10-07, IMAGE-CHOICES-SPEC.md). No shipped item has
+       the shape yet, so the proof SYNTHESISES one in memory: the first Math
+       MCQ outside the reserved slots becomes a four-image item, with the
+       four fixture URIs tests/image-choice-fixture.js pins (embedded here
+       verbatim — this file is pasted into a console; image-choice.test.js
+       checks the two copies agree). Its saved choiceHtml slots get the
+       hostile blob below, and its surfaces assert the picture renders from
+       TEST DATA with no render site for the blob. */
+    const IMG_URIS = [
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGM4oaEBRww4OQAHpg0hlLAT/AAAAABJRU5ErkJggg==",
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGPQWGADRww4OQDs3wwxgy58EwAAAABJRU5ErkJggg==",
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGPQCDgBRww4OQAdNg8B7MAzwQAAAABJRU5ErkJggg==",
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGN4tkoEjhhwcgCJ9hOxCBph0wAAAABJRU5ErkJggg=="
+    ];
+    let imgQ = null, imgMi = -1, imgQi = -1;
+    test.modules.forEach((m, mi) => m.questions.forEach((q, qi) => {
+      if(!imgQ && m.section === "Math" && q.type === "mcq" && Array.isArray(q.choices) && q.choices.length === 4 && !(mi === 0 && qi < 2)){
+        imgQ = q; imgMi = mi; imgQi = qi;
+        q.choices = IMG_URIS.map(u => ({ image: u }));
+        if(typeof q.correctAnswer !== "number") q.correctAnswer = 3;
+      }
+    }));
+
     /* future-content fields: rationale goes through fmt(), which must escape
        prose while still honouring {{i}}/{{m}} tokens; an SPR correctAnswer
        comes from test data and reaches the table + banner */
@@ -202,6 +225,14 @@
       choiceHtml:  { [annQ.id]: { 0: HOSTILE_HTML, 2: HOSTILE_HTML } },
       notes: { [annQ.id]: [{ id: ATTR_PAY, snippet: PAYLOAD, text: PAYLOAD }] }
     } } : undefined;
+    /* the image item's four saved choice slots: a crafted record aiming to
+       replace or blank the pictures (must have no render site at all) */
+    if(imgQ && hostileAnnotations){
+      const mid = test.modules[imgMi].moduleId;
+      hostileAnnotations[mid] = hostileAnnotations[mid] || {};
+      hostileAnnotations[mid].choiceHtml = hostileAnnotations[mid].choiceHtml || {};
+      hostileAnnotations[mid].choiceHtml[imgQ.id] = { 0: HOSTILE_HTML, 1: HOSTILE_HTML, 2: HOSTILE_HTML, 3: HOSTILE_HTML };
+    }
 
     const { rec, sprCount } = poisonedRecord(test, { annotations: hostileAnnotations });
     localStorage.setItem("as:" + rec.attemptId, JSON.stringify(rec));
@@ -382,6 +413,84 @@
           note: nChoices >= 2 ? `${nChoices} choices still rendered after the poisoned stem`
                               : `only ${nChoices} choice(s) rendered — markup after the stem was swallowed` });
       }
+
+      /* IMAGE CHOICES: the synthetic four-image item, with the hostile blob
+         planted in all four of its saved choice slots. The picture must
+         render from TEST DATA — the exact fixture source, one <img>, outside
+         any .ctext — and the blob must have NO render site: not sanitized,
+         not shown, nothing executed. Then annotationHost (the real function,
+         exposed on AppSanitize) must refuse the image as a region, and a
+         battery of bad sources must render the placeholder with no <img> and
+         no network request. A scripted SVG passes the grammar by design: the
+         render path is <img>, which runs no script — asserted. */
+      $("rvBackBtn").click();
+      await wait(350);
+      results.push({ surface: "Synthetic image-choice item present in the replayed test",
+        pass: !!imgQ, note: imgQ ? `${imgQ.id} (module ${imgMi}, question ${imgQi}) with four image choices` : "no Math MCQ found to convert" });
+      if(imgQ){
+        root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
+        await wait(450);
+        const choices = [...document.querySelectorAll("#paneRight .choice")];
+        const imgs = choices.map(c => c.querySelector("img.choice-image"));
+        const exact = imgs.every((im, i) => im && im.getAttribute("src") === IMG_URIS[i]);
+        const noCtext = choices.every(c => !c.querySelector(".ctext"));
+        const oneImg = choices.every(c => c.querySelectorAll("img").length === 1);
+        const payload = choices.reduce((n, c) => n + c.querySelectorAll('img[src="x"], b[data-x], style, svg, plaintext').length, 0) +
+                        choices.filter(c => c.textContent.indexOf("PWN") !== -1).length;
+        const handlers = choices.reduce((n, c) => n + [...c.querySelectorAll("*")].filter(e => [...e.attributes].some(a => /^on/i.test(a.name))).length, 0);
+        const urlAttrs = choices.reduce((n, c) => n + [...c.querySelectorAll("*")].filter(e => [...e.attributes].some(a => /^(href|xlink:href|srcdoc|action|formaction|data)$/i.test(a.name))).length, 0);
+        results.push({ surface: "Image choices render from test data: one <img> each, the EXACT fixture source, no .ctext",
+          pass: choices.length === 4 && exact && noCtext && oneImg && choices.every(c => c.classList.contains("choice-img")),
+          note: `${choices.length} choices, exact sources ${exact}, no .ctext ${noCtext}, one img each ${oneImg}` });
+        results.push({ surface: "Hostile choiceHtml on an image choice has no render site (blob neither shown nor sanitized, nothing fired)",
+          pass: payload === 0 && handlers === 0 && urlAttrs === 0 && !window.__XSS_FIRED,
+          note: payload || handlers || urlAttrs ? `survived: ${payload} payload element(s), ${handlers} handler(s), ${urlAttrs} url attr(s)` : "no trace of the blob in any image choice" });
+        const marks = document.querySelectorAll("#paneRight .choice .rv-mark").length;
+        results.push({ surface: "Review marks render beside image choices as beside text",
+          pass: marks >= 1, note: `${marks} .rv-mark element(s) on the image item` });
+        const AH = window.AppSanitize && window.AppSanitize.annotationHost;
+        const textChoice = (() => { for(const c of [...root.querySelectorAll("#sdQuestions")]){ } return null; })();
+        const imgHost = AH && imgs[0] ? AH(imgs[0]) : "no-fn";
+        const cimgHost = AH ? AH(choices[0].querySelector(".cimg")) : "no-fn";
+        results.push({ surface: "annotationHost refuses an image choice as a region (the real function)",
+          pass: typeof AH === "function" && imgHost === null && cimgHost === null,
+          note: typeof AH !== "function" ? "AppSanitize.annotationHost missing" : `img -> ${imgHost}, .cimg -> ${cimgHost}` });
+        /* control: the function is live — a text choice's .ctext IS a region */
+        $("rvBackBtn").click(); await wait(350);
+        root.querySelector('.sd-chip[data-mi="0"][data-qi="1"]').click(); await wait(450);
+        const ctextEl = document.querySelector('#paneRight .choice[data-idx="0"] .ctext');
+        const ctrlHost = AH && ctextEl ? AH(ctextEl.firstChild || ctextEl) : null;
+        results.push({ surface: "annotationHost control: a text choice's .ctext resolves to a choice region",
+          pass: !!ctrlHost && ctrlHost.kind === "choice" && ctrlHost.idx === 0, note: ctrlHost ? JSON.stringify({ kind: ctrlHost.kind, idx: ctrlHost.idx }) : "no .ctext or no region" });
+        $("rvBackBtn").click(); await wait(350);
+        /* bad sources: every one must be a placeholder, no <img>, no fetch */
+        const BAD = [{ image: "https://evil.example/choice.png" }, { image: "javascript:window.__XSS_FIRED=true" },
+                     { image: "data:text/html;base64,PHNjcmlwdD53aW5kb3cuX19YU1NfRklSRUQ9dHJ1ZTwvc2NyaXB0Pg==" },
+                     { image: "data:image/png;base64, " + IMG_URIS[0].slice(22) }];
+        imgQ.choices = BAD;
+        root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
+        await wait(450);
+        const bads = [...document.querySelectorAll("#paneRight .choice")];
+        const allPlaceholder = bads.length === 4 && bads.every(c => c.querySelector(".cimg-missing") && !c.querySelector("img"));
+        const fetched = performance.getEntriesByType("resource").filter(e => /evil\.example/.test(e.name)).length;
+        results.push({ surface: "Bad image sources (https, javascript:, data:text/html, whitespace) render the placeholder: no <img>, no request",
+          pass: allPlaceholder && fetched === 0 && !window.__XSS_FIRED,
+          note: `${bads.length} choices, all placeholders ${allPlaceholder}, requests to evil.example ${fetched}` });
+        /* a scripted SVG passes the grammar and renders through <img>, which runs nothing */
+        $("rvBackBtn").click(); await wait(350);
+        imgQ.choices = [{ image: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><script>window.__XSS_FIRED=true</script><rect width="40" height="20" fill="#48c"/></svg>') },
+                        { image: IMG_URIS[1] }, { image: IMG_URIS[2] }, { image: IMG_URIS[3] }];
+        root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
+        await wait(600);
+        const svgImg = document.querySelector('#paneRight .choice[data-idx="0"] img.choice-image');
+        results.push({ surface: "A scripted SVG source renders as an <img> and executes nothing",
+          pass: !!svgImg && /^data:image\/svg\+xml;base64,/.test(svgImg.getAttribute("src")) && !window.__XSS_FIRED && !document.querySelector("#paneRight .choice script"),
+          note: svgImg ? "svg+xml through <img>; __XSS_FIRED=" + window.__XSS_FIRED : "no <img> rendered for the svg source" });
+        imgQ.choices = IMG_URIS.map(u => ({ image: u }));
+        $("rvBackBtn").click(); await wait(350);
+      }
+      root.querySelector(`.sd-chip[data-mi="${annMi}"][data-qi="${annQi}"]`).click();
+      await wait(450);
 
       /* Direct battery against AppSanitize.html. The region checks above can
          only see what a REPLAY happens to render; these hit the filter itself,

@@ -28,6 +28,22 @@ function extractConst(src, name){
   const m = re.exec(src);
   if(!m) throw new Error("const not found in app.js: " + name);
   let i = m.index + m[0].length, depth = 0;
+  /* a value that IS a regex literal (const RE = /…/flags;) may carry ';' or
+     brackets inside it — step over the literal first (escapes and character
+     classes respected), then find the statement's ';' as usual (2026-10-07,
+     CHOICE_IMAGE_RE's ";base64") */
+  if(src[i] === "/" && src[i + 1] !== "/" && src[i + 1] !== "*"){
+    let j = i + 1, inClass = false;
+    for(; j < src.length; j++){
+      const c = src[j];
+      if(c === "\\"){ j++; continue; }
+      if(c === "\n") break;                       // not a regex after all: fall back
+      if(inClass){ if(c === "]") inClass = false; continue; }
+      if(c === "[") inClass = true;
+      else if(c === "/") break;
+    }
+    if(src[j] === "/"){ i = j + 1; while(i < src.length && /[a-z]/.test(src[i])) i++; }
+  }
   while(i < src.length){
     const c = src[i];
     if(c === "(" || c === "{" || c === "[") depth++;

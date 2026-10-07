@@ -288,6 +288,17 @@ function makeAppState(test){
       && out.notices[driftKeys[0]].text.indexOf("2026-08-20-b") !== -1,
       "form drift produces exactly one banner NAMING the item and both versions");
 
+    /* an image-choice bank item (2026-10-07) resolves with its {image}
+       objects intact — the same renderer path a form item takes */
+    const IMGF = require("./image-choice-fixture");
+    const imgBank = { bankId: "bank-david-core", bankVersion: "sha-2",
+      questions: [Object.assign(IMGF.question("q0001"), { qid: "q0001" })] };
+    const outImg = await mk({ bank: imgBank })(record, false);
+    const resolved = outImg.test.modules[0].questions[0];
+    check(Array.isArray(resolved.choices) && resolved.choices.length === 4 &&
+          resolved.choices.every((c, i) => c && typeof c === "object" && c.image === IMGF.URIS[i]) && resolved.correctAnswer === 3,
+      "a bank question with four image choices resolves through buildSetTestFromRecord with the objects intact (no stringification)");
+
     const goneBank = { bankId: "bank-david-core", bankVersion: "sha-2", questions: [] };
     const out2 = await mk({ bank: goneBank })(record, false);
     const n2 = out2.notices["bank-david-core:q0001"];

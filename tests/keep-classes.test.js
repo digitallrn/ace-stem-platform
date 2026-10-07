@@ -129,6 +129,66 @@ banks.forEach(b => {
     scan(b.bankId + ":" + q.qid, [q.passage, q.questionText].concat(Array.isArray(q.choices) ? q.choices : [])));
 });
 check(fields > 3000, "fmt() ran over every RW field of " + manifest.length + " tests and " + banks.length + " banks (" + fields + " fields)");
+
+/* 2b. IMAGE CHOICES (2026-10-07, IMAGE-CHOICES-SPEC.md). scan() above skips
+   a non-string field by its typeof guard — an object entry {image} in
+   `choices` is exactly that, so make the skip EXPLICIT: every image choice in
+   every form and bank (Math included; the fmt sweep is RW-only) must match
+   the renderer's own grammar, CHOICE_IMAGE_RE extracted from app.js, sit in
+   a 4-entry choices array of an MCQ, and carry nothing the renderer would
+   render as a placeholder. No shipped item has the shape yet (the converter
+   emits it later), so a planted-fixture CONTROL proves the audit can fail —
+   a gate that is green over zero items has proven nothing. */
+const CHOICE_IMAGE_RE = new Function(extractConst(appSrc, "CHOICE_IMAGE_RE") + "\nreturn CHOICE_IMAGE_RE;")();
+function auditChoices(where, q){
+  const out = [];
+  const ch = Array.isArray(q.choices) ? q.choices : [];
+  const objs = ch.filter(c => c && typeof c === "object" && !Array.isArray(c));
+  if(!objs.length) return out;
+  if(q.type !== "mcq") out.push(where + ": image choices on a non-MCQ (" + q.type + ")");
+  if(ch.length !== 4) out.push(where + ": " + ch.length + " choices, not 4");
+  ch.forEach((c, i) => {
+    if(typeof c === "string") return;
+    if(!c || typeof c !== "object" || Array.isArray(c)){ out.push(where + "#" + i + ": entry is " + (c === null ? "null" : typeof c)); return; }
+    if(typeof c.image !== "string") out.push(where + "#" + i + ": image is " + typeof c.image);
+    else if(!CHOICE_IMAGE_RE.test(c.image)) out.push(where + "#" + i + ": image fails the grammar (" + c.image.slice(0, 32) + "…)");
+    if("alt" in c && typeof c.alt !== "string") out.push(where + "#" + i + ": alt is " + typeof c.alt);
+  });
+  return out;
+}
+let imageChoices = 0;
+const choiceProblems = [];
+manifest.forEach(entry => {
+  const t = (loadData("testdata/" + entry.testId + ".js").__TESTDATA__ || {})[entry.testId];
+  if(!t) return;
+  t.modules.forEach(m => m.questions.forEach(q => {
+    imageChoices += (Array.isArray(q.choices) ? q.choices : []).filter(c => c && typeof c === "object" && !Array.isArray(c)).length;
+    choiceProblems.push(...auditChoices(entry.testId + ":" + q.id, q));
+  }));
+});
+banks.forEach(b => {
+  const bank = (loadData("testdata/" + b.bankId + ".js").__BANKDATA__ || {})[b.bankId];
+  if(!bank) return;
+  (bank.questions || []).forEach(q => {
+    imageChoices += (Array.isArray(q.choices) ? q.choices : []).filter(c => c && typeof c === "object" && !Array.isArray(c)).length;
+    choiceProblems.push(...auditChoices(b.bankId + ":" + q.qid, q));
+  });
+});
+console.log("  image choices in the shipped library: " + imageChoices + " (the converter does not emit the shape yet)");
+check(choiceProblems.length === 0, "LIBRARY: every image choice in every form and bank matches the renderer's grammar inside a 4-entry MCQ", choiceProblems.slice(0, 10).join("; "));
+/* the control: the audit passes the fixture and FAILS each planted defect */
+const FIX = require("./image-choice-fixture");
+check(auditChoices("fixture", FIX.question()).length === 0, "CONTROL: the shared fixture item (four image choices) passes the audit");
+const planted = {
+  "three entries": Object.assign(FIX.question(), { choices: FIX.URIS.slice(0, 3).map(u => ({ image: u })) }),
+  "javascript: source": Object.assign(FIX.question(), { choices: [{ image: "javascript:alert(1)" }].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) }),
+  "https source": Object.assign(FIX.question(), { choices: [{ image: "https://evil.example/x.png" }].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) }),
+  "an SPR carrying images": Object.assign(FIX.question(), { type: "spr", correctAnswer: "3" }),
+  "a number entry": Object.assign(FIX.question(), { choices: [5].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) }),
+  "image not a string": Object.assign(FIX.question(), { choices: [{ image: 5 }].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) }),
+  "non-string alt": Object.assign(FIX.question(), { choices: [{ image: FIX.URIS[0], alt: 7 }].concat(FIX.URIS.slice(1).map(u => ({ image: u }))) })
+};
+Object.keys(planted).forEach(k => check(auditChoices("planted", planted[k]).length > 0, "CONTROL: the audit fails a planted defect — " + k));
 const libDropped = [...perToken.keys()].filter(t => !KEEP.test(t)).sort();
 check(libDropped.length === 0, "LIBRARY: every fmt-* class the shipped RW fields emit is in KEEP_CLASSES",
   libDropped.map(t => t + " (" + perToken.get(t).length + " fields, e.g. " + perToken.get(t).slice(0, 3).join(", ") + ")").join("; "));
