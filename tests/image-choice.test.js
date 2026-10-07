@@ -145,6 +145,33 @@ console.log("--- 6. the browser proof carries the same fixture ---");
   check(F.URIS.every(u => proof.indexOf(u) !== -1), "tests/injection-proof.js embeds all four fixture URIs verbatim (it is pasted into a console and cannot require this file)");
 }
 
+console.log("--- 7. the stem figure goes through the same guard (ruling 2026-10-07) ---");
+{
+  const figureSrc = new Function(extractConst(appSrc, "CHOICE_IMAGE_RE") + "\n" + extractFn(appSrc, "figureSrc") + "\nreturn figureSrc;")();
+  check(figureSrc({ figure: F.URIS[0] }) === F.URIS[0], "figureSrc returns a data:image/png figure unchanged");
+  check(figureSrc({ figure: "https://evil.example/f.png" }) === null && figureSrc({ figure: "javascript:1" }) === null &&
+        figureSrc({ figure: "" }) === null && figureSrc({}) === null && figureSrc({ figure: 5 }) === null && figureSrc(null) === null,
+    "figureSrc refuses http(s), javascript:, an empty string, a missing or non-string figure, a null question");
+  const frame = extractFn(appSrc, "figureFrameHtml");
+  check(frame.indexOf("const src = figureSrc(q);") !== -1 && frame.indexOf('src="${escapeHtml(src)}"') !== -1 && frame.indexOf("escapeHtml(q.figure)") === -1,
+    "figureFrameHtml renders the GUARDED source into the attribute, never q.figure directly");
+  check(frame.indexOf("fig-missing") !== -1 && /\$\{src \? `<div class="fig-toolbar">/.test(frame), "a figure outside the grammar renders the placeholder with no toolbar");
+  const handlers = extractFn(appSrc, "attachFigureHandlers");
+  check(handlers.indexOf("if(!figureSrc(q)) return;") !== -1 && handlers.indexOf('el("figOverlayImg").src = figureSrc(q);') !== -1 && handlers.indexOf("= q.figure") === -1,
+    "attachFigureHandlers and the expand overlay use the guarded source too");
+  /* every shipped figure — current builds, archived builds, banks — passes */
+  function loadData(file){ const c = { window: { __TESTDATA__: {}, __BANKDATA__: {} } }; vm.createContext(c); vm.runInContext(fs.readFileSync(file, "utf8"), c); return c.window; }
+  const manifest = loadData("testdata/manifest.js").TEST_MANIFEST;
+  const banks = loadData("testdata/bank-manifest.js").BANK_MANIFEST;
+  let figures = 0; const rejected = [];
+  const sweep = (where, qs) => qs.forEach(q => { if(q && q.figure !== undefined){ figures++; if(figureSrc(q) !== q.figure) rejected.push(where + ":" + (q.id || q.qid)); } });
+  manifest.forEach(e => { const t = loadData("testdata/" + e.testId + ".js").__TESTDATA__[e.testId]; t.modules.forEach(m => sweep(e.testId, m.questions)); });
+  fs.readdirSync("testdata/archive").filter(f => f.indexOf("@") !== -1 && /\.js$/.test(f)).forEach(f => {
+    const id = f.split("@")[0]; const t = loadData("testdata/archive/" + f).__TESTDATA__[id]; t.modules.forEach(m => sweep(f, m.questions)); });
+  banks.forEach(b => { const bank = loadData("testdata/" + b.bankId + ".js").__BANKDATA__[b.bankId]; sweep(b.bankId, bank.questions || []); });
+  check(figures >= 500 && rejected.length === 0, "LIBRARY: every shipped figure (" + figures + " across current builds, archived builds and banks) passes the guard unchanged", rejected.slice(0, 8).join(", "));
+}
+
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);
 if(failures.length){ console.log("Failures:"); failures.forEach(f => console.log("  - " + f)); }
 process.exit(fail ? 1 : 0);

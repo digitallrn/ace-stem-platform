@@ -948,6 +948,9 @@
      wider than about 440px of content — raising this cap does not widen those. */
   .fig-imgwrap img{ width:auto; max-width:100%; max-height:560px; }
   .fig-caption{ font-family:var(--serif); text-align:center; padding:0 12px 14px; font-size:15.5px; }
+  /* a figure outside the data:-only grammar (figureSrc, 2026-10-07): visible, never a blank frame */
+  .fig-missing{ font-family:var(--sans); font-size:13px; color:#8a6d00; background:#FFF6D6;
+    border:1px dashed #c9a300; border-radius:6px; padding:18px 14px; }
   /* A figure TITLE sits above the image (see figureFrameHtml for what that
      placement rests on). It takes the padding on the other side so the gap
      lands between title and plot, not under the toolbar. Weight follows the

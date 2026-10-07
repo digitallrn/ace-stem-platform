@@ -2765,18 +2765,25 @@
        line to change, and it is a one-line revert. */
     const cap = q.figureCaption;
     const capIsNote = /^\s*note\s*:/i.test(String(cap || ""));
+    /* the source is test data, escaped into the attribute as always, and now
+       also held to the data:-only grammar (figureSrc): a figure outside it
+       gets the frame with a visible placeholder and no toolbar — there is no
+       image to zoom — rather than an <img> that could fetch */
+    const src = figureSrc(q);
     return `
       <div class="fig-frame">
-        <div class="fig-toolbar">
+        ${src ? `<div class="fig-toolbar">
           <button id="figZin" title="Zoom in">🔍+</button>
           <button id="figZout" title="Zoom out">🔍−</button>
           <span id="figPct">100%</span>
           <button id="figReset">Reset</button>
           <span class="sep"></span>
           <button id="figExpand" title="Expand">⛶</button>
-        </div>
+        </div>` : ""}
         ${cap && !capIsNote ? `<div class="fig-caption fig-title">${fmt(cap)}</div>` : ""}
-        <div class="fig-imgwrap"><img id="figImg" src="${escapeHtml(q.figure)}" alt="Question figure"></div>
+        <div class="fig-imgwrap">${src
+          ? `<img id="figImg" src="${escapeHtml(src)}" alt="Question figure">`
+          : `<div class="fig-missing" role="img" aria-label="Figure unavailable">Figure unavailable</div>`}</div>
         ${cap && capIsNote ? `<div class="fig-caption">${fmt(cap)}</div>` : ""}
       </div>`;
   }
@@ -2912,6 +2919,14 @@
   function isImageChoice(c){ return !!c && typeof c === "object" && !Array.isArray(c); }
   function choiceImageSrc(c){
     return (isImageChoice(c) && typeof c.image === "string" && CHOICE_IMAGE_RE.test(c.image)) ? c.image : null;
+  }
+  /* The stem figure goes through the same data:-only guard (ruling 2026-10-07):
+     every shipped figure — current builds, archived builds and banks, 585 of
+     them — already matches it, so nothing legitimate changes; a figure that
+     does not match renders a visible "Figure unavailable" frame, never an
+     <img> with a source that could fetch. */
+  function figureSrc(q){
+    return (q && typeof q.figure === "string" && CHOICE_IMAGE_RE.test(q.figure)) ? q.figure : null;
   }
   function choiceBodyHtml(c, idx, savedC){
     const letter = String.fromCharCode(65 + idx);
@@ -3927,7 +3942,7 @@
 
   /* ---- Figure zoom / expand ---- */
   function attachFigureHandlers(q){
-    if(!q.figure) return;
+    if(!figureSrc(q)) return;          // no figure, or one outside the grammar: the frame shows a placeholder, nothing to zoom
     const img = el("figImg");
     /* Zoom level lives in figZoomPct (renderQuestionView), so it survives the
        in-place rebuilds this question gets — flagging, the ABC toggle, a
@@ -3963,7 +3978,7 @@
     el("figZout").addEventListener("click", ()=> setPct(Math.max(50, pct - 25)));
     el("figReset").addEventListener("click", ()=> setPct(100));
     el("figExpand").addEventListener("click", ()=>{
-      el("figOverlayImg").src = q.figure;
+      el("figOverlayImg").src = figureSrc(q);   // the same guarded source the frame rendered
       show("figOverlay");
     });
   }
