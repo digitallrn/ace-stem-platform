@@ -161,10 +161,14 @@
         if(typeof q.correctAnswer !== "number") q.correctAnswer = 3;
         return;
       }
-      if(imgQ && !mathQ && m.section === "Math" && q.type === "mcq" && Array.isArray(q.choices) && q.choices.every(c => typeof c === "string")){
-        mathQ = q; mathMi = mi; mathQi = qi;
+      if(imgQ && m.section === "Math" && q.type === "mcq" && Array.isArray(q.choices) && q.choices.every(c => typeof c === "string")){
+        /* prefer a Math text item WITH a set-up passage, so the stacked
+           stimulus gate is exercised too; fall back to a passage-less one
+           (three shipped forms have none after the image item) and say so */
+        if(!mathQ || (!mathQ.passage && q.passage)){ mathQ = q; mathMi = mi; mathQi = qi; }
       }
     }));
+    let mathPlanted = false;
 
     /* future-content fields: rationale goes through fmt(), which must escape
        prose while still honouring {{i}}/{{m}} tokens; an SPR correctAnswer
@@ -257,6 +261,7 @@
       hostileAnnotations[mid].stemHtml = Object.assign(hostileAnnotations[mid].stemHtml || {}, { [mathQ.id]: HOSTILE_HTML });
       hostileAnnotations[mid].passageHtml = Object.assign(hostileAnnotations[mid].passageHtml || {}, { [mathQ.id]: HOSTILE_HTML });
       hostileAnnotations[mid].choiceHtml = Object.assign(hostileAnnotations[mid].choiceHtml || {}, { [mathQ.id]: { 0: HOSTILE_HTML, 1: HOSTILE_HTML, 2: HOSTILE_HTML, 3: HOSTILE_HTML } });
+      mathPlanted = true;
     }
 
     const { rec, sprCount } = poisonedRecord(test, { annotations: hostileAnnotations });
@@ -576,9 +581,14 @@
         const expectedChoices = mathQ.choices.map(c => { const d = document.createElement("div"); d.innerHTML = fmt(c, { bigInline: true }); return d.textContent.replace(/\s+/g, " ").trim(); });
         const stemOk = stemText.length > 0 && (expectedStem.indexOf(stemText) !== -1 || stemText.indexOf(expectedStem.slice(0, 40)) !== -1);
         const choicesOk = choiceTexts.length === 4 && choiceTexts.every((t, i) => t === expectedChoices[i]);
-        results.push({ surface: "Math modules replay no annotations: planted stem, stimulus and choice blobs on a Math text item have no render site (not even sanitized)",
-          pass: kept === 0 && payload === 0 && stemOk && choicesOk && !window.__XSS_FIRED,
-          note: `kept highlight spans ${kept}, payload traces ${payload}, stem matches test data ${stemOk}, four choices match test data ${choicesOk}` });
+        /* the stimulus half is real only when the item HAS a set-up passage:
+           then .q-stimulus must exist and hold fmt(q.passage)'s own text */
+        const stim = pane.querySelector(".q-stimulus .passage-text");
+        const expectedStim = mathQ.passage ? (() => { const d = document.createElement("div"); d.innerHTML = fmt(mathQ.passage); return d.textContent.replace(/\s+/g, " ").trim(); })() : "";
+        const stimOk = !mathQ.passage || (!!stim && stim.textContent.replace(/\s+/g, " ").trim() === expectedStim && !stim.querySelector("span.hl"));
+        results.push({ surface: "Math modules replay no annotations: planted stem" + (mathQ.passage ? ", stimulus" : "") + " and choice blobs on a Math text item have no render site (not even sanitized)",
+          pass: mathPlanted && kept === 0 && payload === 0 && stemOk && choicesOk && stimOk && !window.__XSS_FIRED,
+          note: `planted ${mathPlanted}; kept highlight spans ${kept}, payload traces ${payload}, stem matches test data ${stemOk}, four choices match test data ${choicesOk}, stimulus present ${!!mathQ.passage}` + (mathQ.passage ? ` and matches test data ${stimOk}` : " (no set-up passage on this form's Math text items after the image item — stimulus gate covered by the node pin only)") });
         $("rvBackBtn").click(); await wait(300);
       }
       root.querySelector(`.sd-chip[data-mi="${annMi}"][data-qi="${annQi}"]`).click();

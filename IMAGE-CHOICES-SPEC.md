@@ -131,9 +131,12 @@ the passage pane, the stacked stimulus, the stem and the choices' saved map
 `stemHtml` / `choiceHtml` for a Math question has no render site at all —
 the same closure for TEXT choices that the type branch gives image choices.
 Pinned in tests/image-choice.test.js §8 (the gate and every call site) and in
-the proof (a Math text item carrying the blob in its stem, stimulus and all
-four choice slots renders only its own test data — the kept-highlight span
-that must survive on the RW item must NOT appear here).
+the proof (a Math text item carrying the blob in its stem, all four choice
+slots and — when the form has a Math text item with a set-up passage after
+the image item, as 202606asiav1 does at ma2-q9 — its stimulus renders only
+its own test data; the kept-highlight span that must survive on the RW item
+must NOT appear here; the note records whether a stimulus was present, and
+the stacked-stimulus gate is pinned by the node suite regardless).
 
 ## 3. Renderer (built)
 
