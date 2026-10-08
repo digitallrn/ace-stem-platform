@@ -300,7 +300,14 @@ Also recorded as SCHEMA-v1.2.md §3 (shape) and §5 rule 8.
 
 ## 7. Tests
 
-- `node tests/image-choice.test.js`: 60 checks — text path byte-for-byte
+- `node tests/image-choice.test.js`: 73 checks (§8 adds the Math-replay
+  gate's truth table, its five call-site pins, and a FILE-WIDE, prefix-blind
+  sweep: every mention of passageHtml/stemHtml/choiceHtml in app.js is an
+  initialiser, restoreAnnotations, saveAnnotation or one of the five gated
+  lines; the sanitizer has exactly four sinks; attempts.js names the fields
+  only where the recorder packs the record; dashboard.js and render.js never
+  do — a fifth replay site, an alias read, a new helper and an ungated sink
+  each fail it) — text path byte-for-byte
   (the saved map indexed only on the text path, only at this choice's slot;
   an empty or non-string slot is "no blob");
   image path with the exact source, no `.ctext`, identical output with a

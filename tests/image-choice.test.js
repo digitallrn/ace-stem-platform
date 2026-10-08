@@ -239,6 +239,49 @@ console.log("--- 8. Math modules replay no annotations (ruling 2026-10-07 §9.7)
     "buildQuestionHtml mentions the three saved-markup fields six times on four lines: three gated statements plus the stimulus ternary's read line (nothing ungated)", mentions.map(l => l.trim().slice(0, 80)).join(" || "));
   check((rqv.match(/ms\.(passageHtml|stemHtml|choiceHtml)\b/g) || []).length === 1, "renderQuestionView reads a saved-markup field at exactly its one gated place");
   function bqAll(){ return extractFn(appSrc, "buildQuestionHtml"); }
+
+  /* FILE-WIDE SWEEP, prefix-blind: every line of app.js (comments stripped)
+     that names passageHtml, stemHtml or choiceHtml — through `ms.`, an
+     alias, or anything else — must be one of: the moduleState initialisers,
+     a line inside restoreAnnotations (the record → state shape filter), a
+     line inside saveAnnotation (state ← DOM), or one of the five gated
+     replay lines pinned above. A new replay site anywhere in the file — a
+     fifth function, an alias, a helper — lands outside that set and fails
+     here. The same for the sanitizer's sinks: every sanitizeSavedHtml(…)
+     call is one of the four known expressions, each fed only by a gated
+     value. attempts.js names the fields only where the recorder packs them
+     onto the record (a write, not a render). */
+  const stripped = appSrc.replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, " ")).replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const restoreBody = extractFn(stripped, "restoreAnnotations"), saveBody = extractFn(stripped, "saveAnnotation");
+  const inBody = (line, body) => body.split("\n").some(b => b.trim() === line.trim() && line.trim() !== "");
+  const INIT_RE = /\{ answers:\{\}, flags:new Set\(\), eliminated:\{\}, passageHtml:\{\}, stemHtml:\{\}, choiceHtml:\{\}, notes:\{\} \}/;
+  const GATED = [
+    /* the stem helper's own declaration carries the field's name; its `saved`
+       argument is fed only by the gated stem line below (pinned above) */
+    "function stemHtml(questionText, saved){",
+    "const saved = replaysAnnotations(mod) ? ms.passageHtml[q.id] : undefined;",
+    "((replaysAnnotations(mod) && ms.passageHtml[q.id] !== undefined)",
+    "? sanitizeSavedHtml(ms.passageHtml[q.id]) : fmt(q.passage)) + '</div></div>'",
+    "const savedMap = (replaysAnnotations(mod) && ms.choiceHtml && ms.choiceHtml[q.id]) || undefined;",
+    "${stemHtml(q.questionText, (replaysAnnotations(mod) && ms.stemHtml) ? ms.stemHtml[q.id] : undefined)}"
+  ];
+  const fieldLines = stripped.split("\n").map((l, i) => ({ n: i + 1, t: l })).filter(x => /\b(passageHtml|stemHtml|choiceHtml)\b/.test(x.t));
+  const unexplained = fieldLines.filter(x => !INIT_RE.test(x.t) && !inBody(x.t, restoreBody) && !inBody(x.t, saveBody) && GATED.indexOf(x.t.trim()) === -1);
+  check(fieldLines.length >= 15 && unexplained.length === 0,
+    "SWEEP: every mention of passageHtml/stemHtml/choiceHtml in app.js is an initialiser, restoreAnnotations, saveAnnotation, or one of the five gated replay lines (" + fieldLines.length + " lines)",
+    unexplained.map(x => x.n + ": " + x.t.trim().slice(0, 90)).join(" || "));
+  check(GATED.every(g => fieldLines.some(x => x.t.trim() === g)), "SWEEP: all five gated lines are present verbatim (the pin is not stale)");
+  const sinks = (stripped.match(/sanitizeSavedHtml\([^)]*\)/g) || []).filter(s => s !== "sanitizeSavedHtml(html)");
+  const KNOWN_SINKS = ["sanitizeSavedHtml(saved)", "sanitizeSavedHtml(savedC)", "sanitizeSavedHtml(ms.passageHtml[q.id])"];
+  const strayS = sinks.filter(s => KNOWN_SINKS.indexOf(s) === -1);
+  check(sinks.length === 4 && strayS.length === 0, "SWEEP: the sanitizer has exactly four call sites, each fed only by a gated value (passage pane, stem helper, seam text path, stacked stimulus)", sinks.join(" | "));
+  const attemptsSrc = fs.readFileSync("attempts.js", "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const aMentions = attemptsSrc.split("\n").map((l, i) => ({ n: i + 1, t: l })).filter(x => /\b(passageHtml|stemHtml|choiceHtml)\b/.test(x.t));
+  const span = aMentions.length ? aMentions[aMentions.length - 1].n - aMentions[0].n : 0;
+  check(aMentions.length === 5 && span <= 8 && aMentions.some(x => /annotations\[mid\] = \{ passageHtml: ms\.passageHtml/.test(x.t)),
+    "SWEEP: attempts.js names the fields only where the recorder packs them onto the record (five lines, one block) — no replay there", aMentions.map(x => x.n).join(","));
+  check(!/\b(passageHtml|stemHtml|choiceHtml)\b/.test(fs.readFileSync("dashboard.js", "utf8")) && !/\b(passageHtml|stemHtml|choiceHtml)\b/.test(fs.readFileSync("render.js", "utf8")),
+    "SWEEP: dashboard.js and render.js never name the fields (no replay surface outside app.js)");
 }
 
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);

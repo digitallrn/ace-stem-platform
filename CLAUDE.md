@@ -297,7 +297,12 @@ Three rules:
    gates every replay site (passage pane, stacked stimulus, stem, the
    choices' saved map), so a record's `passageHtml` / `stemHtml` /
    `choiceHtml` for a Math question has no render site; the sanitizer is the
-   second net there. Keep that gate on any new replay site.
+   second net there. Keep that gate on any new replay site —
+   `tests/image-choice.test.js` §8 sweeps all of app.js, prefix-blind, and
+   fails on any mention of the three fields outside the initialisers,
+   `restoreAnnotations`, `saveAnnotation` and the five gated lines, and on
+   any `sanitizeSavedHtml(…)` call beyond the four known sinks (a fifth site,
+   an alias, a new helper, an ungated sink each fail it).
 
 `tests/injection-proof.js` is a paste-into-the-console regression proof —
 run it against `dist/index-live.html` after touching any render surface.
