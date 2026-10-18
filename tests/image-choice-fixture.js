@@ -20,7 +20,7 @@
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGPQCDgBRww4OQAdNg8B7MAzwQAAAABJRU5ErkJggg==",
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGN4tkoEjhhwcgCJ9hOxCBph0wAAAABJRU5ErkJggg=="
   ];
-  /* the shape the converter will emit: four {image} objects, index key, no alt */
+  /* the shape the converter emits (since test-bank 6d03bcb): four {image} objects, index key, no alt */
   function question(id){
     return { id: id || "ma2-q4", type: "mcq", passage: null,
       questionText: "Which of the following graphs in the {{m}}xy{{/m}}-plane could represent the solutions to the system?",

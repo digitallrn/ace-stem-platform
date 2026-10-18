@@ -291,11 +291,18 @@ Three rules:
    for one. The source must match `CHOICE_IMAGE_RE` (a `data:image/…;base64`
    URI, which can fetch nothing), and since 2026-10-18 its decoded bytes must
    be the type it declares (`imageSourceOk`: PNG signature, JPEG `FF D8 FF`,
-   an SVG root in the SVG namespace; `figureSrc` runs the same guard).
-   Anything else renders a placeholder. `tests/image-choice.test.js` pins the
-   seam, the bytes check at both sites (with mutants) and every shipped
-   image; keep-classes audits every shipped image choice through the
-   renderer's own `choiceImageSrc`, with planted controls.
+   an XML document whose root is `<svg>` in the SVG namespace — XML's prolog,
+   DOCTYPE included, is allowed; `figureSrc` runs the same guard). Anything
+   else renders a placeholder, never a throw. `tests/image-choice.test.js`
+   pins the seam, the bytes check at both sites (with mutants) and every
+   shipped image; keep-classes audits every shipped image choice through the
+   renderer's own `choiceImageSrc`, with planted controls; and
+   **`build-site.js` fails the deploy on any current or bank image the guard
+   refuses** (an archived build's refusal is a warning), because the
+   test-bank converter checks figure bytes not at all — keep that gate if
+   the guard changes, and keep `function choiceImageSrc(` and the grammar
+   literal verbatim (the test-bank exporters' `platform_supports()` reads
+   both).
 5. **Math modules replay no annotations (2026-10-07).** Annotations are
    created in Reading and Writing only, and `replaysAnnotations(mod)` now
    gates every replay site (passage pane, stacked stimulus, stem, the

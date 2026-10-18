@@ -348,6 +348,24 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
       uri("svg+xml", b64("\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- drawn - by hand -->\n<svg width='4'\r\n\txmlns = '" + NS + "'><rect/></svg>")),
     "a prefixed SVG root bound by its own xmlns:prefix": uri("svg+xml", b64('<s:svg xmlns:s="' + NS + '"><s:rect/></s:svg>')),
     "an SVG with UTF-8 text in an attribute": uri("svg+xml", Buffer.from('<svg xmlns="' + NS + '" aria-label="−2 → x à"/>', "utf8").toString("base64")),
+    /* XML's own prolog (review 2026-10-18): the browser draws each of these,
+       so the bytes ARE an SVG, whatever the converter's choice rules make of
+       a DOCTYPE. Refusing them made a figure from a standard tool show
+       "Figure unavailable" where the build before this check drew it. */
+    "a matplotlib-style SVG (XML declaration, DOCTYPE PUBLIC, xmlns last)":
+      uri("svg+xml", b64('<?xml version="1.0" encoding="utf-8" standalone="no"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"\n  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n' +
+        '<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="460.8pt" height="345.6pt" viewBox="0 0 460.8 345.6" xmlns="' + NS + '" version="1.1">\n <metadata/></svg>')),
+    "an Illustrator-style SVG (declaration, generator comment, DOCTYPE)":
+      uri("svg+xml", b64('<?xml version="1.0" encoding="utf-8"?>\n<!-- Generator: Adobe Illustrator 24.0.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->\n' +
+        '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg version="1.1" id="Layer_1" xmlns="' + NS + '" x="0px" y="0px"\n\t viewBox="0 0 40 30"><rect/></svg>')),
+    "a bare <!DOCTYPE svg>": uri("svg+xml", b64('<!DOCTYPE svg><svg xmlns="' + NS + '"/>')),
+    "a DOCTYPE whose internal subset holds a comment with ] and a quote, an entity and a PI":
+      uri("svg+xml", b64("<!DOCTYPE svg [ <!-- it's ] here --> <!ENTITY a \"x]y\"> <?pi ]? ?> ]>\n<svg xmlns=\"" + NS + "\"/>")),
+    "an xml-stylesheet processing instruction": uri("svg+xml", b64('<?xml version="1.0"?><?xml-stylesheet href="s.css" type="text/css"?><svg xmlns="' + NS + '"/>')),
+    "the namespace written with a decimal character reference": uri("svg+xml", b64('<svg xmlns="http&#58;//www.w3.org/2000/svg"/>')),
+    "the namespace written with a hex character reference": uri("svg+xml", b64('<svg xmlns="http&#x3A;//www.w3.org/2000/svg"/>')),
+    "a non-ASCII prefix": uri("svg+xml", Buffer.from('<é:svg xmlns:é="' + NS + '"/>', "utf8").toString("base64")),
+    "Inkscape's attribute order (xmlns:svg, then xmlns)": uri("svg+xml", b64('<svg xmlns:svg="' + NS + '" xmlns="' + NS + '" xmlns:xlink="http://www.w3.org/1999/xlink"/>')),
     /* the bytes ARE an SVG: what one contains is not this check's business —
        <img> runs no script (the browser proof renders this one and asserts it) */
     "a scripted SVG": uri("svg+xml", b64('<svg xmlns="' + NS + '"><script>window.__XSS_FIRED=true</script></svg>'))
@@ -362,7 +380,12 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "a PNG signature with one byte wrong": uri("png", b64("\x89PNg\r\n\x1A\n\x00\x00\x00\x0D")),
     "a PNG signature one byte late": uri("png", b64("\x00\x89PNG\r\n\x1A\n\x00\x00\x00")),
     "half a PNG signature": uri("png", b64("\x89PNG")),
+    /* the signature's back half (review 2026-10-18): a 4-byte compare passed
+       every case above */
+    "a PNG signature whose CRLF became LF (a text-mode transfer)": uri("png", b64("\x89PNG\n\x1A\n\x00\x00\x00\x0DIHDR")),
+    "a PNG signature with byte 7 wrong": uri("png", b64("\x89PNG\r\n\x00\n\x00\x00\x00\x0D")),
     "a JPEG start-of-image with no marker after it": uri("jpeg", b64("\xFF\xD8")),
+    "a JPEG start-of-image followed by a non-marker byte": uri("jpeg", b64("\xFF\xD8\x00\xE0\x00\x10JFIF")),
     "an SVG with no namespace (<svg/>)": "data:image/svg+xml;base64,PHN2Zy8+",
     "an SVG root in the XHTML namespace": uri("svg+xml", b64('<svg xmlns="http://www.w3.org/1999/xhtml"/>')),
     "an SVG namespace with a trailing slash": uri("svg+xml", b64('<svg xmlns="' + NS + '/"/>')),
@@ -372,7 +395,16 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "an html root carrying the SVG namespace": uri("svg+xml", b64('<html xmlns="' + NS + '"/>')),
     "an <svg> only inside a comment": uri("svg+xml", b64('<!-- <svg xmlns="' + NS + '"/> -->')),
     "a prefixed root whose prefix is unbound": uri("svg+xml", b64('<s:svg xmlns="' + NS + '"/>')),
-    "a DOCTYPE before the root (the converter refuses one)": uri("svg+xml", b64('<!DOCTYPE svg><svg xmlns="' + NS + '"/>')),
+    "an unprefixed root with only xmlns:svg declared (the root is in no namespace)": uri("svg+xml", b64('<svg xmlns:svg="' + NS + '"><rect/></svg>')),
+    "a root named SVG (XML names are case-sensitive)": uri("svg+xml", b64('<SVG xmlns="' + NS + '"/>')),
+    "an unquoted attribute on the root (not XML)": uri("svg+xml", b64('<svg xmlns="' + NS + '" width=4/>')),
+    "two DOCTYPEs": uri("svg+xml", b64('<!DOCTYPE svg><!DOCTYPE svg><svg xmlns="' + NS + '"/>')),
+    "an internal subset left open": uri("svg+xml", b64('<!DOCTYPE svg [ <!ENTITY a "b"> <svg xmlns="' + NS + '"/>')),
+    /* the one form the check does not expand, stated in app.js: an xmlns
+       written through an entity the internal subset declares */
+    "the namespace written through an internal-subset entity (old Illustrator)":
+      uri("svg+xml", b64('<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x.dtd" [\n\t<!ENTITY ns_svg "' + NS + '">\n]>\n<svg xmlns="&ns_svg;"/>')),
+    "a character reference past U+10FFFF in the namespace": uri("svg+xml", b64('<svg xmlns="http&#x110000;//www.w3.org/2000/svg"/>')),
     "text before the root": uri("svg+xml", b64('x<svg xmlns="' + NS + '"/>')),
     "a UTF-16 SVG": uri("svg+xml", Buffer.from("﻿<svg xmlns=\"" + NS + "\"/>", "utf16le").toString("base64")),
     "a PNG payload with three '='": uri("png", PNG_CORE + "==="),
@@ -392,11 +424,14 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
   check(DECODE.some(d => d[1]) && DECODE.some(d => !d[1]), "the decodability cases include payloads atob accepts and payloads it refuses (" + DECODE.length + " cases)");
   check(Object.keys(ACCEPT).every(k => CHOICE_IMAGE_RE.test(ACCEPT[k])) && Object.keys(REFUSE).every(k => CHOICE_IMAGE_RE.test(REFUSE[k])) && DECODE.every(d => CHOICE_IMAGE_RE.test(uri("png", d[0]))),
     "every case passes the GRAMMAR, so only the bytes check can refuse one");
-  function battery(accepts){
+  /* a throw is a failure the battery NAMES, not a crash of the suite: the
+     render must never throw (a refusal is the placeholder) */
+  function battery(guard){
     const bad = [];
-    Object.keys(ACCEPT).forEach(k => { if(!accepts(ACCEPT[k])) bad.push("refused " + k); });
-    Object.keys(REFUSE).forEach(k => { if(accepts(REFUSE[k])) bad.push("accepted " + k); });
-    DECODE.forEach(([p, ok]) => { if(accepts(uri("png", p)) !== ok) bad.push((ok ? "refused" : "accepted") + " a " + p.length + "-char payload atob " + (ok ? "decodes" : "refuses")); });
+    const accepts = (u, k) => { try{ return guard(u); }catch(e){ bad.push("THREW " + e.name + " on " + k); return null; } };
+    Object.keys(ACCEPT).forEach(k => { if(accepts(ACCEPT[k], k) !== true) bad.push("refused " + k); });
+    Object.keys(REFUSE).forEach(k => { if(accepts(REFUSE[k], k) !== false) bad.push("accepted " + k); });
+    DECODE.forEach(([p, ok]) => { if(accepts(uri("png", p), p.length + "-char payload") !== ok) bad.push((ok ? "refused" : "accepted") + " a " + p.length + "-char payload atob " + (ok ? "decodes" : "refuses")); });
     return bad;
   }
   /* both acceptance sites, evaluated from a source text (so the mutants
@@ -411,15 +446,27 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
   check(realChoice.length === 0, "choiceImageSrc: " + Object.keys(ACCEPT).length + " true-type sources accepted, " + Object.keys(REFUSE).length +
     " mismatched or undecodable sources refused, decodability agrees with atob in all " + DECODE.length + " cases", realChoice.slice(0, 6).join("; "));
   check(realFigure.length === 0, "figureSrc: the same battery, the same verdicts (one guard for both sites)", realFigure.slice(0, 6).join("; "));
+  /* NEVER A THROW (review 2026-10-18): a root start tag of a million
+     attributes overflows V8's regex backtracking stack (a RangeError, about
+     6 MB decoded). Unreachable through the stated input paths, but the
+     render must not depend on that: the check fails closed. */
+  {
+    const huge = uri("svg+xml", b64("<svg" + ' a="b"'.repeat(1000000) + ' xmlns="' + NS + '">'));
+    let threw = null, verdicts = null;
+    try{ verdicts = [real.choice(huge), real.figure(huge)]; }catch(e){ threw = e; }
+    check(!threw && verdicts.every(v => v === false), "a pathological 8 MB SVG prolog is refused at both sites and never throws (the regex's stack overflow is caught)",
+      threw ? String(threw) : JSON.stringify(verdicts));
+  }
 
   /* the RENDER, not only the predicate: a mismatched choice is the
      placeholder, a mismatched figure the "Figure unavailable" frame */
-  const refused = Object.keys(REFUSE).map(k => choiceBodyHtml({ image: REFUSE[k] }, 2));
+  const safe = f => { try{ return f(); }catch(e){ return "THREW " + e.name + " <img"; } };   // a throw fails the checks below by name
+  const refused = Object.keys(REFUSE).map(k => safe(() => choiceBodyHtml({ image: REFUSE[k] }, 2)));
   check(refused.every(h => h.indexOf("cimg-missing") !== -1 && h.indexOf("<img") === -1 && h.indexOf('aria-label="Choice C image unavailable"') !== -1),
     "choiceBodyHtml renders every refused source as the placeholder, no <img>", refused.find(h => h.indexOf("<img") !== -1) || "");
   const frameHtml = new Function("fmt", "escapeHtml", GUARD_SRC + "\n" + extractFn(appSrc, "figureSrc") + "\n" + extractFn(appSrc, "figureFrameHtml") +
     "\nreturn figureFrameHtml;")(fmt, escapeHtml);
-  const frames = Object.keys(REFUSE).map(k => frameHtml({ figure: REFUSE[k] }));
+  const frames = Object.keys(REFUSE).map(k => safe(() => frameHtml({ figure: REFUSE[k] })));
   check(frames.every(h => h.indexOf("fig-missing") !== -1 && h.indexOf("<img") === -1 && h.indexOf("fig-toolbar") === -1),
     "figureFrameHtml renders every refused figure as the placeholder frame: no <img>, no toolbar", frames.find(h => h.indexOf("<img") !== -1) || "");
   const goodFrame = frameHtml({ figure: F.URIS[0] });
@@ -441,10 +488,17 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "app.js writes exactly two <img> elements, the stem figure's and the image choice's, each from the guarded `src`", imgLines.join(" || "));
   check(extractFn(appSrc, "figureFrameHtml").indexOf("const src = figureSrc(q);") !== -1 && extractFn(appSrc, "choiceBodyHtml").indexOf("const src = choiceImageSrc(c);") !== -1,
     "…where `src` is figureSrc(q) in the frame and choiceImageSrc(c) in the seam");
-  const srcSets = code.split("\n").filter(l => /\.src\s*=(?!=)/.test(l)).map(l => l.trim());
-  check(srcSets.every(l => /^s\.src = /.test(l) || l === 'el("figOverlayImg").src = figureSrc(q);') && srcSets.indexOf('el("figOverlayImg").src = figureSrc(q);') !== -1 &&
-        !/setAttribute\(\s*["']src|\.srcset\b|srcset\s*=|new Image\b|createElement\(\s*["']img/i.test(code),
-    "every other .src assignment is a <script> loader's `s.src`; the overlay is set from figureSrc(q); nothing else creates or sources an image", srcSets.join(" || "));
+  /* an EXACT list, not a pattern (review 2026-10-18): `s.src =` as a
+     prefix let an alias named `s` re-source the overlay unguarded. The four
+     script loaders, verbatim, and the overlay; nothing else, in any form —
+     dotted, bracketed, srcset, setAttribute, new Image, createElement */
+  const SRC_SETS = ['el("figOverlayImg").src = figureSrc(q);', "s.src = src;", "s.src = archiveVersion",
+    's.src = "testdata/" + encodeURIComponent(bankId) + ".js";',
+    's.src = "https://www.desmos.com/api/v1.11/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fda6";'].sort();
+  const srcSets = code.split("\n").filter(l => /\.src\s*=(?!=)/.test(l)).map(l => l.trim()).sort();
+  check(JSON.stringify(srcSets) === JSON.stringify(SRC_SETS) &&
+        !/\[\s*["'`]src(?:set)?["'`]\s*\]\s*=(?!=)|setAttribute\(\s*["'`]src|\.srcset\b|srcset\s*=|new Image\b|createElement\(\s*["'`]img/i.test(code),
+    "the .src assignments in app.js are exactly the four <script> loaders and the overlay (from figureSrc(q)); nothing else creates or sources an image", srcSets.join(" || "));
   check(appSrc.indexOf("/^data:image\\/(png|jpeg|svg\\+xml);base64,[A-Za-z0-9+\\/]+=*$/") !== -1 && /function\s+choiceImageSrc\s*\(/.test(appSrc),
     "the grammar literal and `function choiceImageSrc(` stay verbatim (the test-bank exporters' platform_supports() reads both)");
 
@@ -461,19 +515,25 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     ["the JPEG signature not compared", ["choice", "figure"], 'return b.slice(0, 3) === "\\xFF\\xD8\\xFF";', "return true;"],
     ["the JPEG signature cut to FF D8", ["choice", "figure"], 'return b.slice(0, 3) === "\\xFF\\xD8\\xFF";', 'return b.slice(0, 2) === "\\xFF\\xD8";'],
     ["any SVG root admitted", ["choice", "figure"], "if(!r) return false;", "if(!r) return true;"],
-    ["the SVG namespace's value not compared", ["choice", "figure"], ': a[3]) === "http://www.w3.org/2000/svg";', ': a[3]) !== "-";'],
+    ["the SVG namespace's value not compared", ["choice", "figure"], 'return v === "http://www.w3.org/2000/svg";', 'return v !== "-";'],
     ["an SVG decoded only as far as a raster's head", ["choice", "figure"], 'type === "svg+xml" ? s.length : off + 12', "off + 12"],
-    ["a prefixed root not bound to its own xmlns:prefix", ["choice", "figure"], 'r[1] ? "xmlns:" + r[1] : "xmlns"', '"xmlns"']
+    ["a prefixed root not bound to its own xmlns:prefix", ["choice", "figure"], 'r[1] ? "xmlns:" + r[1] : "xmlns"', '"xmlns"'],
+    /* added with the review's fixes (2026-10-18) */
+    ["the PNG signature cut to its first 4 bytes", ["choice", "figure"], 'b.slice(0, 8) === "\\x89PNG\\r\\n\\x1A\\n"', 'b.slice(0, 4) === "\\x89PNG"'],
+    ["no DOCTYPE admitted", ["choice", "figure"], "<!DOCTYPE[ \\t\\r\\n]", "<!NOTYPE[ \\t\\r\\n]"],
+    ["no processing instruction admitted (the XML declaration is one)", ["choice", "figure"], "|<\\?(?:[^?]|\\?(?!>))*\\?>", "", 3],
+    ["character references in the namespace not expanded", ["choice", "figure"], "const v = (a[2] !== undefined ? a[2] : a[3]).replace(", "const v = (a[2] !== undefined ? a[2] : a[3]); void ("]
   ];
-  MUTANTS.forEach(([name, sites, needle, repl]) => {
-    const once = appSrc.split(needle).length === 2;
+  MUTANTS.forEach(([name, sites, needle, repl, count]) => {
+    const want = count || 1;
+    const fits = appSrc.split(needle).length === want + 1;
     let caught = [];
-    if(once){
-      const m = build(appSrc.replace(needle, () => repl));
+    if(fits){
+      const m = build(appSrc.split(needle).join(repl));
       caught = sites.map(site => battery(m[site]).length);
     }
-    check(once && caught.every(n => n > 0), "MUTANT (" + name + ") fails the battery at " + sites.join(" and "),
-      once ? "battery failures per site: " + caught.join(", ") : "stale mutant: the needle does not occur exactly once in " + APP_PATH);
+    check(fits && caught.every(n => n > 0), "MUTANT (" + name + ") fails the battery at " + sites.join(" and "),
+      fits ? "battery failures per site: " + caught.join(", ") : "stale mutant: the needle does not occur exactly " + want + " time(s) in " + APP_PATH);
   });
 }
 

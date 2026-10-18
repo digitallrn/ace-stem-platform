@@ -17,7 +17,14 @@
      4. a planted form-version drift (manifest.js) is still named;
      5. a manifest the check can no longer parse is a WARNING naming the
         file, never a silent "nothing to compare";
-   and every case still builds (drift is a warning by design, not a red build).
+   and every drift case still builds (drift is a warning by design, not a
+   red build). Since 2026-10-18 the same harness also proves the build's
+   IMAGE GUARD (app.js imageSourceOk over every shipped image): the clean
+   tree reports it ran and passed; a figure, an image choice and a bank
+   figure whose PNG bytes are relabelled jpeg each FAIL the build naming the
+   item; the same plant in an archived build is a WARNING naming the file.
+   To watch the guard cases fail without it, point BUILD_SITE_SRC at
+   `git show 4416e5d:build-site.js` (before the guard).
 
    To watch it fail on the broken check:
      git show f64c512:build-site.js > <scratch>/build-site-pre.js
@@ -62,6 +69,11 @@ function setup(){
     fs.copyFileSync(full, path.join(tmp, f));
   });
   fs.cpSync(path.join(REPO, "testdata"), path.join(tmp, "testdata"), { recursive: true });
+  /* the build's image guard (2026-10-18) takes imageSourceOk out of app.js
+     with the suites' own extractor; Netlify's checkout has tests/, so the
+     copy carries that one file of it */
+  fs.mkdirSync(path.join(tmp, "tests"));
+  fs.copyFileSync(path.join(REPO, "tests", "extract-helper.js"), path.join(tmp, "tests", "extract-helper.js"));
   fs.copyFileSync(BUILD_SRC, path.join(tmp, "build-site.js"));
   BANKS = load("bank-manifest.js", "BANK_MANIFEST");
   TESTS = load("manifest.js", "TEST_MANIFEST");
@@ -112,6 +124,41 @@ try{
     const r = build();
     check(r.status === 0 && /publish directory _site\/ contains/.test(r.out), "the unmodified tree builds", r.out.slice(-400));
     check(r.warn === "", "the unmodified tree: the drift check is QUIET (index, manifest and bank manifest agree)", r.warn);
+    const g = /image guard — (\d+) figures and (\d+) image choices checked/.exec(r.out);
+    check(!!g && +g[1] >= 500 && +g[2] >= 8 && /every current and bank image passes/.test(r.out),
+      "the unmodified tree: the image guard ran over every shipped image and passed (" + (g ? g[1] + " figures, " + g[2] + " image choices" : "no guard line") + ")", r.out.slice(-400));
+  });
+
+  /* THE IMAGE GUARD (2026-10-18): an image the renderer would refuse is a
+     red build naming the item in a current build or a bank, and a WARNING
+     naming it in an archived build (which cannot be re-exported). Each plant
+     passes the GRAMMAR, so only the bytes half can refuse it: PNG bytes
+     relabelled jpeg. */
+  const relabel = s => s.replace(/("(?:figure|image)":\s*"data:image\/)png(;base64,)/, "$1jpeg$2");
+  run("image-figure", () => {
+    const t = TESTS.find(x => /"figure":\s*"data:image\/png;base64,/.test(fs.readFileSync(path.join(tmp, "testdata", x.testId + ".js"), "utf8")));
+    const r = planted(t.testId + ".js", relabel);
+    check(r.status === 1 && /Images the renderer would refuse/.test(r.out) && r.out.indexOf("testdata/" + t.testId + ".js ") !== -1 && /figure \(data:image\/jpeg;base64,/.test(r.out),
+      "a current build's figure whose PNG bytes are labelled jpeg FAILS the build, naming " + t.testId, why(r));
+  });
+  run("image-choice", () => {
+    const t = TESTS.find(x => /"image":\s*"data:image\/png;base64,/.test(fs.readFileSync(path.join(tmp, "testdata", x.testId + ".js"), "utf8")));
+    const r = planted(t.testId + ".js", s => s.replace(/("image":\s*"data:image\/)png(;base64,)/, "$1jpeg$2"));
+    check(r.status === 1 && r.out.indexOf("testdata/" + t.testId + ".js ") !== -1 && /choice A \(data:image\/jpeg;base64,/.test(r.out),
+      "a shipped image CHOICE relabelled the same way FAILS the build, naming " + t.testId + " and the choice", why(r));
+  });
+  run("image-bank", () => {
+    const b = BANKS.find(x => /"figure":\s*"data:image\/png;base64,/.test(fs.readFileSync(path.join(tmp, "testdata", x.bankId + ".js"), "utf8")));
+    const r = planted(b.bankId + ".js", relabel);
+    check(r.status === 1 && r.out.indexOf("testdata/" + b.bankId + ".js ") !== -1,
+      "a bank figure relabelled the same way FAILS the build, naming " + b.bankId, why(r));
+  });
+  run("image-archived", () => {
+    const f = fs.readdirSync(path.join(tmp, "testdata", "archive")).find(x => x.indexOf("@") !== -1 &&
+      /"figure":\s*"data:image\/png;base64,/.test(fs.readFileSync(path.join(tmp, "testdata", "archive", x), "utf8")));
+    const r = planted(path.join("archive", f), relabel);
+    check(r.status === 0 && /archived builds hold images the renderer refuses/.test(r.warn) && r.warn.indexOf(f) !== -1,
+      "an ARCHIVED build's relabelled figure still builds, with a WARNING naming " + f, why(r));
   });
 
   run("bank-version", () => {

@@ -524,13 +524,19 @@
                           { image: "data:image/png;base64," + SVG_OK },                              // SVG bytes declared png
                           { image: IMG_URIS[3].replace(/=+$/, "") + "AAA" }];                        // a payload atob cannot decode
         imgQ.choices = MISMATCH;
+        /* the surface before this one left exactly the DOM asserted here
+           (four placeholders, no <img>), so blank the pane first and require
+           review to be ENTERED: placeholders seen must be this render's
+           (review 2026-10-18) */
+        $("paneRight").innerHTML = '<div id="misSentinel"></div>';
         root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
         await wait(450);
+        const misEntered = !$("screen-test").classList.contains("hidden") && !document.getElementById("misSentinel");
         const mis = [...document.querySelectorAll("#paneRight .choice")];
         const misPlaceholder = mis.length === 4 && mis.every(c => c.querySelector(".cimg-missing") && !c.querySelector("img"));
         results.push({ surface: "Image sources that pass the grammar but whose bytes are not the declared type (or do not decode) render the placeholder: no <img>",
-          pass: misPlaceholder && !window.__XSS_FIRED,
-          note: `${mis.length} choices, all placeholders ${misPlaceholder}` + (misPlaceholder ? "" : "; <img> on: " + mis.filter(c => c.querySelector("img")).map(c => c.dataset.idx).join(",")) });
+          pass: misEntered && misPlaceholder && !window.__XSS_FIRED,
+          note: `review entered and re-rendered ${misEntered}; ${mis.length} choices, all placeholders ${misPlaceholder}` + (misPlaceholder ? "" : "; <img> on: " + mis.filter(c => c.querySelector("img")).map(c => c.dataset.idx).join(",")) });
         /* a scripted SVG passes the grammar and renders through <img>, which runs nothing */
         $("rvBackBtn").click(); await wait(350);
         imgQ.choices = [{ image: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><script>window.__XSS_FIRED=true</script><rect width="40" height="20" fill="#48c"/></svg>') },
@@ -541,6 +547,22 @@
         results.push({ surface: "A scripted SVG source renders as an <img> and executes nothing",
           pass: !!svgImg && /^data:image\/svg\+xml;base64,/.test(svgImg.getAttribute("src")) && !window.__XSS_FIRED && !document.querySelector("#paneRight .choice script"),
           note: svgImg ? "svg+xml through <img>; __XSS_FIRED=" + window.__XSS_FIRED : "no <img> rendered for the svg source" });
+        /* XML's prolog (review 2026-10-18): an XML declaration, a comment and
+           a DOCTYPE before the root, as matplotlib and Illustrator write
+           them, pass the bytes check and the browser DRAWS the result */
+        $("rvBackBtn").click(); await wait(350);
+        imgQ.choices = [{ image: "data:image/svg+xml;base64," + btoa('<?xml version="1.0" encoding="utf-8"?>\n<!-- Generator: a plotting tool -->\n' +
+          '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n' +
+          '<svg width="40" height="20" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="20" fill="#48c"/></svg>') },
+          { image: IMG_URIS[1] }, { image: IMG_URIS[2] }, { image: IMG_URIS[3] }];
+        $("paneRight").innerHTML = "";
+        root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
+        await wait(600);
+        const dtImg = document.querySelector('#paneRight .choice[data-idx="0"] img.choice-image');
+        if(dtImg && !dtImg.complete) await new Promise(r => { dtImg.onload = dtImg.onerror = r; setTimeout(r, 2000); });
+        results.push({ surface: "A DOCTYPE'd SVG (XML declaration, comment, DOCTYPE) passes the bytes check and the browser draws it",
+          pass: !!dtImg && dtImg.naturalWidth === 40 && !document.querySelector('#paneRight .choice[data-idx="0"] .cimg-missing'),
+          note: dtImg ? "rendered " + dtImg.naturalWidth + "x" + dtImg.naturalHeight : "no <img>: the check refused it" });
         imgQ.choices = IMG_URIS.map(u => ({ image: u }));
         $("rvBackBtn").click(); await wait(350);
 

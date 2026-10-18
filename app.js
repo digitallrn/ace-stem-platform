@@ -2941,16 +2941,28 @@
        2. png: the 8-byte signature; jpeg: FF D8 FF (start of image, then
           a marker);
        3. svg+xml has no signature, so the whole document is decoded (every
-          shipped SVG is under 24 KB) and its ROOT must be <svg> in the SVG
-          namespace (default or prefixed), after at most a UTF-8 BOM, an XML
-          declaration, whitespace and comments. A browser will not load an
-          <img> whose root is in no namespace. A DOCTYPE is not admitted:
-          the converter refuses one.
+          shipped SVG is under 24 KB). It must be an SVG document as XML
+          defines one. After XML's prolog (a UTF-8 BOM, then any whitespace,
+          comments and processing instructions, the XML declaration among
+          them, and at most one DOCTYPE, internal subset allowed), the ROOT
+          start tag is <svg> in the SVG namespace, by a default xmlns or by
+          a prefix bound with its own xmlns:prefix. The value is compared
+          after its character references are expanded. A browser will not
+          load an <img> whose SVG root is in no namespace. One form is not
+          expanded and is refused: an xmlns written through an entity the
+          internal subset declares (old Illustrator exports).
+     A refusal is the placeholder, never a throw: everything that can throw
+     (atob, the regexes' backtracking stack on a pathological multi-MB
+     prolog, String.fromCodePoint) sits inside the try.
      What it does not prove: that a raster with a valid signature decodes to
-     its end (a truncated PNG still shows the glyph). The converter's full
-     decode is that gate (§5.3). It also says nothing about what an SVG
-     CONTAINS: the render path is <img>, which runs no script and fetches
-     nothing. */
+     its end (a truncated PNG still shows the glyph); for choices the
+     converter's full decode is that gate (§5.3). It also says nothing about
+     what an SVG CONTAINS: the render path is <img>, which runs no script
+     and fetches nothing. The test-bank converter checks image CHOICES at
+     least this hard but stem FIGURES against the grammar alone, so
+     build-site.js runs this same function over every image a deploy ships
+     and fails the build on a refusal, rather than let a student meet the
+     placeholder. */
   function imageSourceOk(s){
     const m = typeof s === "string" ? CHOICE_IMAGE_RE.exec(s) : null;
     if(!m) return false;
@@ -2959,18 +2971,25 @@
     let pad = 0;
     while(pad < 3 && s.charCodeAt(s.length - 1 - pad) === 61) pad++;   // trailing "="
     if(pad ? (pad > 2 || n % 4 !== 0) : n % 4 === 1) return false;
-    let b;
-    try{ b = atob(s.slice(off, type === "svg+xml" ? s.length : off + 12)); }catch(e){ return false; }
-    if(type === "png") return b.slice(0, 8) === "\x89PNG\r\n\x1A\n";
-    if(type === "jpeg") return b.slice(0, 3) === "\xFF\xD8\xFF";
-    const r = /^(?:\xEF\xBB\xBF)?(?:<\?xml[ \t\r\n][^?]*\?>)?(?:[ \t\r\n]|<!--(?:[^-]|-[^-])*-->)*<(?:([A-Za-z_][\w.-]*):)?svg((?:[ \t\r\n]+[^ \t\r\n=\/>"']+[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'))*)[ \t\r\n]*\/?>/.exec(b);
-    if(!r) return false;
-    const want = r[1] ? "xmlns:" + r[1] : "xmlns";
-    const attr = /([^ \t\r\n=\/>"']+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/g;
-    for(let a = attr.exec(r[2]); a; a = attr.exec(r[2])){
-      if(a[1] === want) return (a[2] !== undefined ? a[2] : a[3]) === "http://www.w3.org/2000/svg";
-    }
-    return false;
+    try{
+      const b = atob(s.slice(off, type === "svg+xml" ? s.length : off + 12));
+      if(type === "png") return b.slice(0, 8) === "\x89PNG\r\n\x1A\n";
+      if(type === "jpeg") return b.slice(0, 3) === "\xFF\xD8\xFF";
+      const prolog = /^(?:\xEF\xBB\xBF)?(?:[ \t\r\n]|<!--(?:[^-]|-[^-])*-->|<\?(?:[^?]|\?(?!>))*\?>)*(?:<!DOCTYPE[ \t\r\n](?:[^\[>"']|"[^"]*"|'[^']*')*(?:\[(?:[^\]"'<]|"[^"]*"|'[^']*'|<!--(?:[^-]|-[^-])*-->|<\?(?:[^?]|\?(?!>))*\?>|<(?!!--|\?))*\][ \t\r\n]*)?>(?:[ \t\r\n]|<!--(?:[^-]|-[^-])*-->|<\?(?:[^?]|\?(?!>))*\?>)*)?/.exec(b);
+      const root = /<(?:([^ \t\r\n:=\/>"'<!?]+):)?svg((?:[ \t\r\n]+[^ \t\r\n=\/>"']+[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'))*)[ \t\r\n]*\/?>/y;
+      root.lastIndex = prolog[0].length;
+      const r = root.exec(b);
+      if(!r) return false;
+      const want = r[1] ? "xmlns:" + r[1] : "xmlns";
+      const attr = /([^ \t\r\n=\/>"']+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/g;
+      for(let a = attr.exec(r[2]); a; a = attr.exec(r[2])){
+        if(a[1] !== want) continue;
+        const v = (a[2] !== undefined ? a[2] : a[3]).replace(/&(?:#x([0-9A-Fa-f]+)|#([0-9]+)|(amp|lt|gt|quot|apos));/g,
+          (x, h, d, e) => h ? String.fromCodePoint(parseInt(h, 16)) : d ? String.fromCodePoint(parseInt(d, 10)) : ({ amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" })[e]);
+        return v === "http://www.w3.org/2000/svg";
+      }
+      return false;
+    }catch(e){ return false; }
   }
   function isImageChoice(c){ return !!c && typeof c === "object" && !Array.isArray(c); }
   function choiceImageSrc(c){

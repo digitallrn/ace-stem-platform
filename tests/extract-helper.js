@@ -1,5 +1,10 @@
 /* tests/extract-helper.js — shared by tests/timer-drift.test.js and
-   tests/assignment-delete.test.js (not itself a test suite; nothing to run).
+   tests/assignment-delete.test.js (not itself a test suite; nothing to run),
+   the image suites, and — since 2026-10-18 — build-site.js, whose deploy
+   gate takes app.js's image guard out with it. So this file is on the
+   DEPLOY path: a change that breaks it reds the Netlify build (loudly,
+   naming app.js), and tests/build-site-drift.test.js copies it into its
+   throwaway checkout for that reason.
 
    app.js is a DOM-heavy single IIFE with no exports, so it can't be
    `require()`d or vm-loaded whole the way attempts.js can (see

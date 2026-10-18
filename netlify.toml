@@ -4,7 +4,10 @@
 #   1. gen-config.js  — writes config.js from environment variables, failing
 #                       the build if they are missing (see SETUP.md).
 #   2. build-site.js  — copies ONLY the files the running app needs into
-#                       _site/, which is what gets published.
+#                       _site/, which is what gets published, and fails the
+#                       build on any image the renderer would refuse
+#                       (2026-10-18: app.js imageSourceOk over every figure
+#                       and image choice; an archived build only warns).
 #
 # Required environment variables (Site configuration → Environment variables):
 #   SUPABASE_URL              https://<ref>.supabase.co

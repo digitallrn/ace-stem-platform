@@ -137,8 +137,9 @@ Example table:
   "skill": string | null,
   "tags": [strings],               // [] when untagged (v1.2)
   "figure": string,                // optional; a data URI matching the grammar in §5 rule 8
-                                   // (2026-10-07: the app refuses anything else and shows a
-                                   // "Figure unavailable" frame — no URL figures)
+                                   // whose decoded bytes are the declared type (§5 rule 7;
+                                   // 2026-10-07 / 2026-10-18: the app refuses anything else and
+                                   // shows a "Figure unavailable" frame — no URL figures)
   "figureCaption": string          // optional
 }
 ```
@@ -186,9 +187,15 @@ A row reaches the clean JSON only if **all** hold; otherwise it lands in
 7. `needs_figure=1` ⇒ `figure` non-blank; and ANY non-blank `figure` must
    match `^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*$`
    (2026-10-07: the renderer refuses anything else with a "Figure
-   unavailable" frame; every shipped figure already matches). The grammar
-   half is not in the converter yet — it checks presence only — and lands
-   with the converter commit, like rule 8's gates.
+   unavailable" frame; every shipped figure already matches). The converter
+   checks the grammar since test-bank `6d03bcb`. **Bytes (2026-10-18):** the
+   decoded bytes must also be the type the URI declares. PNG must open with
+   its 8-byte signature and JPEG with `FF D8 FF`. An SVG must be an XML
+   document whose root is `<svg>` in the SVG namespace. The renderer
+   (`imageSourceOk`, IMAGE-CHOICES-SPEC.md §2.4) refuses anything else with
+   the same frame. The converter does NOT check a figure's bytes yet, so
+   `build-site.js` runs the renderer's own check over every shipped figure
+   and fails the deploy on a refusal. All 608 shipped figures pass.
 8. **Image choices (2026-10-07).** A picture choice comes from the
    `choice_a_img` … `choice_d_img` columns (never the `choice_*` text cells, so
    no prose gate ever sees base64) and is emitted as `{"image": s}` with `s`
@@ -200,18 +207,21 @@ A row reaches the clean JSON only if **all** hold; otherwise it lands in
    becomes: all four choices are non-empty strings, OR all four are valid
    image objects — a mixed item fails the row (`mixed text/image choices`);
    the same rule applies in `bank_lib.validate_payload_shape` (the
-   payload-level gate every `load_bank` runs — today strings-only, so it must
-   change BEFORE the first image item is minted or every later bank load
-   aborts) and in `bank_lib.mcq_answerability_problems`. The key is still a
+   payload-level gate every `load_bank` runs; it had to accept the shape
+   BEFORE the first image item was minted, or every later bank load would
+   abort, and `6d03bcb` changed it first) and in
+   `bank_lib.mcq_answerability_problems`. The key is still a
    letter A–D. Dedup keys an image choice by `[image:<sha256 of the decoded
    bytes, 16 hex>]`, never by the base64 text. The exporter refuses to emit
    the shape unless the platform checkout's app.js carries `choiceImageSrc`.
-   An item is never held FOR being an image item once the shape exists; fewer
-   than four decodable images still fails this rule. Full contract:
-   IMAGE-CHOICES-SPEC.md §5. **Canonical copies:** the test-bank repo's
-   SCHEMA-v1.2.md and SCHEMA-BANKS-v1.md §3 still read `[4 strings]` until
-   the converter commit mirrors this section; until then IMAGE-CHOICES-SPEC.md
-   §5 is authoritative for the converter.
+   An item is never held FOR being an image item; fewer than four decodable
+   images still fails this rule. Full contract: IMAGE-CHOICES-SPEC.md §5.
+   The converter implements this rule since test-bank `6d03bcb`
+   (`image_choices.py`), and the first two image items are live at platform
+   `b67d3a7`. The renderer also checks each choice's bytes against its
+   declared type (`imageSourceOk`, the same check as rule 7's figures).
+   **Canonical copies:** the test-bank repo's SCHEMA-v1.2.md (its v1.2
+   addendum) and SCHEMA-BANKS-v1.md §3 carry the shape since `6d03bcb`.
 
 `tags` never fails a row on content — it is split on `|`, entries trimmed,
 empties dropped — but like every cell it must not contain raw newlines/tabs.

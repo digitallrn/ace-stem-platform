@@ -180,6 +180,80 @@ archiveFiles.forEach(f => {
   fs.copyFileSync(rel, path.join(OUT, rel));
   copied.push(rel);
 });
+
+/* Every IMAGE the deploy ships must be one the renderer accepts (2026-10-18,
+   IMAGE-CHOICES-SPEC §2.4). app.js's imageSourceOk refuses a source outside
+   the data:image grammar or whose decoded bytes are not the type it
+   declares, and the student then sees "Figure unavailable" or "Image
+   unavailable" in its place. The test-bank converter checks image CHOICES
+   at least that hard but stem FIGURES against the grammar alone, so a
+   mislabelled or non-SVG figure can export cleanly. This makes that a red
+   build naming the item, the same posture as a manifest entry with no file.
+   The guard is taken from app.js itself (tests/extract-helper.js, the
+   extraction the node suites use), so the build checks exactly what the
+   renderer runs, and "renders" means what the renderer does with a figure
+   (a frame for any truthy q.figure) and a choice (the image path for any
+   non-string entry). Current builds and banks are FATAL: the fix is a
+   re-export. An ARCHIVED build is byte-pinned to the commit it was served
+   from and cannot be re-exported, so a refusal there is a WARNING naming
+   it: Review Mode and resume on that build would show the placeholder. */
+{
+  const vm = require("vm");
+  /* the guard decodes with the global atob, exactly as the browser does
+     (Node 16+). Without it every image would be "refused" — say why instead */
+  if(typeof atob !== "function")
+    die(["The image guard needs Node 16 or later (global atob); this build runs Node " + process.version + "."]);
+  let guard;
+  try{
+    const { extractFn, extractConst } = require("./tests/extract-helper");
+    const appSrc = fs.readFileSync("app.js", "utf8");
+    guard = new Function([extractConst(appSrc, "CHOICE_IMAGE_RE"), extractFn(appSrc, "imageSourceOk"),
+      extractFn(appSrc, "isImageChoice"), extractFn(appSrc, "choiceImageSrc"), extractFn(appSrc, "figureSrc")].join("\n") +
+      "\nreturn { choiceImageSrc, figureSrc };")();
+  }catch(e){
+    die(["Could not take the image guard from app.js (" + e.message + ").",
+         "build-site.js checks every shipped image with app.js's own choiceImageSrc and figureSrc."]);
+  }
+  const tally = { figures: 0, choices: 0 };
+  const audit = (rel, id, bank) => {
+    const c = { window: { __TESTDATA__: {}, __BANKDATA__: {} } };
+    vm.createContext(c);
+    vm.runInContext(fs.readFileSync(rel, "utf8"), c, { filename: rel });
+    const data = bank ? c.window.__BANKDATA__[id] : c.window.__TESTDATA__[id];
+    if(!data) return [rel + " does not register " + id];
+    const qs = bank ? (data.questions || []) : [].concat(...(data.modules || []).map(m => m.questions || []));
+    const bad = [];
+    qs.forEach(q => {
+      if(!q) return;
+      const where = rel.replace(/\\/g, "/") + " " + (q.id || q.qid);
+      const head = v => typeof v === "string" ? v.slice(0, 30) + "…" : String(v);
+      if(q.figure){ tally.figures++; if(guard.figureSrc(q) !== q.figure) bad.push(where + " figure (" + head(q.figure) + ")"); }
+      (Array.isArray(q.choices) ? q.choices : []).forEach((ch, i) => {
+        if(typeof ch === "string") return;
+        tally.choices++;
+        if(guard.choiceImageSrc(ch) === null) bad.push(where + " choice " + "ABCD".charAt(i) + " (" + head(ch && ch.image) + ")");
+      });
+    });
+    return bad;
+  };
+  const fatal = [].concat(
+    ...manifestIds.map(id => audit(path.join(TESTDATA_DIR, id + ".js"), id, false)),
+    ...bankIds.map(id => audit(path.join(TESTDATA_DIR, id + ".js"), id, true)));
+  const archived = [].concat(...archiveFiles.map(f => audit(path.join(ARCHIVE_DIR, f), f.split("@")[0], false)));
+  if(fatal.length){
+    die(["Images the renderer would refuse — students would see \"Figure unavailable\" / \"Image unavailable\":"]
+      .concat(fatal.slice(0, 20).map(b => "  " + b), fatal.length > 20 ? ["  … and " + (fatal.length - 20) + " more"] : [],
+        ["A source must match the data:image grammar AND its decoded bytes must be the type it declares",
+         "(app.js imageSourceOk; IMAGE-CHOICES-SPEC.md §2.4). Fix the item in the test-bank repo and re-export."]));
+  }
+  if(archived.length){
+    console.warn("build-site.js: WARNING — archived builds hold images the renderer refuses (Review Mode / resume on them show the placeholder): " +
+      archived.slice(0, 10).join("; ") + (archived.length > 10 ? "; … and " + (archived.length - 10) + " more" : ""));
+  }
+  console.log("build-site.js: image guard — " + tally.figures + " figures and " + tally.choices +
+    " image choices checked across current, bank and archived builds; every current and bank image passes");
+}
+
 /* The canonical-id index records the build of every form and bank it was
    generated against. Drift against the manifests is NOT fatal — the
    dashboard names it in its own notice and degrades to "not indexed" /
