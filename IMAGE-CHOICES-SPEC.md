@@ -148,18 +148,36 @@ invariants, each pinned by a test:
       12 base64 characters are decoded, which matters because a figure can
       be 600 KB;
    3. svg+xml has no signature, so the whole document is decoded (every
-      shipped SVG is under 24 KB). It must be an SVG document as XML defines
-      one. First comes XML's prolog: a UTF-8 BOM, then any whitespace,
-      comments and processing instructions (the XML declaration is one),
-      and at most one DOCTYPE, internal subset allowed. Then the ROOT start
-      tag must be `<svg>` in the SVG namespace, via
-      `xmlns="http://www.w3.org/2000/svg"` or a prefix bound by its own
-      `xmlns:prefix` (any XML name, non-ASCII included). The value is
-      compared after its character references are expanded. A browser will
-      not load an `<img>` whose SVG root is in no namespace. Refused: an
-      `xmlns` written through an entity the internal subset declares (old
-      Illustrator exports), UTF-16, a case-changed `<SVG>`, an unquoted
-      attribute, text before the root, and a second DOCTYPE.
+      shipped SVG is under 24 KB). It is read as XML 1.0 reads it, as far as
+      the end of the root start tag. Chrome draws an `<img>` SVG only if it
+      is well-formed, so the rules are XML's, exactly: looser rules pass
+      what the browser shows as broken, stricter ones refuse what it draws.
+      In order:
+      - an optional UTF-8 BOM;
+      - an optional XML declaration, only at the very start
+        (`<?xml version="1.x" …?>`);
+      - any whitespace, comments (no `--` inside) and processing
+        instructions (a Name target that is not `xml` in any case, so
+        `<?xml-stylesheet …?>` is one);
+      - at most one DOCTYPE: a Name; then optionally `SYSTEM "lit"` or
+        `PUBLIC "pubid" "lit"`; then optionally an internal subset holding
+        only whitespace, comments, PIs, `%refs;` and
+        `<!ENTITY|ATTLIST|ELEMENT|NOTATION …>` declarations; then
+        whitespace, comments and PIs again;
+      - the ROOT start tag `<svg>` or `<prefix:svg>`. Its attributes are
+        whitespace-separated Names, and their quoted values hold no `<` and
+        no bare `&`. It must be in the SVG namespace: a default
+        `xmlns="http://www.w3.org/2000/svg"`, or the `xmlns:prefix` that
+        binds its own prefix. The first such attribute decides, compared
+        after character references are expanded. A browser will not load an
+        `<img>` whose SVG root is in no namespace.
+
+      Measured in Chrome 152 (2026-10-18) on 54 probe documents, the check
+      agrees with the browser on 52. The two exceptions are deliberate
+      refusals of documents Chrome draws: an `xmlns` written through an
+      internal-subset entity, and one supplied as an ATTLIST default (old
+      Illustrator exports). UTF-16 is refused too. These are rare, and they
+      mean a red deploy, not a silent loss.
 
    It runs at both acceptance sites, choices and figures, because they share
    one guard (9.4). On 2026-10-18 every shipped image passes it: 608 figures
@@ -178,8 +196,13 @@ invariants, each pinned by a test:
    CHOICES, as SVG safety rules. For FIGURES, its rule 7 checks the grammar
    alone, and Chrome draws a matplotlib- or Illustrator-style SVG. Such a
    figure would have exported cleanly and then shown "Figure unavailable"
-   where the build before drew it. So the check now asks only whether the
-   bytes are an SVG.
+   where the build before drew it. The second version (`e92a2bd`, never
+   deployed) admitted the prolog loosely, and a second review showed it
+   overshot. It accepted an XML declaration anywhere, a PI with any target,
+   and a DOCTYPE or subset with any body: 23 forms Chrome shows as broken.
+   A figure template with one stray newline before `<?xml` would have
+   passed every gate and shown the broken-image glyph. Hence XML 1.0's
+   grammar, exactly.
 
    **The deploy runs the same check (2026-10-18).** The converter does not
    check a figure's bytes, so `build-site.js` takes `imageSourceOk`,
@@ -189,15 +212,31 @@ invariants, each pinned by a test:
    the build, naming the item. In an archived build, which is byte-pinned
    and cannot be re-exported, a refusal is a WARNING naming the file. So a
    mislabelled figure is a red deploy, never a placeholder in front of a
-   student. tests/build-site-drift.test.js proves both outcomes on a copy of
-   the tree.
+   student.
+
+   Before it judges any test data, the build self-checks. The guard as
+   extracted must accept a known-good PNG, JPEG, plain SVG, prefixed SVG
+   and DOCTYPE'd SVG, and refuse PNG bytes labelled jpeg. A helper added
+   beside `imageSourceOk` would otherwise read as "every SVG refused — fix
+   the test data". Instead it fails as an extraction problem, naming
+   build-site.js.
+
+   It also prints its counts per type and per lane: current and bank figures
+   png 212, jpeg 12, svg+xml 41; archived 226, 36, 81. A gate that skipped a
+   type or a lane would show it.
+
+   tests/build-site-drift.test.js proves all of this on a copy of the tree.
 
    What the check does not prove: that a raster with a correct opening
    decodes to the end (a truncated PNG still shows the glyph); for choices
-   the converter's full decode is that gate (§5.3). Nor does it look at what
-   an SVG contains: the render path is `<img>`, which runs no script and
-   fetches nothing, so a scripted SVG is still accepted (the browser proof
-   renders one).
+   the converter's full decode is that gate (§5.3). For an SVG, nothing past
+   the root start tag is read. A body cut short or malformed (an unclosed
+   element, a missing `</svg>`) still shows the glyph, and so do duplicate
+   or unbound attributes and undefined entities on the root tag. For
+   choices, the converter's XML parse is that gate; for figures, nothing is
+   yet (test-bank work). Nor does it look at what an SVG contains: the
+   render path is `<img>`, which runs no script and fetches nothing, so a
+   scripted SVG is still accepted (the browser proof renders one).
 
 `alt` is app-generated unless the reserved field is present; the new classes
 (`choice-img`, `cimg`, `choice-image`, `cimg-missing`) are NOT in
@@ -400,8 +439,8 @@ each support removed. The numbered rules below stay the contract.
 | app.js DROP_ELEMENTS comment | one clause |
 | styles.css after `.choice.eliminated .hl` | the `.cimg` rules; the 2×2 grid commented beside them |
 | render.js, grading.js, attempts.js, dashboard.js, assemble.py, archive-testdata.js | NO change |
-| build-site.js (2026-10-18) | the deploy's image guard: app.js's own `imageSourceOk` / `choiceImageSrc` / `figureSrc` over every shipped image; a refusal in a current build or bank fails the build, in an archived build it is a WARNING (§2.4) |
-| tests/build-site-drift.test.js (2026-10-18) | the guard on a copy of the tree: the clean tree passes; a relabelled figure, image choice and bank figure each fail the build by name; an archived one warns. Against `4416e5d`'s build-site.js (no guard) its five guard checks fail |
+| build-site.js (2026-10-18) | the deploy's image guard: app.js's own `imageSourceOk` / `choiceImageSrc` / `figureSrc` over every shipped image, after a self-check on known-good and known-bad images; a refusal in a current build or bank fails the build, in an archived build it is a WARNING; counts printed per type and lane (§2.4) |
+| tests/build-site-drift.test.js (2026-10-18) | the guard on a copy of the tree: the clean tree passes, with floors on each type's total and every type in both lanes. Each of these fails the build by name: a relabelled figure, image choice and bank figure; an un-namespaced SVG figure; a path figure; and an image choice with no image. An archived one warns, and a const planted beside `imageSourceOk` fails as an extraction problem. 16/0. Against `4416e5d`'s build-site.js (no guard) 9 checks fail, and against `e92a2bd`'s (no self-check, no per-type counts) 2 |
 | tests/image-choice-fixture.js | NEW — the shared four-image item (four distinct 4×3 PNGs) |
 | tests/image-choice.test.js | NEW — the seam, the grammar, the placeholder, the fixture, the proof's copy of it, (0792fe7) the stem-figure guard with every shipped figure, and (2026-10-18) §9 the bytes check at both sites with its mutants, plus every shipped image choice |
 | tests/keep-classes.test.js | explicit image-choice audit over every form and bank through the renderer's own `choiceImageSrc` (grammar, and since 2026-10-18 bytes), with planted-fixture controls |
@@ -412,7 +451,7 @@ each support removed. The numbered rules below stay the contract.
 
 ## 7. Tests
 
-- `node tests/image-choice.test.js`: 102 checks (§8 adds the Math-replay
+- `node tests/image-choice.test.js`: 113 checks (§8 adds the Math-replay
   gate's truth table, its five call-site pins, and a FILE-WIDE, prefix-blind
   sweep: every mention of passageHtml/stemHtml/choiceHtml in app.js is an
   initialiser, restoreAnnotations, saveAnnotation or one of the five gated
@@ -441,25 +480,37 @@ each support removed. The numbered rules below stay the contract.
   `choiceImageSrc` beside them; ruling 9.4's "258" was the student-servable
   subset, current forms plus banks. §9 (2026-10-18) is the bytes check, at
   BOTH sites.
-  - 20 true-type sources are accepted: the fixture PNGs, a JPEG head, and
+  - 24 true-type sources are accepted: the fixture PNGs, a JPEG head, and
     SVGs with XML's whole prolog. That covers a BOM, the XML declaration,
-    comments, an xml-stylesheet instruction, matplotlib- and
-    Illustrator-style DOCTYPEs, and an internal subset holding a `]` and a
-    quote. It also covers a non-ASCII prefix, Inkscape's attribute order, a
-    namespace written with character references, and a scripted SVG.
-  - 37 grammar-valid sources are refused: PNG, JPEG and SVG bytes each
-    declared as the other two types; GIF and HTML bytes; zero bytes; broken,
-    shifted, cut or CRLF-to-LF signatures, and a JPEG start-of-image
-    followed by a non-marker; and SVG documents whose root is not `<svg>`
-    in the SVG namespace or whose prolog is not XML's. Among those: an
-    unprefixed root with only `xmlns:svg`, a case-changed `<SVG>`, an
-    unquoted attribute, two DOCTYPEs, an open internal subset, an
-    entity-written namespace, an out-of-range character reference, and text
-    before the root. Three padding faults complete the list.
+    comments and PIs before and after a DOCTYPE (a Graphviz-style file), an
+    xml-stylesheet instruction, matplotlib-, Illustrator- and SYSTEM-style
+    DOCTYPEs, and an internal subset holding a `]`, a quote, an ENTITY, an
+    ATTLIST, a PI and a `%ref;`. It also covers a non-ASCII prefix,
+    Inkscape's attribute order, a namespace written with character
+    references, references in another attribute, and a scripted SVG.
+  - 71 grammar-valid sources are refused: PNG, JPEG and SVG bytes each
+    declared as the other two types; GIF and HTML bytes; zero bytes; and
+    every byte of both signatures broken on its own (shifted, cut, CRLF to
+    LF and LF to CRLF, first byte, byte 7, JPEG's middle byte, a non-marker
+    after the start of image). The rest are SVG documents that are not
+    XML, or whose root is not `<svg>` in the SVG namespace. Among those: an
+    XML declaration that is not first (after a newline, a space, a comment,
+    a BOM and newline, a DOCTYPE, or a second one), without a version, or at
+    version 2.0; PIs with no target, an `xml`/`XML` target or a non-Name
+    one; DOCTYPEs with junk, a bare SYSTEM, PUBLIC with one literal, a `[`
+    in the public id, no name, junk in or after the subset, an unclosed
+    ENTITY, lowercase, or no space; a comment holding `--`; and root tags
+    with attributes run together, a `<` or a bare `&` in a value, a non-Name
+    attribute or prefix, a wrong xmlns before the right one, an
+    entity-written or ATTLIST-default namespace, an out-of-range or
+    `;`-less character reference, `xmlns:svg` only, `<SVG>`, an unquoted
+    attribute, or text before the root. Three padding faults complete the
+    list.
   - The decodability arithmetic agrees with `atob` on all 80 length ×
     padding cases.
-  - A pathological 8 MB prolog is refused and never throws. Any throw is a
-    named failure, not a crash of the suite.
+  - Never a throw: a 21 MB SVG whose prolog overflows the regex stack is
+    refused at both sites, and an 8 MB well-formed root tag is accepted. Any
+    throw is a named failure, not a crash of the suite.
   - The placeholder renders in the seam and in `figureFrameHtml`.
   - A sweep pins where the renderer accepts an image. There are exactly two
     `<img>` writers, each fed by its guard, and the overlay is fed by
@@ -468,7 +519,7 @@ each support removed. The numbered rules below stay the contract.
     bracketed `["src"]`, `srcset`, `setAttribute`, `new Image` or
     `createElement("img")` appears. The grammar is named only at its
     declaration and inside `imageSourceOk`.
-  - Fourteen in-process mutants, each built from the real source by a
+  - Twenty-five in-process mutants, each built from the real source by a
     replacement that must apply, must each turn the battery red:
     - either site running the bare grammar;
     - the decodability rule dropped;
@@ -478,15 +529,24 @@ each support removed. The numbered rules below stay the contract.
     - the namespace value not compared;
     - an SVG decoded only as far as a raster's head;
     - a prefixed root not bound to its own prefix;
-    - no DOCTYPE admitted;
-    - no processing instruction admitted;
-    - character references not expanded.
+    - no DOCTYPE admitted; no processing instruction admitted;
+    - character references not expanded;
+    - and each XML rule loosened in turn: the declaration anywhere, its
+      version not required, an `xml` PI target admitted, the DOCTYPE's
+      external id or the subset's content unchecked, `--` in a comment,
+      case-insensitive reading, attribute values or names unchecked,
+      attributes run together, and the first xmlns no longer deciding.
 
-  The review's own surviving mutants (5- to 7-byte PNG compares, any
-  `xmlns:*` counted, a case-insensitive root, the start tag's end dropped,
-  the `try` removed, an aliased or bracketed overlay assignment) each turn
-  it red too. Against b67d3a7's app.js (no check) the suite fails 22
-  checks, among them the battery at both sites.
+  Every mutant both reviews reported as surviving now turns it red BY THE
+  BATTERY, not through a mutant needle going stale. That covers the
+  5-, 6- and 7-byte PNG compares, a compare that skips 0x89, a JPEG compare
+  that skips D8, and any `xmlns:*` counted. It also covers a
+  case-insensitive root, the start tag's end dropped, the `try` removed,
+  and an aliased or bracketed overlay assignment. Last, it covers an
+  optional DOCTYPE space, junk after the subset, no Misc after the
+  DOCTYPE, a non-Name PI target, any public id, and any prefix. Against
+  b67d3a7's app.js (no check) the suite fails 33 checks, among them the
+  battery at both sites; against e92a2bd's looser prolog it fails 17.
   Mutants that fail it (sixteen): the typeof guard dropped; the regex
   loosened to `^data:`; the saved slot read before the type branch; `<img>`
   inside `.ctext`; `draggable` dropped; alt unescaped; the branch rendering
@@ -551,10 +611,14 @@ each support removed. The numbered rules below stay the contract.
   the loud placeholder (§2.4). keep-classes' audit runs the same check over
   every shipped image choice, image-choice.test.js runs it over every
   shipped figure, and `build-site.js` fails a deploy that ships an image it
-  refuses. What is left: a raster that opens correctly but is
-  truncated or corrupt further in still shows the browser's broken-image
-  glyph (visible and labelled, but not the placeholder). Full decodability
-  is the converter's gate (§5.3: a PIL decode of every raster).
+  refuses. What is left still shows the browser's broken-image glyph
+  (visible and labelled, but not the placeholder):
+  - a raster that opens correctly but is truncated or corrupt further in;
+  - an SVG that is well-formed up to its root start tag but cut short or
+    malformed after it.
+  For choices, the converter is the full gate (§5.3: a PIL decode of every
+  raster, an XML parse of every SVG). For figures, nothing checks either
+  yet; that is owed to the test-bank converter (its rule 7).
 - **Narrow review panes**: `.cimg` is the only flexible item in a review
   choice, so under ~515 px the image yields to the nowrap `.rv-mark`
   (unreachable on target devices for Math-only v1); fold into the

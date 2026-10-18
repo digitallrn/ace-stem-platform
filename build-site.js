@@ -214,8 +214,35 @@ archiveFiles.forEach(f => {
     die(["Could not take the image guard from app.js (" + e.message + ").",
          "build-site.js checks every shipped image with app.js's own choiceImageSrc and figureSrc."]);
   }
-  const tally = { figures: 0, choices: 0 };
-  const audit = (rel, id, bank) => {
+  /* SELF-CHECK before any test data is judged: the guard as extracted must
+     accept known-good images of every kind and refuse a known-bad one. The
+     extraction above names its pieces by hand, and imageSourceOk swallows
+     every exception as a refusal, so a helper or const added beside it in a
+     later refactor would otherwise read as "every SVG refused — fix the item
+     in the test-bank repo" (review 2026-10-18), pointing the fixer at the
+     wrong repo. */
+  {
+    const NS = "http://www.w3.org/2000/svg";
+    const b64 = s => Buffer.from(s, "latin1").toString("base64");
+    const good = [
+      "data:image/png;base64," + b64("\x89PNG\r\n\x1A\n\x00\x00\x00\x0DIHDR"),
+      "data:image/jpeg;base64," + b64("\xFF\xD8\xFF\xE0\x00\x10JFIF\x00"),
+      "data:image/svg+xml;base64," + b64('<svg xmlns="' + NS + '"/>'),
+      "data:image/svg+xml;base64," + b64('<s:svg xmlns:s="' + NS + '"/>'),
+      "data:image/svg+xml;base64," + b64('<?xml version="1.0"?>\n<!-- c -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" ' +
+        '"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="' + NS + '"/>')];
+    const bad = "data:image/jpeg;base64," + b64("\x89PNG\r\n\x1A\n\x00\x00\x00\x0DIHDR");
+    const wrong = good.filter(u => guard.figureSrc({ figure: u }) !== u || guard.choiceImageSrc({ image: u }) !== u)
+      .map(u => "refuses a known-good " + u.slice(11, u.indexOf(";")))
+      .concat(guard.figureSrc({ figure: bad }) === null && guard.choiceImageSrc({ image: bad }) === null ? [] : ["accepts PNG bytes labelled jpeg"]);
+    if(wrong.length)
+      die(["The image guard taken from app.js is not working here: it " + wrong.join("; it ") + ".",
+           "This is build-site.js's extraction, not the test data: a helper or const beside imageSourceOk",
+           "in app.js must be added to the list build-site.js extracts."]);
+  }
+  const tally = { figures: 0, choices: 0, live: { png: 0, jpeg: 0, "svg+xml": 0, other: 0 }, archived: { png: 0, jpeg: 0, "svg+xml": 0, other: 0 } };
+  const kind = v => { const t = /^data:image\/(png|jpeg|svg\+xml);/.exec(typeof v === "string" ? v : ""); return t ? t[1] : "other"; };
+  const audit = (rel, id, bank, archived) => {
     const c = { window: { __TESTDATA__: {}, __BANKDATA__: {} } };
     vm.createContext(c);
     vm.runInContext(fs.readFileSync(rel, "utf8"), c, { filename: rel });
@@ -227,7 +254,10 @@ archiveFiles.forEach(f => {
       if(!q) return;
       const where = rel.replace(/\\/g, "/") + " " + (q.id || q.qid);
       const head = v => typeof v === "string" ? v.slice(0, 30) + "…" : String(v);
-      if(q.figure){ tally.figures++; if(guard.figureSrc(q) !== q.figure) bad.push(where + " figure (" + head(q.figure) + ")"); }
+      if(q.figure){
+        tally.figures++; tally[archived ? "archived" : "live"][kind(q.figure)]++;
+        if(guard.figureSrc(q) !== q.figure) bad.push(where + " figure (" + head(q.figure) + ")");
+      }
       (Array.isArray(q.choices) ? q.choices : []).forEach((ch, i) => {
         if(typeof ch === "string") return;
         tally.choices++;
@@ -237,9 +267,9 @@ archiveFiles.forEach(f => {
     return bad;
   };
   const fatal = [].concat(
-    ...manifestIds.map(id => audit(path.join(TESTDATA_DIR, id + ".js"), id, false)),
-    ...bankIds.map(id => audit(path.join(TESTDATA_DIR, id + ".js"), id, true)));
-  const archived = [].concat(...archiveFiles.map(f => audit(path.join(ARCHIVE_DIR, f), f.split("@")[0], false)));
+    ...manifestIds.map(id => audit(path.join(TESTDATA_DIR, id + ".js"), id, false, false)),
+    ...bankIds.map(id => audit(path.join(TESTDATA_DIR, id + ".js"), id, true, false)));
+  const archived = [].concat(...archiveFiles.map(f => audit(path.join(ARCHIVE_DIR, f), f.split("@")[0], false, true)));
   if(fatal.length){
     die(["Images the renderer would refuse — students would see \"Figure unavailable\" / \"Image unavailable\":"]
       .concat(fatal.slice(0, 20).map(b => "  " + b), fatal.length > 20 ? ["  … and " + (fatal.length - 20) + " more"] : [],
@@ -250,8 +280,10 @@ archiveFiles.forEach(f => {
     console.warn("build-site.js: WARNING — archived builds hold images the renderer refuses (Review Mode / resume on them show the placeholder): " +
       archived.slice(0, 10).join("; ") + (archived.length > 10 ? "; … and " + (archived.length - 10) + " more" : ""));
   }
+  const types = t => "png " + t.png + ", jpeg " + t.jpeg + ", svg+xml " + t["svg+xml"] + (t.other ? ", other " + t.other : "");
   console.log("build-site.js: image guard — " + tally.figures + " figures and " + tally.choices +
     " image choices checked across current, bank and archived builds; every current and bank image passes");
+  console.log("  figures by type: current and bank (" + types(tally.live) + "); archived (" + types(tally.archived) + ")");
 }
 
 /* The canonical-id index records the build of every form and bank it was

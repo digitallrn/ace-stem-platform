@@ -190,8 +190,9 @@ A row reaches the clean JSON only if **all** hold; otherwise it lands in
    unavailable" frame; every shipped figure already matches). The converter
    checks the grammar since test-bank `6d03bcb`. **Bytes (2026-10-18):** the
    decoded bytes must also be the type the URI declares. PNG must open with
-   its 8-byte signature and JPEG with `FF D8 FF`. An SVG must be an XML
-   document whose root is `<svg>` in the SVG namespace. The renderer
+   its 8-byte signature and JPEG with `FF D8 FF`. An SVG must be
+   well-formed XML 1.0 as far as the end of its root start tag, and the
+   root must be `<svg>` in the SVG namespace. The renderer
    (`imageSourceOk`, IMAGE-CHOICES-SPEC.md §2.4) refuses anything else with
    the same frame. The converter does NOT check a figure's bytes yet, so
    `build-site.js` runs the renderer's own check over every shipped figure

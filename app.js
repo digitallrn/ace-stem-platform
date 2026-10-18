@@ -2941,24 +2941,42 @@
        2. png: the 8-byte signature; jpeg: FF D8 FF (start of image, then
           a marker);
        3. svg+xml has no signature, so the whole document is decoded (every
-          shipped SVG is under 24 KB). It must be an SVG document as XML
-          defines one. After XML's prolog (a UTF-8 BOM, then any whitespace,
-          comments and processing instructions, the XML declaration among
-          them, and at most one DOCTYPE, internal subset allowed), the ROOT
-          start tag is <svg> in the SVG namespace, by a default xmlns or by
-          a prefix bound with its own xmlns:prefix. The value is compared
-          after its character references are expanded. A browser will not
-          load an <img> whose SVG root is in no namespace. One form is not
-          expanded and is refused: an xmlns written through an entity the
-          internal subset declares (old Illustrator exports).
+          shipped SVG is under 24 KB) and read as XML 1.0 reads it, as far
+          as the end of the root start tag. Chrome draws an <img> SVG only
+          if it is well-formed, so the rules are XML's exactly; looser ones
+          pass what the browser shows as broken, stricter ones refuse what
+          it draws. In order:
+          - an optional UTF-8 BOM;
+          - an optional XML declaration, only at the very start
+            (`<?xml version="1.x" …?>`);
+          - any whitespace, comments (no "--" inside) and processing
+            instructions (a Name target that is not "xml" in any case);
+          - at most one DOCTYPE: a Name; then optionally SYSTEM "lit" or
+            PUBLIC "pubid" "lit"; then optionally an internal subset that
+            holds only whitespace, comments, PIs, %refs; and <!ENTITY …>,
+            <!ATTLIST …>, <!ELEMENT …>, <!NOTATION …> declarations; then
+            whitespace, comments and PIs again;
+          - the ROOT start tag <svg>, or <prefix:svg>, whose attributes are
+            Names with quoted values holding no "<" and no bare "&". It must
+            be in the SVG namespace: a default xmlns, or the xmlns:prefix
+            that binds its own prefix, compared after character references
+            are expanded. A browser will not load an <img> whose SVG root is
+            in no namespace.
+          Refused although a browser may draw them (stated, rare, and a red
+          deploy rather than a silent loss): an xmlns written through an
+          entity the internal subset declares, or supplied as an ATTLIST
+          default (old Illustrator exports); UTF-16.
      A refusal is the placeholder, never a throw: everything that can throw
      (atob, the regexes' backtracking stack on a pathological multi-MB
      prolog, String.fromCodePoint) sits inside the try.
      What it does not prove: that a raster with a valid signature decodes to
      its end (a truncated PNG still shows the glyph); for choices the
-     converter's full decode is that gate (§5.3). It also says nothing about
-     what an SVG CONTAINS: the render path is <img>, which runs no script
-     and fetches nothing. The test-bank converter checks image CHOICES at
+     converter's full decode is that gate (§5.3). For an SVG, nothing past
+     the root start tag is read: a body cut short or malformed (an unclosed
+     element, a missing </svg>) still shows the glyph, and so do duplicate
+     or unbound attributes and undefined entities on the root tag. Nor does
+     it look at what an SVG CONTAINS: the render path is <img>, which runs
+     no script and fetches nothing. The test-bank converter checks image CHOICES at
      least this hard but stem FIGURES against the grammar alone, so
      build-site.js runs this same function over every image a deploy ships
      and fails the build on a refusal, rather than let a student meet the
@@ -2975,13 +2993,28 @@
       const b = atob(s.slice(off, type === "svg+xml" ? s.length : off + 12));
       if(type === "png") return b.slice(0, 8) === "\x89PNG\r\n\x1A\n";
       if(type === "jpeg") return b.slice(0, 3) === "\xFF\xD8\xFF";
-      const prolog = /^(?:\xEF\xBB\xBF)?(?:[ \t\r\n]|<!--(?:[^-]|-[^-])*-->|<\?(?:[^?]|\?(?!>))*\?>)*(?:<!DOCTYPE[ \t\r\n](?:[^\[>"']|"[^"]*"|'[^']*')*(?:\[(?:[^\]"'<]|"[^"]*"|'[^']*'|<!--(?:[^-]|-[^-])*-->|<\?(?:[^?]|\?(?!>))*\?>|<(?!!--|\?))*\][ \t\r\n]*)?>(?:[ \t\r\n]|<!--(?:[^-]|-[^-])*-->|<\?(?:[^?]|\?(?!>))*\?>)*)?/.exec(b);
-      const root = /<(?:([^ \t\r\n:=\/>"'<!?]+):)?svg((?:[ \t\r\n]+[^ \t\r\n=\/>"']+[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'))*)[ \t\r\n]*\/?>/y;
-      root.lastIndex = prolog[0].length;
-      const r = root.exec(b);
+      /* the grammar above, built from its parts (b is a binary string: a
+         UTF-8 multi-byte character arrives as bytes \x80-\xFF, which is
+         how Name admits non-ASCII) */
+      const S = "[ \\t\\r\\n]";
+      const NAME = "[A-Za-z_:\\x80-\\xFF][A-Za-z0-9._:\\x80-\\xFF-]*";
+      const NCNAME = "[A-Za-z_\\x80-\\xFF][A-Za-z0-9._\\x80-\\xFF-]*";
+      const COMMENT = "<!--(?:[^-]|-[^-])*-->";
+      const PI = "<\\?(?![Xx][Mm][Ll](?:" + S + "|\\?>))" + NAME + "(?:" + S + "(?:[^?]|\\?(?!>))*)?\\?>";
+      const MISC = "(?:" + S + "|" + COMMENT + "|" + PI + ")*";
+      const XMLDECL = "<\\?xml" + S + "+version" + S + "*=" + S + "*(?:\"1\\.[0-9]+\"|'1\\.[0-9]+')(?:[^?]|\\?(?!>))*\\?>";
+      const LIT = "(?:\"[^\"]*\"|'[^']*')";
+      const PUBID = "(?:\"[- \\r\\na-zA-Z0-9'()+,./:=?;!*#@$_%]*\"|'[- \\r\\na-zA-Z0-9()+,./:=?;!*#@$_%]*')";
+      const DECL = "<!(?:ENTITY|ATTLIST|ELEMENT|NOTATION)" + S + "(?:[^>\"']|" + LIT + ")*>";
+      const DOCTYPE = "<!DOCTYPE" + S + "+" + NAME + "(?:" + S + "+(?:SYSTEM" + S + "+" + LIT + "|PUBLIC" + S + "+" + PUBID + S + "+" + LIT + "))?" + S + "*" +
+        "(?:\\[(?:" + S + "|" + COMMENT + "|" + PI + "|%" + NAME + ";|" + DECL + ")*\\]" + S + "*)?>";
+      const REF = "&(?:#[0-9]+|#x[0-9A-Fa-f]+|" + NAME + ");";
+      const VALUE = "(?:\"(?:[^\"<&]|" + REF + ")*\"|'(?:[^'<&]|" + REF + ")*')";
+      const r = new RegExp("^(?:\\xEF\\xBB\\xBF)?(?:" + XMLDECL + ")?" + MISC + "(?:" + DOCTYPE + MISC + ")?" +
+        "<(?:(" + NCNAME + "):)?svg((?:" + S + "+" + NAME + S + "*=" + S + "*" + VALUE + ")*)" + S + "*\\/?>").exec(b);
       if(!r) return false;
       const want = r[1] ? "xmlns:" + r[1] : "xmlns";
-      const attr = /([^ \t\r\n=\/>"']+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/g;
+      const attr = new RegExp("(" + NAME + ")" + S + "*=" + S + "*(?:\"([^\"]*)\"|'([^']*)')", "g");
       for(let a = attr.exec(r[2]); a; a = attr.exec(r[2])){
         if(a[1] !== want) continue;
         const v = (a[2] !== undefined ? a[2] : a[3]).replace(/&(?:#x([0-9A-Fa-f]+)|#([0-9]+)|(amp|lt|gt|quot|apos));/g,

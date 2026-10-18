@@ -103,12 +103,14 @@ function build(){
   const out = (r.stdout || "") + (r.stderr || "");
   return { status: r.status, out: out, warn: out.split(/\r?\n/).filter(l => /WARNING/.test(l) || /^\s+The dashboard will show/.test(l)).join("\n") };
 }
-/* plant: rewrite one file of the copy, build, restore the exact bytes */
-function planted(file, edit){
-  const p = path.join(tmp, "testdata", file);
+/* plant: rewrite one file of the copy, build, restore the exact bytes
+   (planted: a testdata/ file; plantedAt: any path relative to the copy) */
+function planted(file, edit){ return plantedAt(path.join("testdata", file), edit); }
+function plantedAt(rel, edit){
+  const p = path.join(tmp, rel);
   const orig = fs.readFileSync(p);
   const next = edit(orig.toString("utf8"));
-  if(next === orig.toString("utf8")) throw new Error("the plant changed nothing in " + file);
+  if(next === orig.toString("utf8")) throw new Error("the plant changed nothing in " + rel);
   fs.writeFileSync(p, next);
   try{ return build(); } finally { fs.writeFileSync(p, orig); }
 }
@@ -124,9 +126,20 @@ try{
     const r = build();
     check(r.status === 0 && /publish directory _site\/ contains/.test(r.out), "the unmodified tree builds", r.out.slice(-400));
     check(r.warn === "", "the unmodified tree: the drift check is QUIET (index, manifest and bank manifest agree)", r.warn);
+    /* floors at the 2026-10-18 counts, so a gate that quietly skips one kind
+       of image (every SVG, say) or one lane cannot pass on the total (review
+       2026-10-18): each type's TOTAL across the lanes (current and bank:
+       png 212, jpeg 12, svg+xml 41; archived: 226, 36, 81) only grows,
+       because an archived build keeps a replaced figure; and every type must
+       appear in BOTH lanes. Not a per-lane floor: a redraw (png -> svg) of a
+       current figure legitimately moves one between types. */
     const g = /image guard — (\d+) figures and (\d+) image choices checked/.exec(r.out);
-    check(!!g && +g[1] >= 500 && +g[2] >= 8 && /every current and bank image passes/.test(r.out),
-      "the unmodified tree: the image guard ran over every shipped image and passed (" + (g ? g[1] + " figures, " + g[2] + " image choices" : "no guard line") + ")", r.out.slice(-400));
+    const t = /figures by type: current and bank \(png (\d+), jpeg (\d+), svg\+xml (\d+)\); archived \(png (\d+), jpeg (\d+), svg\+xml (\d+)\)/.exec(r.out);
+    const FLOOR = { figures: 608, choices: 8, byType: [438, 48, 122] };
+    check(!!g && +g[1] >= FLOOR.figures && +g[2] >= FLOOR.choices && /every current and bank image passes/.test(r.out) &&
+          !!t && [0, 1, 2].every(i => +t[i + 1] + +t[i + 4] >= FLOOR.byType[i] && +t[i + 1] > 0 && +t[i + 4] > 0),
+      "the unmodified tree: the image guard ran over every shipped image, every type in every lane, and passed (" +
+      (g ? g[1] + " figures, " + g[2] + " image choices" : "no guard line") + (t ? "; " + t[0] : "; no per-type line") + ")", r.out.slice(-600));
   });
 
   /* THE IMAGE GUARD (2026-10-18): an image the renderer would refuse is a
@@ -152,6 +165,40 @@ try{
     const r = planted(b.bankId + ".js", relabel);
     check(r.status === 1 && r.out.indexOf("testdata/" + b.bankId + ".js ") !== -1,
       "a bank figure relabelled the same way FAILS the build, naming " + b.bankId, why(r));
+  });
+  /* each of the other ways an image can be refused, in a current build: an
+     SVG whose root is in no namespace (the converter, checking figures
+     against the grammar only, would ship it), a figure that is not a data:
+     URI at all, and an image choice with no image */
+  const fileWith = re => TESTS.find(x => re.test(fs.readFileSync(path.join(tmp, "testdata", x.testId + ".js"), "utf8")));
+  run("image-svg-no-namespace", () => {
+    const t = fileWith(/"figure":\s*"data:image\/svg\+xml;base64,/);
+    const r = planted(t.testId + ".js", s => s.replace(/("figure":\s*"data:image\/svg\+xml;base64,)[A-Za-z0-9+\/=]+/,
+      (m, p) => p + Buffer.from('<svg width="10" height="10"><rect width="10" height="10"/></svg>').toString("base64")));
+    check(r.status === 1 && r.out.indexOf("testdata/" + t.testId + ".js ") !== -1 && /figure \(data:image\/svg\+xml;base64,/.test(r.out),
+      "a current build's SVG figure whose root is in no namespace FAILS the build, naming " + t.testId, why(r));
+  });
+  run("image-not-data", () => {
+    const t = fileWith(/"figure":\s*"data:image\/png;base64,/);
+    const r = planted(t.testId + ".js", s => s.replace(/"figure":\s*"data:image\/png;base64,/, '"figure": "figures/q12.png", "figureWas": "'));
+    check(r.status === 1 && r.out.indexOf("testdata/" + t.testId + ".js ") !== -1 && /figure \(figures\/q12\.png/.test(r.out),
+      "a figure that is a path, not a data: URI, FAILS the build, naming " + t.testId, why(r));
+  });
+  run("image-choice-no-image", () => {
+    const t = fileWith(/\{"image":\s*"data:image\/png;base64,/);
+    const r = planted(t.testId + ".js", s => s.replace(/\{"image":(\s*"data:image\/png;base64,)/, '{"src":$1'));
+    check(r.status === 1 && r.out.indexOf("testdata/" + t.testId + ".js ") !== -1 && /choice A \(undefined\)/.test(r.out),
+      "an image choice with no image FAILS the build (the renderer would show its placeholder), naming " + t.testId, why(r));
+  });
+  /* the self-check: a behaviour-preserving refactor of app.js that adds a
+     const beside imageSourceOk breaks build-site.js's hand-listed
+     extraction. The build must say THAT, not blame the test data. */
+  run("image-guard-extraction", () => {
+    const r = plantedAt("app.js", s => s.replace('return v === "http://www.w3.org/2000/svg";', "return v === SVG_NS_PLANTED;")
+      .replace("  function imageSourceOk(s){", '  const SVG_NS_PLANTED = "http://www.w3.org/2000/svg";\n  function imageSourceOk(s){'));
+    check(r.status === 1 && /image guard taken from app\.js is not working here/.test(r.out) && /refuses a known-good svg\+xml/.test(r.out) &&
+          !/Images the renderer would refuse/.test(r.out),
+      "a const added beside imageSourceOk fails the build as an EXTRACTION problem, not as refused test data", why(r));
   });
   run("image-archived", () => {
     const f = fs.readdirSync(path.join(tmp, "testdata", "archive")).find(x => x.indexOf("@") !== -1 &&
