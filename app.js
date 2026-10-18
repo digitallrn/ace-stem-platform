@@ -2922,23 +2922,68 @@
      no render site to replace or blank the picture). The source must match
      CHOICE_IMAGE_RE — a data: URI can fetch nothing, whatever path the
      content arrived by (the single-file build, a bank file, the device-
-     writable test cache) — and is escaped into the attribute like q.figure.
+     writable test cache) — and its decoded bytes must be the type it
+     declares (imageSourceOk); it is escaped into the attribute like q.figure.
      SVG is allowed only because the render path is <img>, which runs no
      script and fetches nothing; do not reuse this grammar for an inline path.
      Anything that is neither a string nor a valid image object renders a
      visible placeholder: never a throw, never a blank box. */
   const CHOICE_IMAGE_RE = /^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+\/]+=*$/;
+  /* MAGIC BYTES (2026-10-18, IMAGE-CHOICES-SPEC §2.4): the grammar says what
+     a source DECLARES; this also checks that its bytes ARE that type. Both
+     acceptance sites run it (choiceImageSrc, figureSrc), so a source the
+     browser would show as a broken-image glyph, or sniff as some other
+     format, gets the loud placeholder instead. Three steps, none of which
+     decodes past a raster's first 9 bytes (a figure can be 600 KB):
+       1. the payload decodes at all, by the rule atob (the decoder a data:
+          URL uses) applies to a grammar-valid string: with no '=', any
+          length but 1 mod 4; one or two '=' only on a multiple of 4;
+       2. png: the 8-byte signature; jpeg: FF D8 FF (start of image, then
+          a marker);
+       3. svg+xml has no signature, so the whole document is decoded (every
+          shipped SVG is under 24 KB) and its ROOT must be <svg> in the SVG
+          namespace (default or prefixed), after at most a UTF-8 BOM, an XML
+          declaration, whitespace and comments. A browser will not load an
+          <img> whose root is in no namespace. A DOCTYPE is not admitted:
+          the converter refuses one.
+     What it does not prove: that a raster with a valid signature decodes to
+     its end (a truncated PNG still shows the glyph). The converter's full
+     decode is that gate (§5.3). It also says nothing about what an SVG
+     CONTAINS: the render path is <img>, which runs no script and fetches
+     nothing. */
+  function imageSourceOk(s){
+    const m = typeof s === "string" ? CHOICE_IMAGE_RE.exec(s) : null;
+    if(!m) return false;
+    const type = m[1], off = 19 + type.length;          // "data:image/" + type + ";base64,"
+    const n = s.length - off;
+    let pad = 0;
+    while(pad < 3 && s.charCodeAt(s.length - 1 - pad) === 61) pad++;   // trailing "="
+    if(pad ? (pad > 2 || n % 4 !== 0) : n % 4 === 1) return false;
+    let b;
+    try{ b = atob(s.slice(off, type === "svg+xml" ? s.length : off + 12)); }catch(e){ return false; }
+    if(type === "png") return b.slice(0, 8) === "\x89PNG\r\n\x1A\n";
+    if(type === "jpeg") return b.slice(0, 3) === "\xFF\xD8\xFF";
+    const r = /^(?:\xEF\xBB\xBF)?(?:<\?xml[ \t\r\n][^?]*\?>)?(?:[ \t\r\n]|<!--(?:[^-]|-[^-])*-->)*<(?:([A-Za-z_][\w.-]*):)?svg((?:[ \t\r\n]+[^ \t\r\n=\/>"']+[ \t\r\n]*=[ \t\r\n]*(?:"[^"]*"|'[^']*'))*)[ \t\r\n]*\/?>/.exec(b);
+    if(!r) return false;
+    const want = r[1] ? "xmlns:" + r[1] : "xmlns";
+    const attr = /([^ \t\r\n=\/>"']+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/g;
+    for(let a = attr.exec(r[2]); a; a = attr.exec(r[2])){
+      if(a[1] === want) return (a[2] !== undefined ? a[2] : a[3]) === "http://www.w3.org/2000/svg";
+    }
+    return false;
+  }
   function isImageChoice(c){ return !!c && typeof c === "object" && !Array.isArray(c); }
   function choiceImageSrc(c){
-    return (isImageChoice(c) && typeof c.image === "string" && CHOICE_IMAGE_RE.test(c.image)) ? c.image : null;
+    return (isImageChoice(c) && typeof c.image === "string" && imageSourceOk(c.image)) ? c.image : null;
   }
-  /* The stem figure goes through the same data:-only guard (ruling 2026-10-07):
-     every shipped figure — current builds, archived builds and banks, 585 of
-     them — already matches it, so nothing legitimate changes; a figure that
-     does not match renders a visible "Figure unavailable" frame, never an
-     <img> with a source that could fetch. */
+  /* The stem figure goes through the same data:-only guard (ruling 2026-10-07),
+     magic bytes included (2026-10-18). Every shipped figure (current builds,
+     archived builds and banks, 608 of them on 2026-10-18) already passes, so
+     nothing legitimate changes. A figure that does not pass renders a visible
+     "Figure unavailable" frame, never an <img> with a source that could fetch
+     or would show the broken-image glyph. */
   function figureSrc(q){
-    return (q && typeof q.figure === "string" && CHOICE_IMAGE_RE.test(q.figure)) ? q.figure : null;
+    return (q && typeof q.figure === "string" && imageSourceOk(q.figure)) ? q.figure : null;
   }
   /* `saved` is the record's per-question map of highlighted-choice markup
      (ms.choiceHtml[q.id]) — record-derived, untrusted. It is handed in whole

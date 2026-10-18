@@ -289,9 +289,13 @@ Three rules:
    reason IMG is in DROP_ELEMENTS), never inside `.ctext` (so they are never
    an annotation region), and a record's saved `choiceHtml` slot is never read
    for one. The source must match `CHOICE_IMAGE_RE` (a `data:image/…;base64`
-   URI, which can fetch nothing); anything else renders a placeholder.
-   `tests/image-choice.test.js` pins the seam; keep-classes audits every
-   shipped image choice against the grammar with a planted control.
+   URI, which can fetch nothing), and since 2026-10-18 its decoded bytes must
+   be the type it declares (`imageSourceOk`: PNG signature, JPEG `FF D8 FF`,
+   an SVG root in the SVG namespace; `figureSrc` runs the same guard).
+   Anything else renders a placeholder. `tests/image-choice.test.js` pins the
+   seam, the bytes check at both sites (with mutants) and every shipped
+   image; keep-classes audits every shipped image choice through the
+   renderer's own `choiceImageSrc`, with planted controls.
 5. **Math modules replay no annotations (2026-10-07).** Annotations are
    created in Reading and Writing only, and `replaysAnnotations(mod)` now
    gates every replay site (passage pane, stacked stimulus, stem, the

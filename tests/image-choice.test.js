@@ -13,7 +13,14 @@
      3. the grammar admits exactly data:image/(png|jpeg|svg+xml);base64,… and
         nothing else (http(s), javascript:, data:text/html, a charset param,
         whitespace, an empty payload, gif);
-     4. every malformed entry renders the visible placeholder and never throws.
+     4. every malformed entry renders the visible placeholder and never throws;
+     5. (§9, 2026-10-18) the decoded bytes must be the declared type —
+        imageSourceOk, run by BOTH acceptance sites (choiceImageSrc and
+        figureSrc): a payload atob cannot decode, PNG bytes declared jpeg or
+        svg+xml, SVG bytes declared png, an SVG whose root is not <svg> in
+        the SVG namespace — each refused at both sites and rendered as the
+        placeholder; every shipped image, choices and figures in every
+        current, archived and bank build, still passes (§7).
    Plus: the shared fixture passes the grammar and escapeHtml leaves it
    untouched; the browser proof embeds the fixture's four URIs verbatim; and
    buildQuestionHtml's choice branch no longer calls fmt() or writes .ctext
@@ -26,7 +33,17 @@
      saved slot before the type branch; put the <img> inside .ctext; have
      buildQuestionHtml's branch index the saved map or interpolate a blob
      itself (the map is handed to the seam whole; only the seam's text path
-     indexes it).                                                              */
+     indexes it). §9 runs its own ten bytes mutants in-process, each built
+     from the real source by an exact replacement that must apply.
+
+   To watch the bytes check fail without it (the commit before it, b67d3a7):
+     git show b67d3a7:app.js > <scratch>/app-pre.js
+     APP_SRC=<scratch>/app-pre.js node tests/image-choice.test.js
+   §9's battery FAILS at both sites there (every mismatch is accepted). That
+   is why imageSourceOk is extracted when present rather than required: the
+   old file has none, and the run must reach the battery and report what it
+   accepts. Requiring it would only crash. The pin that the function exists
+   and both sites call it is a check of its own (§9).                        */
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -53,14 +70,22 @@ vm.runInContext(renderSrc, rctx);
 const fmt = rctx.fmt, escapeHtml = rctx.escapeHtml;
 check(typeof fmt === "function" && typeof escapeHtml === "function", "render.js provides fmt() and escapeHtml()");
 
+/* the image-source guard both acceptance sites share: the grammar and the
+   bytes check. imageSourceOk is taken when the file has it (see the header:
+   a pre-check app.js must still reach §9's battery and FAIL there); a file
+   that calls it without defining it throws a ReferenceError at the first
+   call, so leaving it out can never pass. */
+function optFn(src, name){ try{ return extractFn(src, name); }catch(e){ return ""; } }
+const GUARD_SRC = extractConst(appSrc, "CHOICE_IMAGE_RE") + "\n" + optFn(appSrc, "imageSourceOk");
+
 /* the seam, with a sanitizer stub that MARKS its output so the test can see
    which path ran (the real one needs a DOM) */
-const SEAM_SRC = [extractConst(appSrc, "CHOICE_IMAGE_RE"), extractFn(appSrc, "isImageChoice"),
+const SEAM_SRC = [GUARD_SRC, extractFn(appSrc, "isImageChoice"),
   extractFn(appSrc, "choiceImageSrc"), extractFn(appSrc, "choiceBodyHtml")].join("\n");
 const seam = new Function("fmt", "escapeHtml", "sanitizeSavedHtml",
   SEAM_SRC + "\nreturn { CHOICE_IMAGE_RE, isImageChoice, choiceImageSrc, choiceBodyHtml };")(
   fmt, escapeHtml, s => "<sanitized>" + String(s) + "</sanitized>");
-const { CHOICE_IMAGE_RE, choiceImageSrc, choiceBodyHtml } = seam;
+const { CHOICE_IMAGE_RE, isImageChoice, choiceImageSrc, choiceBodyHtml } = seam;
 const HOSTILE = '"><img src=x onerror="window.__XSS_FIRED=true"><b data-x=\'y\'>PWN</b>';
 
 console.log("--- 1. text choices render as before ---");
@@ -107,7 +132,12 @@ console.log("--- 2. image choices render from test data only ---");
 
 console.log("--- 3. the grammar ---");
 {
-  const ok = ["data:image/png;base64,iVBORw0KGgo=", "data:image/jpeg;base64,/9j/4AAQ", "data:image/svg+xml;base64,PHN2Zy8+"];
+  /* the smallest payloads that are also the type they declare (§9): the PNG
+     signature alone, a JPEG's first six bytes, an empty namespaced <svg/>.
+     The svg vector was "PHN2Zy8+" (<svg/>, no namespace) until 2026-10-18:
+     a browser shows that as a broken image, and §9 now refuses it. */
+  const ok = ["data:image/png;base64,iVBORw0KGgo=", "data:image/jpeg;base64,/9j/4AAQ",
+    "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64")];
   ok.forEach(s => check(choiceImageSrc({ image: s }) === s, "accepts " + s.slice(0, 24) + "…"));
   const bad = {
     "https URL": "https://evil.example/x.png",
@@ -192,7 +222,7 @@ console.log("--- 6. the browser proof carries the same fixture ---");
 
 console.log("--- 7. the stem figure goes through the same guard (ruling 2026-10-07) ---");
 {
-  const figureSrc = new Function(extractConst(appSrc, "CHOICE_IMAGE_RE") + "\n" + extractFn(appSrc, "figureSrc") + "\nreturn figureSrc;")();
+  const figureSrc = new Function(GUARD_SRC + "\n" + extractFn(appSrc, "figureSrc") + "\nreturn figureSrc;")();
   check(figureSrc({ figure: F.URIS[0] }) === F.URIS[0], "figureSrc returns a data:image/png figure unchanged");
   check(figureSrc({ figure: "https://evil.example/f.png" }) === null && figureSrc({ figure: "javascript:1" }) === null &&
         figureSrc({ figure: "" }) === null && figureSrc({}) === null && figureSrc({ figure: 5 }) === null && figureSrc(null) === null,
@@ -204,17 +234,33 @@ console.log("--- 7. the stem figure goes through the same guard (ruling 2026-10-
   const handlers = extractFn(appSrc, "attachFigureHandlers");
   check(handlers.indexOf("if(!figureSrc(q)) return;") !== -1 && handlers.indexOf('el("figOverlayImg").src = figureSrc(q);') !== -1 && handlers.indexOf("= q.figure") === -1,
     "attachFigureHandlers and the expand overlay use the guarded source too");
-  /* every shipped figure — current builds, archived builds, banks — passes */
+  /* every shipped image passes, through the guard it is rendered by: every
+     figure through figureSrc, every image choice through choiceImageSrc, in
+     current builds, archived builds and banks. Grammar AND bytes since
+     2026-10-18 (§9); the choices floor is the first two image items' eight
+     (an archived build keeps an item, so the count can only grow). */
   function loadData(file){ const c = { window: { __TESTDATA__: {}, __BANKDATA__: {} } }; vm.createContext(c); vm.runInContext(fs.readFileSync(file, "utf8"), c); return c.window; }
   const manifest = loadData("testdata/manifest.js").TEST_MANIFEST;
   const banks = loadData("testdata/bank-manifest.js").BANK_MANIFEST;
-  let figures = 0; const rejected = [];
-  const sweep = (where, qs) => qs.forEach(q => { if(q && q.figure !== undefined){ figures++; if(figureSrc(q) !== q.figure) rejected.push(where + ":" + (q.id || q.qid)); } });
+  let figures = 0, choices = 0; const rejected = [], byType = {};
+  const tally = u => { const t = /^data:image\/([a-z+]+);/.exec(String(u)); const k = t ? t[1] : "other"; byType[k] = (byType[k] || 0) + 1; };
+  const sweep = (where, qs) => qs.forEach(q => {
+    if(!q) return;
+    if(q.figure !== undefined){ figures++; tally(q.figure); if(figureSrc(q) !== q.figure) rejected.push(where + ":" + (q.id || q.qid)); }
+    (Array.isArray(q.choices) ? q.choices : []).forEach((c, i) => {
+      if(!isImageChoice(c)) return;
+      choices++; tally(c.image);
+      if(choiceImageSrc(c) !== c.image) rejected.push(where + ":" + (q.id || q.qid) + "#" + i);
+    });
+  });
   manifest.forEach(e => { const t = loadData("testdata/" + e.testId + ".js").__TESTDATA__[e.testId]; t.modules.forEach(m => sweep(e.testId, m.questions)); });
   fs.readdirSync("testdata/archive").filter(f => f.indexOf("@") !== -1 && /\.js$/.test(f)).forEach(f => {
     const id = f.split("@")[0]; const t = loadData("testdata/archive/" + f).__TESTDATA__[id]; t.modules.forEach(m => sweep(f, m.questions)); });
   banks.forEach(b => { const bank = loadData("testdata/" + b.bankId + ".js").__BANKDATA__[b.bankId]; sweep(b.bankId, bank.questions || []); });
-  check(figures >= 500 && rejected.length === 0, "LIBRARY: every shipped figure (" + figures + " across current builds, archived builds and banks) passes the guard unchanged", rejected.slice(0, 8).join(", "));
+  check(figures >= 500 && choices >= 8 && rejected.length === 0,
+    "LIBRARY: every shipped image (" + figures + " figures and " + choices + " image choices across current builds, archived builds and banks; " +
+    Object.keys(byType).sort().map(k => k + " " + byType[k]).join(", ") + ") passes the guard it renders through, grammar and bytes, unchanged",
+    rejected.slice(0, 8).join(", "));
 }
 
 console.log("--- 8. Math modules replay no annotations (ruling 2026-10-07 §9.7) ---");
@@ -282,6 +328,153 @@ console.log("--- 8. Math modules replay no annotations (ruling 2026-10-07 §9.7)
     "SWEEP: attempts.js names the fields only where the recorder packs them onto the record (five lines, one block) — no replay there", aMentions.map(x => x.n).join(","));
   check(!/\b(passageHtml|stemHtml|choiceHtml)\b/.test(fs.readFileSync("dashboard.js", "utf8")) && !/\b(passageHtml|stemHtml|choiceHtml)\b/.test(fs.readFileSync("render.js", "utf8")),
     "SWEEP: dashboard.js and render.js never name the fields (no replay surface outside app.js)");
+}
+
+console.log("--- 9. magic bytes: the decoded bytes must be the declared type (2026-10-18) ---");
+{
+  const b64 = s => Buffer.from(s, "latin1").toString("base64");
+  const uri = (type, payload) => "data:image/" + type + ";base64," + payload;
+  const NS = "http://www.w3.org/2000/svg";
+  const PNG = F.URIS[0].slice("data:image/png;base64,".length);             // a whole 4×3 PNG
+  const PNG_CORE = PNG.replace(/=+$/, "");                                 // its payload without padding
+  const JPEG = b64("\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00");         // a JPEG's head: SOI, then APP0
+  const SVG = b64('<svg xmlns="' + NS + '" width="4" height="3"><rect width="4" height="3"/></svg>');
+  const ACCEPT = {
+    "a PNG (fixture A)": F.URIS[0], "a PNG (fixture B)": F.URIS[1], "a PNG (fixture C)": F.URIS[2], "a PNG (fixture D)": F.URIS[3],
+    "a PNG signature with nothing after it": "data:image/png;base64,iVBORw0KGgo=",
+    "a JPEG head declared jpeg": uri("jpeg", JPEG),
+    "an SVG declared svg+xml": uri("svg+xml", SVG),
+    "an SVG after a BOM, an XML declaration, a comment and newlines, its single-quoted xmlns not the first attribute":
+      uri("svg+xml", b64("\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- drawn - by hand -->\n<svg width='4'\r\n\txmlns = '" + NS + "'><rect/></svg>")),
+    "a prefixed SVG root bound by its own xmlns:prefix": uri("svg+xml", b64('<s:svg xmlns:s="' + NS + '"><s:rect/></s:svg>')),
+    "an SVG with UTF-8 text in an attribute": uri("svg+xml", Buffer.from('<svg xmlns="' + NS + '" aria-label="−2 → x à"/>', "utf8").toString("base64")),
+    /* the bytes ARE an SVG: what one contains is not this check's business —
+       <img> runs no script (the browser proof renders this one and asserts it) */
+    "a scripted SVG": uri("svg+xml", b64('<svg xmlns="' + NS + '"><script>window.__XSS_FIRED=true</script></svg>'))
+  };
+  const REFUSE = {
+    "PNG bytes declared jpeg": uri("jpeg", PNG), "PNG bytes declared svg+xml": uri("svg+xml", PNG),
+    "JPEG bytes declared png": uri("png", JPEG), "JPEG bytes declared svg+xml": uri("svg+xml", JPEG),
+    "SVG bytes declared png": uri("png", SVG), "SVG bytes declared jpeg": uri("jpeg", SVG),
+    "GIF bytes declared png": uri("png", b64("GIF89a\x01\x00\x01\x00\x00\x00\x00")),
+    "HTML declared svg+xml": uri("svg+xml", b64("<html><body><script>window.__XSS_FIRED=true</script></body></html>")),
+    "zero bytes declared png": uri("png", "AAAAAAAAAAAA"),
+    "a PNG signature with one byte wrong": uri("png", b64("\x89PNg\r\n\x1A\n\x00\x00\x00\x0D")),
+    "a PNG signature one byte late": uri("png", b64("\x00\x89PNG\r\n\x1A\n\x00\x00\x00")),
+    "half a PNG signature": uri("png", b64("\x89PNG")),
+    "a JPEG start-of-image with no marker after it": uri("jpeg", b64("\xFF\xD8")),
+    "an SVG with no namespace (<svg/>)": "data:image/svg+xml;base64,PHN2Zy8+",
+    "an SVG root in the XHTML namespace": uri("svg+xml", b64('<svg xmlns="http://www.w3.org/1999/xhtml"/>')),
+    "an SVG namespace with a trailing slash": uri("svg+xml", b64('<svg xmlns="' + NS + '/"/>')),
+    "the SVG namespace only on a child": uri("svg+xml", b64('<svg><g xmlns="' + NS + '"/></svg>')),
+    "xmlns inside another attribute's VALUE": uri("svg+xml", b64("<svg data-x='xmlns=\"" + NS + "\"'/>")),
+    "a root named svgx": uri("svg+xml", b64('<svgx xmlns="' + NS + '"/>')),
+    "an html root carrying the SVG namespace": uri("svg+xml", b64('<html xmlns="' + NS + '"/>')),
+    "an <svg> only inside a comment": uri("svg+xml", b64('<!-- <svg xmlns="' + NS + '"/> -->')),
+    "a prefixed root whose prefix is unbound": uri("svg+xml", b64('<s:svg xmlns="' + NS + '"/>')),
+    "a DOCTYPE before the root (the converter refuses one)": uri("svg+xml", b64('<!DOCTYPE svg><svg xmlns="' + NS + '"/>')),
+    "text before the root": uri("svg+xml", b64('x<svg xmlns="' + NS + '"/>')),
+    "a UTF-16 SVG": uri("svg+xml", Buffer.from("﻿<svg xmlns=\"" + NS + "\"/>", "utf16le").toString("base64")),
+    "a PNG payload with three '='": uri("png", PNG_CORE + "==="),
+    "a PNG payload of length 1 mod 4": uri("png", PNG_CORE + "AAA"),
+    "a PNG payload padded on a length that is not a multiple of 4": uri("png", PNG_CORE + "=")
+  };
+  /* decodability, against atob itself: for a grammar-valid payload the
+     verdict depends only on its length mod 4 and its run of trailing "=", so
+     every core length 12..27 with 0..4 "=" covers every case. Each payload
+     opens with the PNG signature, so only decodability decides it. */
+  const atobOk = p => { try{ atob(p); return true; }catch(e){ return false; } };
+  const DECODE = [];
+  for(let core = 12; core <= 27; core++) for(let pad = 0; pad <= 4; pad++){
+    const p = "iVBORw0KGgoA" + "A".repeat(core - 12) + "=".repeat(pad);
+    DECODE.push([p, atobOk(p)]);
+  }
+  check(DECODE.some(d => d[1]) && DECODE.some(d => !d[1]), "the decodability cases include payloads atob accepts and payloads it refuses (" + DECODE.length + " cases)");
+  check(Object.keys(ACCEPT).every(k => CHOICE_IMAGE_RE.test(ACCEPT[k])) && Object.keys(REFUSE).every(k => CHOICE_IMAGE_RE.test(REFUSE[k])) && DECODE.every(d => CHOICE_IMAGE_RE.test(uri("png", d[0]))),
+    "every case passes the GRAMMAR, so only the bytes check can refuse one");
+  function battery(accepts){
+    const bad = [];
+    Object.keys(ACCEPT).forEach(k => { if(!accepts(ACCEPT[k])) bad.push("refused " + k); });
+    Object.keys(REFUSE).forEach(k => { if(accepts(REFUSE[k])) bad.push("accepted " + k); });
+    DECODE.forEach(([p, ok]) => { if(accepts(uri("png", p)) !== ok) bad.push((ok ? "refused" : "accepted") + " a " + p.length + "-char payload atob " + (ok ? "decodes" : "refuses")); });
+    return bad;
+  }
+  /* both acceptance sites, evaluated from a source text (so the mutants
+     below run through exactly the same harness) */
+  function build(src){
+    return new Function([extractConst(src, "CHOICE_IMAGE_RE"), optFn(src, "imageSourceOk"), extractFn(src, "isImageChoice"),
+      extractFn(src, "choiceImageSrc"), extractFn(src, "figureSrc")].join("\n") +
+      "\nreturn { choice: u => choiceImageSrc({ image: u }) === u, figure: u => figureSrc({ figure: u }) === u };")();
+  }
+  const real = build(appSrc);
+  const realChoice = battery(real.choice), realFigure = battery(real.figure);
+  check(realChoice.length === 0, "choiceImageSrc: " + Object.keys(ACCEPT).length + " true-type sources accepted, " + Object.keys(REFUSE).length +
+    " mismatched or undecodable sources refused, decodability agrees with atob in all " + DECODE.length + " cases", realChoice.slice(0, 6).join("; "));
+  check(realFigure.length === 0, "figureSrc: the same battery, the same verdicts (one guard for both sites)", realFigure.slice(0, 6).join("; "));
+
+  /* the RENDER, not only the predicate: a mismatched choice is the
+     placeholder, a mismatched figure the "Figure unavailable" frame */
+  const refused = Object.keys(REFUSE).map(k => choiceBodyHtml({ image: REFUSE[k] }, 2));
+  check(refused.every(h => h.indexOf("cimg-missing") !== -1 && h.indexOf("<img") === -1 && h.indexOf('aria-label="Choice C image unavailable"') !== -1),
+    "choiceBodyHtml renders every refused source as the placeholder, no <img>", refused.find(h => h.indexOf("<img") !== -1) || "");
+  const frameHtml = new Function("fmt", "escapeHtml", GUARD_SRC + "\n" + extractFn(appSrc, "figureSrc") + "\n" + extractFn(appSrc, "figureFrameHtml") +
+    "\nreturn figureFrameHtml;")(fmt, escapeHtml);
+  const frames = Object.keys(REFUSE).map(k => frameHtml({ figure: REFUSE[k] }));
+  check(frames.every(h => h.indexOf("fig-missing") !== -1 && h.indexOf("<img") === -1 && h.indexOf("fig-toolbar") === -1),
+    "figureFrameHtml renders every refused figure as the placeholder frame: no <img>, no toolbar", frames.find(h => h.indexOf("<img") !== -1) || "");
+  const goodFrame = frameHtml({ figure: F.URIS[0] });
+  check(goodFrame.indexOf('<img id="figImg" src="' + F.URIS[0] + '"') !== -1 && goodFrame.indexOf("fig-toolbar") !== -1 && goodFrame.indexOf("fig-missing") === -1,
+    "…and a true-type figure still renders #figImg with the exact source and its toolbar (control)");
+
+  /* WHERE the renderer accepts an image: exactly these sites, all guarded */
+  const code = appSrc.replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, " ")).replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  check(optFn(appSrc, "imageSourceOk") !== "", "app.js defines imageSourceOk");
+  const cis = extractFn(appSrc, "choiceImageSrc"), fsrc = extractFn(appSrc, "figureSrc");
+  check(cis.indexOf("imageSourceOk(c.image)") !== -1 && fsrc.indexOf("imageSourceOk(q.figure)") !== -1 && !/CHOICE_IMAGE_RE/.test(cis + fsrc),
+    "choiceImageSrc and figureSrc both accept through imageSourceOk, and neither runs the bare grammar itself");
+  const greUses = code.split("\n").filter(l => /CHOICE_IMAGE_RE/.test(l)).map(l => l.trim());
+  check(greUses.length === 2 && /^const CHOICE_IMAGE_RE = /.test(greUses[0]) && greUses[1] === 'const m = typeof s === "string" ? CHOICE_IMAGE_RE.exec(s) : null;',
+    "the grammar is named in app.js's code only at its declaration and inside imageSourceOk (no third acceptance site runs it alone)", greUses.join(" || "));
+  const imgLines = code.split("\n").filter(l => /<img\b/i.test(l)).map(l => l.trim());
+  check(imgLines.length === 2 && imgLines.some(l => l.indexOf('<img id="figImg" src="${escapeHtml(src)}"') !== -1) &&
+        imgLines.some(l => l.indexOf('<img class="choice-image" src="${escapeHtml(src)}"') !== -1),
+    "app.js writes exactly two <img> elements, the stem figure's and the image choice's, each from the guarded `src`", imgLines.join(" || "));
+  check(extractFn(appSrc, "figureFrameHtml").indexOf("const src = figureSrc(q);") !== -1 && extractFn(appSrc, "choiceBodyHtml").indexOf("const src = choiceImageSrc(c);") !== -1,
+    "…where `src` is figureSrc(q) in the frame and choiceImageSrc(c) in the seam");
+  const srcSets = code.split("\n").filter(l => /\.src\s*=(?!=)/.test(l)).map(l => l.trim());
+  check(srcSets.every(l => /^s\.src = /.test(l) || l === 'el("figOverlayImg").src = figureSrc(q);') && srcSets.indexOf('el("figOverlayImg").src = figureSrc(q);') !== -1 &&
+        !/setAttribute\(\s*["']src|\.srcset\b|srcset\s*=|new Image\b|createElement\(\s*["']img/i.test(code),
+    "every other .src assignment is a <script> loader's `s.src`; the overlay is set from figureSrc(q); nothing else creates or sources an image", srcSets.join(" || "));
+  check(appSrc.indexOf("/^data:image\\/(png|jpeg|svg\\+xml);base64,[A-Za-z0-9+\\/]+=*$/") !== -1 && /function\s+choiceImageSrc\s*\(/.test(appSrc),
+    "the grammar literal and `function choiceImageSrc(` stay verbatim (the test-bank exporters' platform_supports() reads both)");
+
+  /* MUTANTS: each removes one part of the check from the REAL source by an
+     exact replacement that must apply once (a stale needle fails here, so
+     the list cannot rot into passing), and the battery must then FAIL at
+     the named site(s). A check whose removal no case notices is not
+     tested. */
+  const MUTANTS = [
+    ["choiceImageSrc runs the bare grammar", ["choice"], "&& imageSourceOk(c.image)) ? c.image", "&& CHOICE_IMAGE_RE.test(c.image)) ? c.image"],
+    ["figureSrc runs the bare grammar", ["figure"], "&& imageSourceOk(q.figure)) ? q.figure", "&& CHOICE_IMAGE_RE.test(q.figure)) ? q.figure"],
+    ["the decodability rule dropped", ["choice", "figure"], "if(pad ? (pad > 2 || n % 4 !== 0) : n % 4 === 1) return false;", ""],
+    ["the PNG signature not compared", ["choice", "figure"], 'return b.slice(0, 8) === "\\x89PNG\\r\\n\\x1A\\n";', "return true;"],
+    ["the JPEG signature not compared", ["choice", "figure"], 'return b.slice(0, 3) === "\\xFF\\xD8\\xFF";', "return true;"],
+    ["the JPEG signature cut to FF D8", ["choice", "figure"], 'return b.slice(0, 3) === "\\xFF\\xD8\\xFF";', 'return b.slice(0, 2) === "\\xFF\\xD8";'],
+    ["any SVG root admitted", ["choice", "figure"], "if(!r) return false;", "if(!r) return true;"],
+    ["the SVG namespace's value not compared", ["choice", "figure"], ': a[3]) === "http://www.w3.org/2000/svg";', ': a[3]) !== "-";'],
+    ["an SVG decoded only as far as a raster's head", ["choice", "figure"], 'type === "svg+xml" ? s.length : off + 12', "off + 12"],
+    ["a prefixed root not bound to its own xmlns:prefix", ["choice", "figure"], 'r[1] ? "xmlns:" + r[1] : "xmlns"', '"xmlns"']
+  ];
+  MUTANTS.forEach(([name, sites, needle, repl]) => {
+    const once = appSrc.split(needle).length === 2;
+    let caught = [];
+    if(once){
+      const m = build(appSrc.replace(needle, () => repl));
+      caught = sites.map(site => battery(m[site]).length);
+    }
+    check(once && caught.every(n => n > 0), "MUTANT (" + name + ") fails the battery at " + sites.join(" and "),
+      once ? "battery failures per site: " + caught.join(", ") : "stale mutant: the needle does not occur exactly once in " + APP_PATH);
+  });
 }
 
 console.log(`\n${fail ? "FAIL" : "ALL PASS"} — ${pass} passed, ${fail} failed`);

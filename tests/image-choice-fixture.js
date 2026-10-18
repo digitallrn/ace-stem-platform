@@ -1,10 +1,13 @@
 /* tests/image-choice-fixture.js — the one image-choice item the suites share
-   (no shipped test carries the shape yet: the converter emits it later, see
-   IMAGE-CHOICES-SPEC.md). Four distinct 4×3 PNGs (red, green, blue, amber),
-   generated once with node's zlib and pinned here as data URIs, so every
-   check — the node renderer suite, keep-classes' grammar audit, and the
-   browser injection proof, which embeds the SAME four strings because it is
-   pasted into a console — renders the same bytes.
+   (a synthetic one: it was written before any shipped test carried the
+   shape, and the suites keep it so their checks never depend on library
+   content; see IMAGE-CHOICES-SPEC.md). Four distinct 4×3 PNGs (red, green,
+   blue, amber), generated once with node's zlib and pinned here as data
+   URIs, so every check — the node renderer suite, keep-classes' audit, and
+   the browser injection proof, which embeds the SAME four strings because
+   it is pasted into a console — renders the same bytes. The test-bank
+   repo's test_image_choices.py carries a verbatim copy of the four (its
+   FIXTURE_URIS), so change them in both places or not at all.
 
    node: const F = require("./image-choice-fixture");  F.URIS, F.question()
    browser (pasted): the proof carries URIS verbatim; image-choice.test.js

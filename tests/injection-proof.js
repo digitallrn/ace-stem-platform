@@ -134,8 +134,10 @@
     }
     const test = await window.AppTestLoader.load(window.TEST_MANIFEST[0]);
 
-    /* IMAGE CHOICES (2026-10-07, IMAGE-CHOICES-SPEC.md). No shipped item has
-       the shape yet, so the proof SYNTHESISES one in memory: the first Math
+    /* IMAGE CHOICES (2026-10-07, IMAGE-CHOICES-SPEC.md). Two shipped items
+       carry the shape since 2026-10-18 (202609asiav1 ma2-q4, 202510usv1
+       ma2-q1), but neither is on the manifest's first test, the one this
+       proof opens, so it SYNTHESISES one in memory: the first Math
        MCQ outside the reserved slots becomes a four-image item, with the
        four fixture URIs tests/image-choice-fixture.js pins (embedded here
        verbatim — this file is pasted into a console; image-choice.test.js
@@ -510,6 +512,25 @@
         results.push({ surface: "Bad image sources (https, javascript:, data:text/html, whitespace) render the placeholder: no <img>, no request",
           pass: allPlaceholder && fetched === 0 && !window.__XSS_FIRED,
           note: `${bads.length} choices, all placeholders ${allPlaceholder}, requests to evil.example ${fetched}` });
+        /* MAGIC BYTES (2026-10-18): four sources that pass the GRAMMAR but
+           whose decoded bytes are not the declared type, or do not decode.
+           Each must be the placeholder, not an <img>. Without the check a
+           browser draws the first (it sniffs rasters) and shows a broken-
+           image glyph for the rest. */
+        $("rvBackBtn").click(); await wait(350);
+        const SVG_OK = btoa('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#48c"/></svg>');
+        const MISMATCH = [{ image: "data:image/jpeg;base64," + IMG_URIS[1].slice(22) },              // PNG bytes declared jpeg
+                          { image: "data:image/svg+xml;base64," + IMG_URIS[2].slice(22) },           // PNG bytes declared svg+xml
+                          { image: "data:image/png;base64," + SVG_OK },                              // SVG bytes declared png
+                          { image: IMG_URIS[3].replace(/=+$/, "") + "AAA" }];                        // a payload atob cannot decode
+        imgQ.choices = MISMATCH;
+        root.querySelector(`.sd-chip[data-mi="${imgMi}"][data-qi="${imgQi}"]`).click();
+        await wait(450);
+        const mis = [...document.querySelectorAll("#paneRight .choice")];
+        const misPlaceholder = mis.length === 4 && mis.every(c => c.querySelector(".cimg-missing") && !c.querySelector("img"));
+        results.push({ surface: "Image sources that pass the grammar but whose bytes are not the declared type (or do not decode) render the placeholder: no <img>",
+          pass: misPlaceholder && !window.__XSS_FIRED,
+          note: `${mis.length} choices, all placeholders ${misPlaceholder}` + (misPlaceholder ? "" : "; <img> on: " + mis.filter(c => c.querySelector("img")).map(c => c.dataset.idx).join(",")) });
         /* a scripted SVG passes the grammar and renders through <img>, which runs nothing */
         $("rvBackBtn").click(); await wait(350);
         imgQ.choices = [{ image: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><script>window.__XSS_FIRED=true</script><rect width="40" height="20" fill="#48c"/></svg>') },
@@ -531,7 +552,10 @@
            image with its toolbar. Planted on the synthetic item (a Math
            question, so the frame sits in the right pane). */
         const hadFigure = Object.prototype.hasOwnProperty.call(imgQ, "figure") ? imgQ.figure : undefined;
-        const BAD_FIGS = ["https://evil.example/figure.png", "javascript:window.__XSS_FIRED=true", "data:text/html;base64,PHNjcmlwdD4=", "data:image/png;base64, " + IMG_URIS[0].slice(22), 5];
+        /* the last two pass the grammar and fail the bytes check (2026-10-18):
+           PNG bytes declared jpeg, and declared svg+xml */
+        const BAD_FIGS = ["https://evil.example/figure.png", "javascript:window.__XSS_FIRED=true", "data:text/html;base64,PHNjcmlwdD4=", "data:image/png;base64, " + IMG_URIS[0].slice(22), 5,
+                          "data:image/jpeg;base64," + IMG_URIS[0].slice(22), "data:image/svg+xml;base64," + IMG_URIS[0].slice(22)];
         const figOutcomes = [];
         for(const bad of BAD_FIGS){
           imgQ.figure = bad;
@@ -543,7 +567,7 @@
           $("rvBackBtn").click(); await wait(300);
         }
         const figFetched = performance.getEntriesByType("resource").filter(e => /evil\.example/.test(e.name)).length;
-        results.push({ surface: "Bad stem-figure sources render the placeholder frame (review entered, no #figImg, no toolbar, no request)",
+        results.push({ surface: "Bad stem-figure sources, two failing only the bytes check, render the placeholder frame (review entered, no #figImg, no toolbar, no request)",
           pass: figOutcomes.length === BAD_FIGS.length && figOutcomes.every(o => o.entered && o.missing && !o.img && !o.toolbar) && figFetched === 0 && !window.__XSS_FIRED,
           note: JSON.stringify(figOutcomes) + " requests=" + figFetched });
         imgQ.figure = IMG_URIS[0];
