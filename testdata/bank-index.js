@@ -7,7 +7,7 @@
 window.BANK_INDEX = {
  "indexVersion": 1,
  "questionCount": 246,
- "activeCount": 188,
+ "activeCount": 187,
  "entries": [
   {
    "ref": "bank-202608-salvage:q0001",
@@ -2435,7 +2435,7 @@ window.BANK_INDEX = {
     "src:202608usv1:rw1-q23"
    ],
    "keyType": "mcq",
-   "retired": false,
+   "retired": true,
    "supersededBy": null,
    "stemPreview": "The student wants to emphasize a similarity between cherries and strawberries.…"
   },

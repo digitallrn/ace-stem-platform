@@ -481,9 +481,9 @@ window.TEST_MANIFEST = [
  {
   "testId": "202510usv1",
   "testName": "2025 October US v1",
-  "testVersion": "2026-09-25-a",
+  "testVersion": "2026-10-10-a",
   "moduleCount": 4,
-  "questionCount": 97,
+  "questionCount": 98,
   "sections": [
    {
     "section": "Reading and Writing",
@@ -493,7 +493,7 @@ window.TEST_MANIFEST = [
    {
     "section": "Math",
     "moduleCount": 2,
-    "questionCount": 43
+    "questionCount": 44
    }
   ],
   "legacyIds": [],
@@ -544,7 +544,7 @@ window.TEST_MANIFEST = [
  {
   "testId": "202403intv2",
   "testName": "2024 March International v2",
-  "testVersion": "2026-09-30-b",
+  "testVersion": "2026-10-10-a",
   "moduleCount": 4,
   "questionCount": 98,
   "sections": [
@@ -607,9 +607,9 @@ window.TEST_MANIFEST = [
  {
   "testId": "202609asiav1",
   "testName": "2026 September Asia v1",
-  "testVersion": "2026-10-02-a",
+  "testVersion": "2026-10-10-a",
   "moduleCount": 4,
-  "questionCount": 95,
+  "questionCount": 96,
   "sections": [
    {
     "section": "Reading and Writing",
@@ -619,7 +619,7 @@ window.TEST_MANIFEST = [
    {
     "section": "Math",
     "moduleCount": 2,
-    "questionCount": 43
+    "questionCount": 44
    }
   ],
   "legacyIds": [],

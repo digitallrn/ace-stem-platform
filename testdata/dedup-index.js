@@ -166,9 +166,9 @@ window.DEDUP_INDEX = {
    },
    {
     "testId": "202510usv1",
-    "testVersion": "2026-09-25-a",
+    "testVersion": "2026-10-10-a",
     "shippedOrder": 23,
-    "itemCount": 97
+    "itemCount": 98
    },
    {
     "testId": "202412usv2",
@@ -184,7 +184,7 @@ window.DEDUP_INDEX = {
    },
    {
     "testId": "202403intv2",
-    "testVersion": "2026-09-30-b",
+    "testVersion": "2026-10-10-a",
     "shippedOrder": 26,
     "itemCount": 98
    },
@@ -202,9 +202,9 @@ window.DEDUP_INDEX = {
    },
    {
     "testId": "202609asiav1",
-    "testVersion": "2026-10-02-a",
+    "testVersion": "2026-10-10-a",
     "shippedOrder": 29,
-    "itemCount": 95
+    "itemCount": 96
    },
    {
     "testId": "202403intv1",
@@ -222,14 +222,14 @@ window.DEDUP_INDEX = {
    },
    {
     "bankId": "bank-202608-salvage",
-    "bankVersion": "sha-c373526f5b01",
+    "bankVersion": "sha-370591ed8845",
     "shippedOrder": 32,
     "questionCount": 245
    }
   ]
  },
- "itemCount": 3271,
- "canonicalCount": 3107,
+ "itemCount": 3273,
+ "canonicalCount": 3109,
  "exactPairCount": 179,
  "skeletonPairCount": 730,
  "relatedPairCount": 168,
@@ -28976,6 +28976,11 @@ window.DEDUP_INDEX = {
    "type": "mcq",
    "canonical": "202510usv1:ma1-q22"
   },
+  "202510usv1:ma2-q1": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202510usv1:ma2-q1"
+  },
   "202510usv1:ma2-q2": {
    "section": "math",
    "type": "mcq",
@@ -37032,6 +37037,11 @@ window.DEDUP_INDEX = {
     ]
    }
   },
+  "202609asiav1:ma2-q4": {
+   "section": "math",
+   "type": "mcq",
+   "canonical": "202609asiav1:ma2-q4"
+  },
   "202609asiav1:ma2-q5": {
    "section": "math",
    "type": "mcq",
@@ -41165,7 +41175,7 @@ window.DEDUP_INDEX = {
      "skeleton-adjudication (session (content compared item by item, two independent readers), 2026-10-07)"
     ]
    },
-   "retired": false
+   "retired": true
   },
   "bank-202608-salvage:q0163": {
    "section": "rw",
