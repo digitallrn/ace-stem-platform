@@ -191,8 +191,9 @@ A row reaches the clean JSON only if **all** hold; otherwise it lands in
    checks the grammar since test-bank `6d03bcb`. **Bytes (2026-10-18):** the
    decoded bytes must also be the type the URI declares. PNG must open with
    its 8-byte signature and JPEG with `FF D8 FF`. An SVG must be valid
-   UTF-8 throughout (Chrome decodes an `<img>` SVG as UTF-8 whatever it
-   declares) with no character XML forbids, well-formed XML 1.0 as far as
+   UTF-8 throughout (Chrome ignores the declared encoding and reads UTF-8,
+   or UTF-16 only behind a BOM, which this check refuses) with no character
+   XML forbids, well-formed XML 1.0 as far as
    the end of its root start tag, and its root must be `<svg>` in the SVG
    namespace. The renderer
    (`imageSourceOk`, IMAGE-CHOICES-SPEC.md §2.4) refuses anything else with

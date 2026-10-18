@@ -148,16 +148,19 @@ invariants, each pinned by a test:
       12 base64 characters are decoded, which matters because a figure can
       be 600 KB;
    3. svg+xml has no signature, so the whole document is decoded (every
-      shipped SVG is under 24 KB). Chrome draws an `<img>` SVG only if it is
-      valid UTF-8 (it decodes as UTF-8 whatever the XML declaration says)
-      and well-formed. Looser rules pass what the browser shows as broken;
-      stricter ones refuse what it draws. So:
+      shipped SVG is under 24 KB). Chrome decodes an `<img>` SVG as UTF-8
+      unless it opens with a UTF-16 BOM; the XML declaration's encoding is
+      ignored. It draws the SVG only if that decode succeeds and the
+      document is well-formed. Looser rules pass what the browser shows as
+      broken; stricter ones refuse what it draws. This check requires UTF-8,
+      so:
       - the WHOLE document must be valid UTF-8, read by a fatal decoder
         that strips one leading BOM as Chrome does. It must hold no
         character XML forbids: C0 controls other than TAB, LF and CR, or
         U+FFFE and U+FFFF.
-      - Then XML 1.0's productions, with Namespaces in XML's colon rules,
-        are applied as far as the end of the root start tag, in order:
+      - Then XML 1.0's productions, with Namespaces in XML's colon rules
+        for PI targets, the root and its attributes, are applied as far as
+        the end of the root start tag, in order:
         - an optional BOM;
         - an optional XML declaration, only at the very start: version
           1.x, then only an encoding name and a standalone yes|no, in that
@@ -168,8 +171,9 @@ invariants, each pinned by a test:
         - at most one DOCTYPE: a Name; then optionally `SYSTEM "lit"` or
           `PUBLIC "pubid" "lit"`; then optionally an internal subset of
           whitespace, comments, PIs, `%refs;` and declarations. ENTITY and
-          NOTATION are checked in their shapes, and ELEMENT up to its
-          content model; then whitespace, comments and PIs again.
+          NOTATION are checked up to their names and literals, ELEMENT up
+          to its content model, and ATTLIST by its delimiters; then
+          whitespace, comments and PIs again.
         - The ROOT start tag is `<svg>` or `<NCName:svg>`. Its attributes
           are whitespace-separated QNames whose quoted values hold no `<`,
           no bare `&`, and only character references to characters XML
@@ -189,15 +193,25 @@ invariants, each pinned by a test:
         exports);
       - `version="1."` with no digit (XML requires one).
 
-      UTF-16 and three or more BOMs are refused too; Chrome draws two BOMs,
-      and so does this. These refusals are rare, and they mean a red deploy,
-      not a silent loss.
+      The final review (2026-10-18) measured two more deliberate refusals,
+      outside those 123:
+      - UTF-16 with a BOM, LE or BE. Chrome draws it, and Notepad's
+        "Unicode" save and Windows PowerShell 5.1's `Out-File` write it.
+      - A document followed by an incomplete UTF-8 sequence at the very end
+        of the file. Chrome tolerates a cut-off final character there, but
+        not one followed by anything else.
+
+      Three or more BOMs are refused as Chrome refuses them; Chrome draws
+      two, and so does this. Every refusal here is rare, and it means a red
+      deploy, not a silent loss.
 
       Not checked, as before this check (the browser shows the glyph): an
-      ELEMENT content model, an ATTLIST body (Chrome draws an ATTLIST with
-      any body), an `xmlns:prefix` value libxml2 cannot parse as a URI, and
-      everything past the root start tag except its encoding and forbidden
-      characters.
+      ELEMENT content model; an ATTLIST body (Chrome draws an ATTLIST with
+      any body); a colon in an entity, notation or parameter-entity name;
+      an entity value's contents (a bare `%` or `&`, character
+      references); NDATA on a parameter entity; an `xmlns:prefix` value
+      libxml2 cannot parse as a URI; and everything past the root start tag
+      except its encoding and forbidden characters.
 
    It runs at both acceptance sites, choices and figures, because they share
    one guard (9.4). On 2026-10-18 every shipped image passes it: 608 figures
@@ -257,10 +271,11 @@ invariants, each pinned by a test:
    png 212, jpeg 12, svg+xml 41; archived 226, 36, 81. A gate that skipped a
    type or a lane, or swapped them, would show it.
 
-   tests/build-site-drift.test.js proves each leg on a copy of the tree, 21
+   tests/build-site-drift.test.js proves each leg at each site on a copy of the tree, 24
    checks. Its extraction plants are a const beside `imageSourceOk` breaking
    SVGs, a PNG-only and a JPEG-only const, a helper only `choiceImageSrc`
-   calls, a choice-only refusal, and a guard that accepts everything. Each
+   calls, a choice-only and a figure-only refusal, each site alone accepting
+   the known-bad image, and a guard that accepts everything. Each
    must fail as an extraction problem and never as refused test data. It
    also floors each type's total and the archived lane per type.
 
@@ -477,7 +492,7 @@ each support removed. The numbered rules below stay the contract.
 | styles.css after `.choice.eliminated .hl` | the `.cimg` rules; the 2×2 grid commented beside them |
 | render.js, grading.js, attempts.js, dashboard.js, assemble.py, archive-testdata.js | NO change |
 | build-site.js (2026-10-18) | the deploy's image guard: app.js's own `imageSourceOk` / `choiceImageSrc` / `figureSrc` over every shipped image, after a self-check on known-good and known-bad images; a refusal in a current build or bank fails the build, in an archived build it is a WARNING; counts printed per type and lane (§2.4) |
-| tests/build-site-drift.test.js (2026-10-18) | the guard on a copy of the tree: the clean tree passes, with floors on each type's total and every type in both lanes. Each of these fails the build by name: a relabelled figure, image choice and bank figure; an un-namespaced SVG figure; a path figure; and an image choice with no image. An archived one warns. Six extraction plants each fail as an extraction problem, never as refused test data: a const beside `imageSourceOk`, a PNG-only and a JPEG-only const, a helper only `choiceImageSrc` calls (it throws), a choice-only refusal, and a guard that accepts everything. The archived lane is floored per type. 21/0. Against the build-site.js of `4416e5d` (no guard) 14 checks fail, of `e92a2bd` 7, of `f31086b` 1 |
+| tests/build-site-drift.test.js (2026-10-18) | the guard on a copy of the tree: the clean tree passes, with floors on each type's total and every type in both lanes. Each of these fails the build by name: a relabelled figure, image choice and bank figure; an un-namespaced SVG figure; a path figure; and an image choice with no image. An archived one warns. Nine extraction plants each fail as an extraction problem, never as refused test data: a const beside `imageSourceOk`, a PNG-only and a JPEG-only const, a helper only `choiceImageSrc` calls (it throws), a choice-only and a figure-only refusal, each site alone accepting the known-bad image, and a guard that accepts everything. The archived lane is floored per type. 24/0. Against the build-site.js of `4416e5d` (no guard) 17 checks fail, of `e92a2bd` 10, of `f31086b` 1 |
 | tests/image-choice-fixture.js | NEW — the shared four-image item (four distinct 4×3 PNGs) |
 | tests/image-choice.test.js | NEW — the seam, the grammar, the placeholder, the fixture, the proof's copy of it, (0792fe7) the stem-figure guard with every shipped figure, and (2026-10-18) §9 the bytes check at both sites with its mutants, plus every shipped image choice |
 | tests/keep-classes.test.js | explicit image-choice audit over every form and bank through the renderer's own `choiceImageSrc` (grammar, and since 2026-10-18 bytes), with planted-fixture controls |
@@ -530,13 +545,16 @@ each support removed. The numbered rules below stay the contract.
     order, a bound prefixed attribute, character references in the
     namespace, references, `>` and TAB in values, UTF-8 text in the body,
     and a scripted SVG.
-  - 128 grammar-valid sources are refused. The rasters: PNG, JPEG and SVG
+  - 130 grammar-valid sources are refused. The rasters: PNG, JPEG and SVG
     bytes each declared as the other two types; GIF and HTML bytes; zero
     bytes; and EVERY byte of both signatures broken on its own (all eight
     PNG bytes, all three JPEG bytes, and shifted, cut and line-ending-
     mangled signatures). The SVGs:
     - Encoding: cp1252 and Latin-1 bytes declared or not, invalid UTF-8,
-      an overlong sequence, an encoded surrogate, UTF-16, three BOMs.
+      an overlong sequence, an encoded surrogate, UTF-16 with a BOM (a
+      stated refusal: Chrome draws it), an incomplete sequence at the end of
+      the file (stated; Chrome draws it) and the same followed by a newline
+      (Chrome refuses it too), three BOMs.
     - Characters XML forbids: a form feed, `\x01`, ESC, NUL, U+FFFE,
       `&#0;` and `&#x1;`.
     - Every XML declaration fault measured: not first, no version,

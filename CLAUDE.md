@@ -294,8 +294,10 @@ Three rules:
    an SVG must be valid UTF-8 throughout, with no character XML forbids,
    and XML 1.0's productions are applied up to its root start tag, which
    must be `<svg>` in the SVG namespace. That is because Chrome draws an
-   `<img>` SVG only if it is UTF-8 and well-formed. The stated refusals and
-   unchecked parts are in IMAGE-CHOICES-SPEC §2.4. `figureSrc` runs the same
+   `<img>` SVG only if it decodes (as UTF-8, or as UTF-16 only behind a
+   BOM; the declared encoding is ignored) and is well-formed. UTF-16 is a
+   stated refusal; it and the other stated refusals and unchecked parts are
+   in IMAGE-CHOICES-SPEC §2.4. `figureSrc` runs the same
    guard). Anything
    else renders a placeholder, never a throw. `tests/image-choice.test.js`
    pins the seam, the bytes check at both sites (with mutants) and every

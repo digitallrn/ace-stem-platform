@@ -231,6 +231,30 @@ try{
       .replace("  function isImageChoice(c){", "  const CHOICE_OK_PLANTED = true;\n  function isImageChoice(c){"));
     check(extractionFails(r, /refuses a known-good png/), "a choice-only refusal in the extracted scope fails as an extraction problem (the self-check judges both sites)", why(r));
   });
+  /* the mirrors (final review, 2026-10-18): the figure site alone refusing,
+     and each site alone ACCEPTING the known-bad image (it returns its input
+     unguarded in the extracted scope). Before these, a self-check narrowed
+     to either single site stayed green. */
+  const FIG_LINE = 'return (q && typeof q.figure === "string" && imageSourceOk(q.figure)) ? q.figure : null;';
+  const CHO_LINE = 'return (isImageChoice(c) && typeof c.image === "string" && imageSourceOk(c.image)) ? c.image : null;';
+  run("image-guard-figure-only-refusal", () => {
+    const r = plantedAt("app.js", s => s.replace(FIG_LINE,
+        'return (typeof FIG_OK_PLANTED !== "undefined" && q && typeof q.figure === "string" && imageSourceOk(q.figure)) ? q.figure : null;')
+      .replace("  function figureSrc(q){", "  const FIG_OK_PLANTED = true;\n  function figureSrc(q){"));
+    check(extractionFails(r, /refuses a known-good png/), "a figure-only refusal in the extracted scope fails as an extraction problem (the goods are judged at the figure site too)", why(r));
+  });
+  run("image-guard-figure-accepts-bad", () => {
+    const r = plantedAt("app.js", s => s.replace(FIG_LINE,
+        'return (q && typeof q.figure === "string" && (typeof FIG_GUARD_PLANTED === "undefined" || imageSourceOk(q.figure))) ? q.figure : null;')
+      .replace("  function figureSrc(q){", "  const FIG_GUARD_PLANTED = true;\n  function figureSrc(q){"));
+    check(extractionFails(r, /accepts PNG bytes labelled jpeg/), "the figure site alone accepting the known-bad image fails the self-check", why(r));
+  });
+  run("image-guard-choice-accepts-bad", () => {
+    const r = plantedAt("app.js", s => s.replace(CHO_LINE,
+        'return (isImageChoice(c) && typeof c.image === "string" && (typeof CHO_GUARD_PLANTED === "undefined" || imageSourceOk(c.image))) ? c.image : null;')
+      .replace("  function isImageChoice(c){", "  const CHO_GUARD_PLANTED = true;\n  function isImageChoice(c){"));
+    check(extractionFails(r, /accepts PNG bytes labelled jpeg/), "the choice site alone accepting the known-bad image fails the self-check", why(r));
+  });
   run("image-guard-accepts-everything", () => {
     const r = plantedAt("app.js", s => s.replace("const type = m[1], off = 19 + type.length;", "return true; const type = m[1], off = 19 + type.length;"));
     check(extractionFails(r, /accepts PNG bytes labelled jpeg/), "a guard that accepts everything fails the self-check's known-bad leg", why(r));

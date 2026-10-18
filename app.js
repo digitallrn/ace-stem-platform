@@ -2941,15 +2941,17 @@
        2. png: the 8-byte signature; jpeg: FF D8 FF (start of image, then
           a marker);
        3. svg+xml has no signature, so the whole document is decoded (every
-          shipped SVG is under 24 KB). Chrome draws an <img> SVG only if it
-          is valid UTF-8 (it decodes as UTF-8 whatever the XML declaration
-          says) and well-formed, so:
+          shipped SVG is under 24 KB). Chrome decodes an <img> SVG as UTF-8
+          unless it opens with a UTF-16 BOM (the XML declaration's encoding
+          is ignored), and draws it only if that decode succeeds and the
+          document is well-formed. This check requires UTF-8, so:
           - the WHOLE document must be valid UTF-8 (a fatal decoder; one
             leading BOM is stripped, as Chrome strips it) and hold no
             character XML forbids (C0 controls but TAB, LF and CR;
             U+FFFE, U+FFFF);
           - then XML 1.0's productions (with Namespaces in XML's colon
-            rules) are applied as far as the end of the root start tag:
+            rules for PI targets, the root and its attributes) are applied
+            as far as the end of the root start tag:
             an optional BOM; an optional XML declaration, only at the very
             start, with version 1.x and then only an encoding name and a
             standalone yes|no, in that order; any whitespace, comments (no
@@ -2957,8 +2959,9 @@
             is not "xml" in any case); at most one DOCTYPE (a Name; then
             optionally SYSTEM "lit" or PUBLIC "pubid" "lit"; then optionally
             an internal subset of whitespace, comments, PIs, %refs; and
-            ENTITY, NOTATION, ELEMENT and ATTLIST declarations in their
-            shapes), then whitespace, comments and PIs again;
+            declarations: ENTITY and NOTATION up to their names and
+            literals, ELEMENT up to its content model, ATTLIST by its
+            delimiters), then whitespace, comments and PIs again;
           - the ROOT start tag <svg> or <NCName:svg>, whose attributes are
             whitespace-separated QNames with quoted values holding no "<",
             no bare "&", and only character references to characters XML
@@ -2967,15 +2970,20 @@
             attribute decides, compared after character references are
             expanded. A browser will not load an <img> whose SVG root is
             in no namespace.
-          Refused although a browser may draw them (stated, rare, and a red
+          Refused although Chrome draws them (stated, rare, and a red
           deploy rather than a silent loss): an xmlns written through an
           entity the internal subset declares, or supplied as an ATTLIST
-          default (old Illustrator exports); UTF-16; version="1." with no
-          digit; three or more BOMs (Chrome draws two, and so does this).
+          default (old Illustrator exports); UTF-16 with a BOM;
+          version="1." with no digit; a document followed by an incomplete
+          UTF-8 sequence at the very end of the file (Chrome tolerates a
+          cut-off final character there). Refused, as Chrome refuses them:
+          three or more BOMs (Chrome draws two, and so does this).
           Not checked (the browser shows the glyph, as before this check):
           an ELEMENT content model and an ATTLIST body (Chrome draws an
-          ATTLIST with any body), and an xmlns:prefix value libxml2 cannot
-          parse as a URI.
+          ATTLIST with any body); a colon in an entity, notation or
+          parameter-entity name; an entity value's contents (a bare % or &,
+          character references); NDATA on a parameter entity; and an
+          xmlns:prefix value libxml2 cannot parse as a URI.
      A refusal is the placeholder, never a throw: everything that can throw
      (atob, the regexes' backtracking stack on a pathological multi-MB
      prolog, String.fromCodePoint) sits inside the try.

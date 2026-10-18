@@ -482,6 +482,10 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "invalid UTF-8 (FF) in a root attribute": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-x="\xFF"/>')),
     "an overlong UTF-8 sequence": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-x="\xC0\xAF"/>')),
     "a UTF-8-encoded surrogate": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-x="\xED\xA0\x80"/>')),
+    "a UTF-8 SVG followed by an incomplete sequence at end of file (stated refusal, Chrome draws it)":
+      uri("svg+xml", b64('<svg xmlns="' + NS + '" width="10" height="10"/>\xC3')),
+    "the same incomplete sequence followed by a newline (Chrome refuses it too)":
+      uri("svg+xml", b64('<svg xmlns="' + NS + '" width="10" height="10"/>\xE2\x88\n')),
     "three UTF-8 BOMs": uri("svg+xml", b64('\xEF\xBB\xBF\xEF\xBB\xBF\xEF\xBB\xBF<svg xmlns="' + NS + '"/>')),
     /* characters XML forbids, and references to them */
     "a form feed in a comment": uri("svg+xml", b64('<!-- a\fb --><svg xmlns="' + NS + '"/>')),
@@ -532,7 +536,7 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "//> to close the root": uri("svg+xml", b64('<svg xmlns="' + NS + '"//>')),
     "a comment ending --->": uri("svg+xml", b64('<!-- a ---><svg xmlns="' + NS + '"/>')),
     "text before the root": uri("svg+xml", b64('x<svg xmlns="' + NS + '"/>')),
-    "a UTF-16 SVG": uri("svg+xml", Buffer.from("﻿<svg xmlns=\"" + NS + "\"/>", "utf16le").toString("base64")),
+    "a UTF-16LE SVG with a BOM (stated refusal, Chrome draws it)": uri("svg+xml", Buffer.from("﻿<svg xmlns=\"" + NS + "\"/>", "utf16le").toString("base64")),
     "a PNG payload with three '='": uri("png", PNG_CORE + "==="),
     "a PNG payload of length 1 mod 4": uri("png", PNG_CORE + "AAA"),
     "a PNG payload padded on a length that is not a multiple of 4": uri("png", PNG_CORE + "=")
