@@ -199,10 +199,11 @@ archiveFiles.forEach(f => {
    it: Review Mode and resume on that build would show the placeholder. */
 {
   const vm = require("vm");
-  /* the guard decodes with the global atob, exactly as the browser does
-     (Node 16+). Without it every image would be "refused" — say why instead */
-  if(typeof atob !== "function")
-    die(["The image guard needs Node 16 or later (global atob); this build runs Node " + process.version + "."]);
+  /* the guard decodes with the globals atob and TextDecoder, exactly as the
+     browser does (Node 16+). Without them every image would be "refused" —
+     say why instead */
+  if(typeof atob !== "function" || typeof TextDecoder !== "function")
+    die(["The image guard needs Node 16 or later (global atob and TextDecoder); this build runs Node " + process.version + "."]);
   let guard;
   try{
     const { extractFn, extractConst } = require("./tests/extract-helper");
@@ -220,7 +221,16 @@ archiveFiles.forEach(f => {
      every exception as a refusal, so a helper or const added beside it in a
      later refactor would otherwise read as "every SVG refused — fix the item
      in the test-bank repo" (review 2026-10-18), pointing the fixer at the
-     wrong repo. */
+     wrong repo. A helper that only choiceImageSrc or figureSrc calls would
+     THROW instead of refusing: every call goes through `call`, which reports
+     that as the same extraction problem rather than crashing the build. */
+  const EXTRACTION = ["This is build-site.js's extraction, not the test data: a helper or const beside imageSourceOk",
+                      "in app.js must be added to the list build-site.js extracts."];
+  const call = (fn, arg) => {
+    try{ return fn(arg); }
+    catch(e){ die(["The image guard taken from app.js threw (" + e.message + ")."].concat(EXTRACTION)); }
+  };
+  const figureSrc = q => call(guard.figureSrc, q), choiceImageSrc = c => call(guard.choiceImageSrc, c);
   {
     const NS = "http://www.w3.org/2000/svg";
     const b64 = s => Buffer.from(s, "latin1").toString("base64");
@@ -232,13 +242,11 @@ archiveFiles.forEach(f => {
       "data:image/svg+xml;base64," + b64('<?xml version="1.0"?>\n<!-- c -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" ' +
         '"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="' + NS + '"/>')];
     const bad = "data:image/jpeg;base64," + b64("\x89PNG\r\n\x1A\n\x00\x00\x00\x0DIHDR");
-    const wrong = good.filter(u => guard.figureSrc({ figure: u }) !== u || guard.choiceImageSrc({ image: u }) !== u)
+    const wrong = good.filter(u => figureSrc({ figure: u }) !== u || choiceImageSrc({ image: u }) !== u)
       .map(u => "refuses a known-good " + u.slice(11, u.indexOf(";")))
-      .concat(guard.figureSrc({ figure: bad }) === null && guard.choiceImageSrc({ image: bad }) === null ? [] : ["accepts PNG bytes labelled jpeg"]);
+      .concat(figureSrc({ figure: bad }) === null && choiceImageSrc({ image: bad }) === null ? [] : ["accepts PNG bytes labelled jpeg"]);
     if(wrong.length)
-      die(["The image guard taken from app.js is not working here: it " + wrong.join("; it ") + ".",
-           "This is build-site.js's extraction, not the test data: a helper or const beside imageSourceOk",
-           "in app.js must be added to the list build-site.js extracts."]);
+      die(["The image guard taken from app.js is not working here: it " + wrong.join("; it ") + "."].concat(EXTRACTION));
   }
   const tally = { figures: 0, choices: 0, live: { png: 0, jpeg: 0, "svg+xml": 0, other: 0 }, archived: { png: 0, jpeg: 0, "svg+xml": 0, other: 0 } };
   const kind = v => { const t = /^data:image\/(png|jpeg|svg\+xml);/.exec(typeof v === "string" ? v : ""); return t ? t[1] : "other"; };
@@ -256,12 +264,12 @@ archiveFiles.forEach(f => {
       const head = v => typeof v === "string" ? v.slice(0, 30) + "…" : String(v);
       if(q.figure){
         tally.figures++; tally[archived ? "archived" : "live"][kind(q.figure)]++;
-        if(guard.figureSrc(q) !== q.figure) bad.push(where + " figure (" + head(q.figure) + ")");
+        if(figureSrc(q) !== q.figure) bad.push(where + " figure (" + head(q.figure) + ")");
       }
       (Array.isArray(q.choices) ? q.choices : []).forEach((ch, i) => {
         if(typeof ch === "string") return;
         tally.choices++;
-        if(guard.choiceImageSrc(ch) === null) bad.push(where + " choice " + "ABCD".charAt(i) + " (" + head(ch && ch.image) + ")");
+        if(choiceImageSrc(ch) === null) bad.push(where + " choice " + "ABCD".charAt(i) + " (" + head(ch && ch.image) + ")");
       });
     });
     return bad;

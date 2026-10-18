@@ -2941,31 +2941,41 @@
        2. png: the 8-byte signature; jpeg: FF D8 FF (start of image, then
           a marker);
        3. svg+xml has no signature, so the whole document is decoded (every
-          shipped SVG is under 24 KB) and read as XML 1.0 reads it, as far
-          as the end of the root start tag. Chrome draws an <img> SVG only
-          if it is well-formed, so the rules are XML's exactly; looser ones
-          pass what the browser shows as broken, stricter ones refuse what
-          it draws. In order:
-          - an optional UTF-8 BOM;
-          - an optional XML declaration, only at the very start
-            (`<?xml version="1.x" …?>`);
-          - any whitespace, comments (no "--" inside) and processing
-            instructions (a Name target that is not "xml" in any case);
-          - at most one DOCTYPE: a Name; then optionally SYSTEM "lit" or
-            PUBLIC "pubid" "lit"; then optionally an internal subset that
-            holds only whitespace, comments, PIs, %refs; and <!ENTITY …>,
-            <!ATTLIST …>, <!ELEMENT …>, <!NOTATION …> declarations; then
-            whitespace, comments and PIs again;
-          - the ROOT start tag <svg>, or <prefix:svg>, whose attributes are
-            Names with quoted values holding no "<" and no bare "&". It must
-            be in the SVG namespace: a default xmlns, or the xmlns:prefix
-            that binds its own prefix, compared after character references
-            are expanded. A browser will not load an <img> whose SVG root is
+          shipped SVG is under 24 KB). Chrome draws an <img> SVG only if it
+          is valid UTF-8 (it decodes as UTF-8 whatever the XML declaration
+          says) and well-formed, so:
+          - the WHOLE document must be valid UTF-8 (a fatal decoder; one
+            leading BOM is stripped, as Chrome strips it) and hold no
+            character XML forbids (C0 controls but TAB, LF and CR;
+            U+FFFE, U+FFFF);
+          - then XML 1.0's productions (with Namespaces in XML's colon
+            rules) are applied as far as the end of the root start tag:
+            an optional BOM; an optional XML declaration, only at the very
+            start, with version 1.x and then only an encoding name and a
+            standalone yes|no, in that order; any whitespace, comments (no
+            "--" inside) and processing instructions (an NCName target that
+            is not "xml" in any case); at most one DOCTYPE (a Name; then
+            optionally SYSTEM "lit" or PUBLIC "pubid" "lit"; then optionally
+            an internal subset of whitespace, comments, PIs, %refs; and
+            ENTITY, NOTATION, ELEMENT and ATTLIST declarations in their
+            shapes), then whitespace, comments and PIs again;
+          - the ROOT start tag <svg> or <NCName:svg>, whose attributes are
+            whitespace-separated QNames with quoted values holding no "<",
+            no bare "&", and only character references to characters XML
+            allows. It must be in the SVG namespace: a default xmlns, or
+            the xmlns:prefix that binds its own prefix; the first such
+            attribute decides, compared after character references are
+            expanded. A browser will not load an <img> whose SVG root is
             in no namespace.
           Refused although a browser may draw them (stated, rare, and a red
           deploy rather than a silent loss): an xmlns written through an
           entity the internal subset declares, or supplied as an ATTLIST
-          default (old Illustrator exports); UTF-16.
+          default (old Illustrator exports); UTF-16; version="1." with no
+          digit; three or more BOMs (Chrome draws two, and so does this).
+          Not checked (the browser shows the glyph, as before this check):
+          an ELEMENT content model and an ATTLIST body (Chrome draws an
+          ATTLIST with any body), and an xmlns:prefix value libxml2 cannot
+          parse as a URI.
      A refusal is the placeholder, never a throw: everything that can throw
      (atob, the regexes' backtracking stack on a pathological multi-MB
      prolog, String.fromCodePoint) sits inside the try.
@@ -2993,28 +3003,51 @@
       const b = atob(s.slice(off, type === "svg+xml" ? s.length : off + 12));
       if(type === "png") return b.slice(0, 8) === "\x89PNG\r\n\x1A\n";
       if(type === "jpeg") return b.slice(0, 3) === "\xFF\xD8\xFF";
-      /* the grammar above, built from its parts (b is a binary string: a
-         UTF-8 multi-byte character arrives as bytes \x80-\xFF, which is
-         how Name admits non-ASCII) */
+      /* valid UTF-8 or nothing: a fatal decoder throws into the catch (a
+         plain loop to bytes: Uint8Array.from with a mapper is ~25x slower) */
+      const u = new Uint8Array(b.length);
+      for(let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+      const t = new TextDecoder("utf-8", { fatal: true }).decode(u);
+      if(/[\x00-\x08\x0B\x0C\x0E-\x1F￾￿]/.test(t)) return false;
+      /* the grammar above, built from its parts, over real characters: XML's
+         Name classes (astral planes as surrogate pairs; no u flag) */
       const S = "[ \\t\\r\\n]";
-      const NAME = "[A-Za-z_:\\x80-\\xFF][A-Za-z0-9._:\\x80-\\xFF-]*";
-      const NCNAME = "[A-Za-z_\\x80-\\xFF][A-Za-z0-9._\\x80-\\xFF-]*";
+      const NCSTART = "A-Za-z_\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C\\u200D" +
+        "\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD";
+      const NCMORE = "\\-.0-9\\u00B7\\u0300-\\u036F\\u203F\\u2040";
+      const ASTRAL = "[\\uD800-\\uDB7F][\\uDC00-\\uDFFF]";
+      const NCNAME = "(?:[" + NCSTART + "]|" + ASTRAL + ")(?:[" + NCSTART + NCMORE + "]|" + ASTRAL + ")*";
+      const NAME = "(?:[:" + NCSTART + "]|" + ASTRAL + ")(?:[:" + NCSTART + NCMORE + "]|" + ASTRAL + ")*";
+      const QNAME = "(?:" + NCNAME + ":)?" + NCNAME;
+      const EQ = S + "*=" + S + "*";
       const COMMENT = "<!--(?:[^-]|-[^-])*-->";
-      const PI = "<\\?(?![Xx][Mm][Ll](?:" + S + "|\\?>))" + NAME + "(?:" + S + "(?:[^?]|\\?(?!>))*)?\\?>";
+      const PI = "<\\?(?![Xx][Mm][Ll](?:" + S + "|\\?>))" + NCNAME + "(?:" + S + "(?:[^?]|\\?(?!>))*)?\\?>";
       const MISC = "(?:" + S + "|" + COMMENT + "|" + PI + ")*";
-      const XMLDECL = "<\\?xml" + S + "+version" + S + "*=" + S + "*(?:\"1\\.[0-9]+\"|'1\\.[0-9]+')(?:[^?]|\\?(?!>))*\\?>";
+      const XMLDECL = "<\\?xml" + S + "+version" + EQ + "(?:\"1\\.[0-9]+\"|'1\\.[0-9]+')" +
+        "(?:" + S + "+encoding" + EQ + "(?:\"[A-Za-z][A-Za-z0-9._-]*\"|'[A-Za-z][A-Za-z0-9._-]*'))?" +
+        "(?:" + S + "+standalone" + EQ + "(?:\"(?:yes|no)\"|'(?:yes|no)'))?" + S + "*\\?>";
       const LIT = "(?:\"[^\"]*\"|'[^']*')";
       const PUBID = "(?:\"[- \\r\\na-zA-Z0-9'()+,./:=?;!*#@$_%]*\"|'[- \\r\\na-zA-Z0-9()+,./:=?;!*#@$_%]*')";
-      const DECL = "<!(?:ENTITY|ATTLIST|ELEMENT|NOTATION)" + S + "(?:[^>\"']|" + LIT + ")*>";
-      const DOCTYPE = "<!DOCTYPE" + S + "+" + NAME + "(?:" + S + "+(?:SYSTEM" + S + "+" + LIT + "|PUBLIC" + S + "+" + PUBID + S + "+" + LIT + "))?" + S + "*" +
+      const EXTID = "(?:SYSTEM" + S + "+" + LIT + "|PUBLIC" + S + "+" + PUBID + S + "+" + LIT + ")";
+      const DECL = "<!ENTITY" + S + "+(?:%" + S + "+)?" + NAME + S + "+(?:" + LIT + "|" + EXTID + "(?:" + S + "+NDATA" + S + "+" + NAME + ")?)" + S + "*>" +
+        "|<!NOTATION" + S + "+" + NAME + S + "+(?:" + EXTID + "|PUBLIC" + S + "+" + PUBID + ")" + S + "*>" +
+        "|<!ELEMENT" + S + "+" + NAME + S + "+(?:EMPTY|ANY|\\([^>]*\\)[?*+]?)" + S + "*>" +
+        "|<!ATTLIST" + S + "(?:[^>\"']|" + LIT + ")*>";
+      const DOCTYPE = "<!DOCTYPE" + S + "+" + NAME + "(?:" + S + "+" + EXTID + ")?" + S + "*" +
         "(?:\\[(?:" + S + "|" + COMMENT + "|" + PI + "|%" + NAME + ";|" + DECL + ")*\\]" + S + "*)?>";
       const REF = "&(?:#[0-9]+|#x[0-9A-Fa-f]+|" + NAME + ");";
       const VALUE = "(?:\"(?:[^\"<&]|" + REF + ")*\"|'(?:[^'<&]|" + REF + ")*')";
-      const r = new RegExp("^(?:\\xEF\\xBB\\xBF)?(?:" + XMLDECL + ")?" + MISC + "(?:" + DOCTYPE + MISC + ")?" +
-        "<(?:(" + NCNAME + "):)?svg((?:" + S + "+" + NAME + S + "*=" + S + "*" + VALUE + ")*)" + S + "*\\/?>").exec(b);
+      const r = new RegExp("^\\uFEFF?(?:" + XMLDECL + ")?" + MISC + "(?:" + DOCTYPE + MISC + ")?" +
+        "<(?:(" + NCNAME + "):)?svg((?:" + S + "+" + QNAME + EQ + VALUE + ")*)" + S + "*\\/?>").exec(t);
       if(!r) return false;
+      /* a numeric reference on the root tag must name a character XML allows */
+      const refs = r[2].match(/&#(?:x[0-9A-Fa-f]+|[0-9]+);/g) || [];
+      for(const c of refs){
+        const cp = c.charAt(2) === "x" ? parseInt(c.slice(3), 16) : parseInt(c.slice(2), 10);
+        if(!(cp === 9 || cp === 10 || cp === 13 || (cp >= 0x20 && cp <= 0xD7FF) || (cp >= 0xE000 && cp <= 0xFFFD) || (cp >= 0x10000 && cp <= 0x10FFFF))) return false;
+      }
       const want = r[1] ? "xmlns:" + r[1] : "xmlns";
-      const attr = new RegExp("(" + NAME + ")" + S + "*=" + S + "*(?:\"([^\"]*)\"|'([^']*)')", "g");
+      const attr = new RegExp("(" + QNAME + ")" + EQ + "(?:\"([^\"]*)\"|'([^']*)')", "g");
       for(let a = attr.exec(r[2]); a; a = attr.exec(r[2])){
         if(a[1] !== want) continue;
         const v = (a[2] !== undefined ? a[2] : a[3]).replace(/&(?:#x([0-9A-Fa-f]+)|#([0-9]+)|(amp|lt|gt|quot|apos));/g,

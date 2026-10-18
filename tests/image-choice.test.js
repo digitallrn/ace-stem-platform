@@ -17,7 +17,8 @@
      5. (§9, 2026-10-18) the decoded bytes must be the declared type —
         imageSourceOk, run by BOTH acceptance sites (choiceImageSrc and
         figureSrc): a payload atob cannot decode, PNG bytes declared jpeg or
-        svg+xml, SVG bytes declared png, an SVG whose root is not <svg> in
+        svg+xml, SVG bytes declared png, an SVG that is not valid UTF-8, not
+        well-formed XML up to its root tag, or whose root is not <svg> in
         the SVG namespace — each refused at both sites and rendered as the
         placeholder; every shipped image, choices and figures in every
         current, archived and bank build, still passes (§7).
@@ -33,7 +34,7 @@
      saved slot before the type branch; put the <img> inside .ctext; have
      buildQuestionHtml's branch index the saved map or interpolate a blob
      itself (the map is handed to the seam whole; only the seam's text path
-     indexes it). §9 runs its own twenty-five bytes mutants in-process, each built
+     indexes it). §9 runs its own thirty-three bytes mutants in-process, each built
      from the real source by an exact replacement that must apply.
 
    To watch the bytes check fail without it (the commit before it, b67d3a7):
@@ -367,6 +368,20 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "a PI after the DOCTYPE": uri("svg+xml", b64('<!DOCTYPE svg><?foo bar?><svg xmlns="' + NS + '"/>')),
     "a DOCTYPE with a SYSTEM literal": uri("svg+xml", b64('<!DOCTYPE svg SYSTEM "x.dtd"><svg xmlns="' + NS + '"/>')),
     "entity and character references in another root attribute": uri("svg+xml", b64('<svg xmlns="' + NS + '" aria-label="a &amp; b &#233;"/>')),
+    /* the third review (2026-10-18), each measured in Chrome 152 as DRAWN */
+    "lxml's single-quoted declaration": uri("svg+xml", b64("<?xml version='1.0' encoding='UTF-8'?><svg xmlns=\"" + NS + "\"/>")),
+    "spaces around = in the declaration": uri("svg+xml", b64('<?xml version = "1.0" encoding = "UTF-8" ?><svg xmlns="' + NS + '"/>')),
+    "standalone='no', and version 1.1, and an unknown encoding name": uri("svg+xml", b64("<?xml version='1.1' encoding='foo' standalone='no'?><svg xmlns=\"" + NS + "\"/>")),
+    "ELEMENT (ANY and a content model) and NOTATION declarations": uri("svg+xml", b64('<!DOCTYPE svg [ <!ELEMENT svg ANY> <!ELEMENT g (#PCDATA|g)*> <!NOTATION n SYSTEM "x"> ]><svg xmlns="' + NS + '"/>')),
+    "an ENTITY literal holding >, a parameter entity, an unparsed entity": uri("svg+xml", b64('<!DOCTYPE svg [ <!ENTITY a "x>y"> <!ENTITY % pe "x"> <!NOTATION n SYSTEM "x"> <!ENTITY e SYSTEM "y" NDATA n> ]><svg xmlns="' + NS + '"/>')),
+    "a defined entity in a root attribute": uri("svg+xml", b64('<!DOCTYPE svg [ <!ENTITY foo "bar"> ]><svg xmlns="' + NS + '" data-a="&foo;"/>')),
+    "a > in a root attribute value": uri("svg+xml", b64('<svg xmlns="' + NS + '" aria-label="x > 2"/>')),
+    "a doubled UTF-8 BOM (Chrome strips two)": uri("svg+xml", b64('\xEF\xBB\xBF\xEF\xBB\xBF<?xml version="1.0"?><svg xmlns="' + NS + '"/>')),
+    "TAB, CR, LF and DEL in a comment, &#9; in an attribute": uri("svg+xml", b64('<!-- a\tb\r\nc\x7F --><svg xmlns="' + NS + '" data-a="a&#9;b"/>')),
+    "an ATTLIST with any body (Chrome draws it)": uri("svg+xml", b64('<!DOCTYPE svg [ <!ATTLIST junk> ]><svg xmlns="' + NS + '"/>')),
+    "an astral-plane NameStartChar in an attribute name": uri("svg+xml", Buffer.from('<svg xmlns="' + NS + '" \u{10000}a="1"/>', "utf8").toString("base64")),
+    "a prefixed attribute bound on the root (xmlns:a, a:b)": uri("svg+xml", b64('<svg xmlns="' + NS + '" xmlns:a="urn:x" a:b="1"/>')),
+    "UTF-8 text in the body": uri("svg+xml", Buffer.from('<svg xmlns="' + NS + '"><title>30° − 2</title></svg>', "utf8").toString("base64")),
     "an xml-stylesheet processing instruction": uri("svg+xml", b64('<?xml version="1.0"?><?xml-stylesheet href="s.css" type="text/css"?><svg xmlns="' + NS + '"/>')),
     "the namespace written with a decimal character reference": uri("svg+xml", b64('<svg xmlns="http&#58;//www.w3.org/2000/svg"/>')),
     "the namespace written with a hex character reference": uri("svg+xml", b64('<svg xmlns="http&#x3A;//www.w3.org/2000/svg"/>')),
@@ -397,6 +412,11 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "a JPEG start-of-image with no marker after it": uri("jpeg", b64("\xFF\xD8")),
     "a JPEG start-of-image followed by a non-marker byte": uri("jpeg", b64("\xFF\xD8\x00\xE0\x00\x10JFIF")),
     "a JPEG whose second byte is not D8": uri("jpeg", b64("\xFF\x00\xFF\xE0\x00\x10JFIF")),
+    "a JPEG whose first byte is not FF": uri("jpeg", b64("\x00\xD8\xFF\xE0\x00\x10JFIF")),
+    "a PNG signature with only byte 2 wrong": uri("png", b64("\x89QNG\r\n\x1A\n\x00\x00\x00\x0D")),
+    "a PNG signature with only byte 3 wrong": uri("png", b64("\x89POG\r\n\x1A\n\x00\x00\x00\x0D")),
+    "a PNG signature with only byte 5 wrong": uri("png", b64("\x89PNG\x00\n\x1A\n\x00\x00\x00\x0D")),
+    "a PNG signature with only byte 6 wrong": uri("png", b64("\x89PNG\r\x00\x1A\n\x00\x00\x00\x0D")),
     "an SVG with no namespace (<svg/>)": "data:image/svg+xml;base64,PHN2Zy8+",
     "an SVG root in the XHTML namespace": uri("svg+xml", b64('<svg xmlns="http://www.w3.org/1999/xhtml"/>')),
     "an SVG namespace with a trailing slash": uri("svg+xml", b64('<svg xmlns="' + NS + '/"/>')),
@@ -454,6 +474,63 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
     "a bare & in a root attribute value": uri("svg+xml", b64('<svg xmlns="' + NS + '" a="a & b"/>')),
     "a root attribute named 1a (not a Name)": uri("svg+xml", b64('<svg xmlns="' + NS + '" 1a="x"/>')),
     "a prefix that is not a Name (<1:svg>)": uri("svg+xml", b64('<1:svg xmlns:1="' + NS + '"/>')),
+    /* the third review (2026-10-18), each measured in Chrome 152 as BROKEN.
+       Encoding: Chrome decodes an <img> SVG as UTF-8 whatever it declares */
+    "a cp1252 degree sign (Windows ANSI re-save)": uri("svg+xml", b64('<svg xmlns="' + NS + '"><title>30\xB0</title></svg>')),
+    "a declared windows-1252 document with a non-ASCII byte": uri("svg+xml", b64('<?xml version="1.0" encoding="windows-1252"?><svg xmlns="' + NS + '"><title>30\xB0</title></svg>')),
+    "a declared ISO-8859-1 attribute byte": uri("svg+xml", b64('<?xml version="1.0" encoding="ISO-8859-1"?><svg xmlns="' + NS + '" data-x="caf\xE9"/>')),
+    "invalid UTF-8 (FF) in a root attribute": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-x="\xFF"/>')),
+    "an overlong UTF-8 sequence": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-x="\xC0\xAF"/>')),
+    "a UTF-8-encoded surrogate": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-x="\xED\xA0\x80"/>')),
+    "three UTF-8 BOMs": uri("svg+xml", b64('\xEF\xBB\xBF\xEF\xBB\xBF\xEF\xBB\xBF<svg xmlns="' + NS + '"/>')),
+    /* characters XML forbids, and references to them */
+    "a form feed in a comment": uri("svg+xml", b64('<!-- a\fb --><svg xmlns="' + NS + '"/>')),
+    "a \\x01 in the XML declaration": uri("svg+xml", b64('<?xml version="1.0"\x01?><svg xmlns="' + NS + '"/>')),
+    "an ESC in a PI": uri("svg+xml", b64('<?foo a\x1Bb?><svg xmlns="' + NS + '"/>')),
+    "a NUL in a root attribute": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-a="a\x00b"/>')),
+    "U+FFFE in a comment": uri("svg+xml", Buffer.from('<!-- a￾b --><svg xmlns="' + NS + '"/>', "utf8").toString("base64")),
+    "&#0; in a root attribute": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-a="&#0;"/>')),
+    "&#x1; in a root attribute": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-a="&#x1;"/>')),
+    /* the XML declaration's own production */
+    "an unquoted encoding": uri("svg+xml", b64('<?xml version="1.0" encoding=UTF-8?><svg xmlns="' + NS + '"/>')),
+    "an unquoted standalone": uri("svg+xml", b64('<?xml version="1.0" standalone=no?><svg xmlns="' + NS + '"/>')),
+    "standalone before encoding": uri("svg+xml", b64('<?xml version="1.0" standalone="no" encoding="UTF-8"?><svg xmlns="' + NS + '"/>')),
+    "Encoding= (capital)": uri("svg+xml", b64('<?xml version="1.0" Encoding="UTF-8"?><svg xmlns="' + NS + '"/>')),
+    "version twice": uri("svg+xml", b64('<?xml version="1.0" version="1.0"?><svg xmlns="' + NS + '"/>')),
+    'standalone="maybe"': uri("svg+xml", b64('<?xml version="1.0" standalone="maybe"?><svg xmlns="' + NS + '"/>')),
+    "junk in the declaration": uri("svg+xml", b64('<?xml version="1.0" junk?><svg xmlns="' + NS + '"/>')),
+    "no space before encoding": uri("svg+xml", b64('<?xml version="1.0"encoding="UTF-8"?><svg xmlns="' + NS + '"/>')),
+    'encoding=""': uri("svg+xml", b64('<?xml version="1.0" encoding=""?><svg xmlns="' + NS + '"/>')),
+    "a declaration left open, running on to a later PI": uri("svg+xml", b64('<?xml version="1.0"><?foo bar?><svg xmlns="' + NS + '"/>')),
+    "<?xmlversion=...?>": uri("svg+xml", b64('<?xmlversion="1.0"?><svg xmlns="' + NS + '"/>')),
+    "mismatched version quotes": uri("svg+xml", b64("<?xml version=\"1.0'?><svg xmlns=\"" + NS + "\"/>")),
+    'version="1." (no digit; stated refusal, Chrome draws it)': uri("svg+xml", b64('<?xml version="1."?><svg xmlns="' + NS + '"/>')),
+    /* PIs, declarations, DOCTYPE spacing, Names and references */
+    "a PI target holding a colon": uri("svg+xml", b64('<?a:b x?><svg xmlns="' + NS + '"/>')),
+    "a PI target :x": uri("svg+xml", b64('<?:x?><svg xmlns="' + NS + '"/>')),
+    "a PI with no space before its data": uri("svg+xml", b64('<?foo"bar?><svg xmlns="' + NS + '"/>')),
+    "<!ENTITY a>": uri("svg+xml", b64('<!DOCTYPE svg [ <!ENTITY a> ]><svg xmlns="' + NS + '"/>')),
+    "<!ENTITY junk junk junk>": uri("svg+xml", b64('<!DOCTYPE svg [ <!ENTITY junk junk junk> ]><svg xmlns="' + NS + '"/>')),
+    "<!ELEMENT svg JUNK>": uri("svg+xml", b64('<!DOCTYPE svg [ <!ELEMENT svg JUNK> ]><svg xmlns="' + NS + '"/>')),
+    "<!NOTATION n> (no id)": uri("svg+xml", b64('<!DOCTYPE svg [ <!NOTATION n> ]><svg xmlns="' + NS + '"/>')),
+    "<!FOO bar> in the subset": uri("svg+xml", b64('<!DOCTYPE svg [ <!FOO bar> ]><svg xmlns="' + NS + '"/>')),
+    "<!ENTITYa ...> (no space)": uri("svg+xml", b64('<!DOCTYPE svg [ <!ENTITYa "b"> ]><svg xmlns="' + NS + '"/>')),
+    "%pe with no ;": uri("svg+xml", b64('<!DOCTYPE svg [ %pe ]><svg xmlns="' + NS + '"/>')),
+    'SYSTEM"x" (no space)': uri("svg+xml", b64('<!DOCTYPE svg SYSTEM"x"><svg xmlns="' + NS + '"/>')),
+    'PUBLIC"id" "x" (no space)': uri("svg+xml", b64('<!DOCTYPE svg PUBLIC"-//W3C//DTD SVG 1.1//EN" "x"><svg xmlns="' + NS + '"/>')),
+    "the public and system literals run together": uri("svg+xml", b64('<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN""x"><svg xmlns="' + NS + '"/>')),
+    "a DOCTYPE name that is not a Name": uri("svg+xml", b64('<!DOCTYPE 1svg><svg xmlns="' + NS + '"/>')),
+    "an attribute name starting with ×": uri("svg+xml", Buffer.from('<svg xmlns="' + NS + '" ×x="1"/>', "utf8").toString("base64")),
+    "an attribute named :x (not a QName)": uri("svg+xml", b64('<svg xmlns="' + NS + '" :x="1"/>')),
+    "an attribute named a:b:c (not a QName)": uri("svg+xml", b64('<svg xmlns="' + NS + '" a:b:c="1"/>')),
+    "<a:b:svg> (not a QName)": uri("svg+xml", b64('<a:b:svg xmlns:a:b="' + NS + '"/>')),
+    "a form feed between the root name and an attribute": uri("svg+xml", b64('<svg\fxmlns="' + NS + '"/>')),
+    "&#xZZ;": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-a="&#xZZ;"/>')),
+    "& ; (a bare & then a space)": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-a="& ;"/>')),
+    "&#X3A; (an upper-case X)": uri("svg+xml", b64('<svg xmlns="http&#X3A;//www.w3.org/2000/svg"/>')),
+    "&#; (no digits)": uri("svg+xml", b64('<svg xmlns="' + NS + '" data-a="&#;"/>')),
+    "//> to close the root": uri("svg+xml", b64('<svg xmlns="' + NS + '"//>')),
+    "a comment ending --->": uri("svg+xml", b64('<!-- a ---><svg xmlns="' + NS + '"/>')),
     "text before the root": uri("svg+xml", b64('x<svg xmlns="' + NS + '"/>')),
     "a UTF-16 SVG": uri("svg+xml", Buffer.from("﻿<svg xmlns=\"" + NS + "\"/>", "utf16le").toString("base64")),
     "a PNG payload with three '='": uri("png", PNG_CORE + "==="),
@@ -579,18 +656,28 @@ console.log("--- 9. magic bytes: the decoded bytes must be the declared type (20
        enforces, loosened one at a time, must turn the battery red */
     ["the XML declaration admitted anywhere in the prolog", ["choice", "figure"], String.raw`const MISC = "(?:" + S + "|" + COMMENT + "|" + PI + ")*";`,
       String.raw`const MISC = "(?:" + S + "|" + COMMENT + "|" + PI + "|<\\?xml" + S + "(?:[^?]|\\?(?!>))*\\?>)*";`],
-    ["the XML declaration's version not required", ["choice", "figure"], String.raw`"+version" + S + "*=" + S + "*(?:\"1\\.[0-9]+\"|'1\\.[0-9]+')`, String.raw`"*`],
+    ["the XML declaration's version not required", ["choice", "figure"], String.raw`"+version" + EQ + "(?:\"1\\.[0-9]+\"|'1\\.[0-9]+')" +`, String.raw`"*" + "(?:[^?]|\\?(?!>))*" +`],
     ["a PI targeted xml (any case) admitted", ["choice", "figure"], "(?![Xx][Mm][Ll](?:", "(?!XML(?:"],
-    ["the DOCTYPE's external id not checked", ["choice", "figure"], String.raw`"(?:" + S + "+(?:SYSTEM" + S + "+" + LIT + "|PUBLIC" + S + "+" + PUBID + S + "+" + LIT + "))?"`,
-      String.raw`"(?:[^\\[>\"']|" + LIT + ")*"`],
+    ["the DOCTYPE's external id not checked", ["choice", "figure"], String.raw`"(?:" + S + "+" + EXTID + ")?"`, String.raw`"(?:[^\\[>\"']|" + LIT + ")*"`],
     ["the internal subset's content not checked", ["choice", "figure"], String.raw`"|%" + NAME + ";|" + DECL + ")*\\]"`, String.raw`"|%" + NAME + ";|" + DECL + "|[^\\]]" + ")*\\]"`],
     ["a comment allowed to hold --", ["choice", "figure"], 'const COMMENT = "<!--(?:[^-]|-[^-])*-->";', String.raw`const COMMENT = "<!--[\\s\\S]*?-->";`],
-    ["the prolog and root read case-insensitively", ["choice", "figure"], String.raw`S + "*\\/?>").exec(b);`, String.raw`S + "*\\/?>", "i").exec(b);`],
+    ["the prolog and root read case-insensitively", ["choice", "figure"], String.raw`S + "*\\/?>").exec(t);`, String.raw`S + "*\\/?>", "i").exec(t);`],
     ["root attribute values not checked for < and bare &", ["choice", "figure"], String.raw`const VALUE = "(?:\"(?:[^\"<&]|" + REF + ")*\"|'(?:[^'<&]|" + REF + ")*')";`, "const VALUE = LIT;"],
-    ["root attribute names not required to be Names", ["choice", "figure"], String.raw`"+" + NAME + S + "*=" + S + "*" + VALUE`, String.raw`"+[^ \\t\\r\\n=\\/>\"']+" + S + "*=" + S + "*" + VALUE`],
-    ["root attributes need no whitespace between them", ["choice", "figure"], String.raw`"):)?svg((?:" + S + "+" + NAME`, String.raw`"):)?svg((?:" + S + "*" + NAME`],
+    ["root attribute names not required to be Names", ["choice", "figure"], '"+" + QNAME + EQ + VALUE', String.raw`"+[^ \\t\\r\\n=\\/>\"']+" + EQ + VALUE`],
+    ["root attributes need no whitespace between them", ["choice", "figure"], '"):)?svg((?:" + S + "+" + QNAME', '"):)?svg((?:" + S + "*" + QNAME'],
     ["the first xmlns no longer decides", ["choice", "figure"], "if(a[1] !== want) continue;",
-      'if(a[1] !== want || (a[2] !== undefined ? a[2] : a[3]) !== "http://www.w3.org/2000/svg") continue;']
+      'if(a[1] !== want || (a[2] !== undefined ? a[2] : a[3]) !== "http://www.w3.org/2000/svg") continue;'],
+    /* the third review (2026-10-18) */
+    ["invalid UTF-8 admitted (a non-fatal decoder)", ["choice", "figure"], 'new TextDecoder("utf-8", { fatal: true })', 'new TextDecoder("utf-8", { fatal: false })'],
+    ["characters XML forbids admitted", ["choice", "figure"], String.raw`if(/[\x00-\x08\x0B\x0C\x0E-\x1F￾￿]/.test(t)) return false;`, ""],
+    ["numeric references on the root not checked", ["choice", "figure"], "if(!(cp === 9 ||", "if(false && !(cp === 9 ||"],
+    ["the declaration's encoding and standalone not checked", ["choice", "figure"],
+      String.raw`"(?:" + S + "+standalone" + EQ + "(?:\"(?:yes|no)\"|'(?:yes|no)'))?" + S + "*\\?>"`, String.raw`"(?:[^?]|\\?(?!>))*\\?>"`],
+    ["a PI target allowed a colon", ["choice", "figure"], String.raw`"|\\?>))" + NCNAME + "(?:"`, String.raw`"|\\?>))" + NAME + "(?:"`],
+    ["root attribute names Names, not QNames", ["choice", "figure"], '"+" + QNAME + EQ + VALUE', '"+" + NAME + EQ + VALUE'],
+    ["the declarations' shapes not checked", ["choice", "figure"], 'const DECL = "<!ENTITY" + S + "+(?:%" + S + "+)?" + NAME',
+      String.raw`const DECL = "<!(?:ENTITY|ATTLIST|ELEMENT|NOTATION)" + S + "(?:[^>\"']|" + LIT + ")*>|(?!)" + S + "+(?:%" + S + "+)?" + NAME`],
+    ["Name classes widened to any non-ASCII", ["choice", "figure"], String.raw`const NCSTART = "A-Za-z_\\u00C0-\\u00D6`, String.raw`const NCSTART = "A-Za-z_\\u0080-\\uFFFF\\u00C0-\\u00D6`]
   ];
   MUTANTS.forEach(([name, sites, needle, repl, count]) => {
     const want = count || 1;

@@ -135,9 +135,11 @@ try{
        current figure legitimately moves one between types. */
     const g = /image guard — (\d+) figures and (\d+) image choices checked/.exec(r.out);
     const t = /figures by type: current and bank \(png (\d+), jpeg (\d+), svg\+xml (\d+)\); archived \(png (\d+), jpeg (\d+), svg\+xml (\d+)\)/.exec(r.out);
-    const FLOOR = { figures: 608, choices: 8, byType: [438, 48, 122] };
+    /* and the ARCHIVED lane floored per type on its own (it only grows), so
+       a gate that swapped the lanes' labels shows (review 2026-10-18) */
+    const FLOOR = { figures: 608, choices: 8, byType: [438, 48, 122], archived: [226, 36, 81] };
     check(!!g && +g[1] >= FLOOR.figures && +g[2] >= FLOOR.choices && /every current and bank image passes/.test(r.out) &&
-          !!t && [0, 1, 2].every(i => +t[i + 1] + +t[i + 4] >= FLOOR.byType[i] && +t[i + 1] > 0 && +t[i + 4] > 0),
+          !!t && [0, 1, 2].every(i => +t[i + 1] + +t[i + 4] >= FLOOR.byType[i] && +t[i + 1] > 0 && +t[i + 4] >= FLOOR.archived[i]),
       "the unmodified tree: the image guard ran over every shipped image, every type in every lane, and passed (" +
       (g ? g[1] + " figures, " + g[2] + " image choices" : "no guard line") + (t ? "; " + t[0] : "; no per-type line") + ")", r.out.slice(-600));
   });
@@ -199,6 +201,39 @@ try{
     check(r.status === 1 && /image guard taken from app\.js is not working here/.test(r.out) && /refuses a known-good svg\+xml/.test(r.out) &&
           !/Images the renderer would refuse/.test(r.out),
       "a const added beside imageSourceOk fails the build as an EXTRACTION problem, not as refused test data", why(r));
+  });
+  /* each leg of the self-check on its own (review 2026-10-18): a raster-only
+     refactor, a helper only choiceImageSrc calls (it THROWS in the extracted
+     scope), and a guard that accepts everything */
+  const extractionFails = (r, re) => r.status === 1 && re.test(r.out) && /build-site\.js's extraction, not the test data/.test(r.out) && !/Images the renderer would refuse/.test(r.out);
+  run("image-guard-png-const", () => {
+    const r = plantedAt("app.js", s => s.replace(String.raw`return b.slice(0, 8) === "\x89PNG\r\n\x1A\n";`, "return b.slice(0, 8) === PNG_SIG_PLANTED;")
+      .replace("  function imageSourceOk(s){", '  const PNG_SIG_PLANTED = "\\x89PNG\\r\\n\\x1A\\n";\n  function imageSourceOk(s){'));
+    check(extractionFails(r, /refuses a known-good png/), "a PNG-only const beside imageSourceOk fails as an extraction problem naming png", why(r));
+  });
+  run("image-guard-jpeg-const", () => {
+    const r = plantedAt("app.js", s => s.replace(String.raw`return b.slice(0, 3) === "\xFF\xD8\xFF";`, "return b.slice(0, 3) === JPEG_SIG_PLANTED;")
+      .replace("  function imageSourceOk(s){", '  const JPEG_SIG_PLANTED = "\\xFF\\xD8\\xFF";\n  function imageSourceOk(s){'));
+    check(extractionFails(r, /refuses a known-good jpeg/), "a JPEG-only const beside imageSourceOk fails as an extraction problem naming jpeg", why(r));
+  });
+  run("image-guard-choice-helper", () => {
+    const r = plantedAt("app.js", s => s.replace('return (isImageChoice(c) && typeof c.image === "string" && imageSourceOk(c.image)) ? c.image : null;',
+        "return choiceOkPlanted(c) ? c.image : null;")
+      .replace("  function isImageChoice(c){", '  function choiceOkPlanted(c){ return isImageChoice(c) && typeof c.image === "string" && imageSourceOk(c.image); }\n  function isImageChoice(c){'));
+    check(extractionFails(r, /threw \(choiceOkPlanted is not defined\)/), "a helper only choiceImageSrc calls fails as an extraction problem (it throws), not a crash", why(r));
+  });
+  run("image-guard-choice-only-refusal", () => {
+    /* choiceImageSrc alone refuses in the extracted scope, without throwing
+       (a const it reads through typeof): only the self-check's CHOICE leg
+       can name this as extraction */
+    const r = plantedAt("app.js", s => s.replace('return (isImageChoice(c) && typeof c.image === "string" && imageSourceOk(c.image)) ? c.image : null;',
+        'return (typeof CHOICE_OK_PLANTED !== "undefined" && isImageChoice(c) && typeof c.image === "string" && imageSourceOk(c.image)) ? c.image : null;')
+      .replace("  function isImageChoice(c){", "  const CHOICE_OK_PLANTED = true;\n  function isImageChoice(c){"));
+    check(extractionFails(r, /refuses a known-good png/), "a choice-only refusal in the extracted scope fails as an extraction problem (the self-check judges both sites)", why(r));
+  });
+  run("image-guard-accepts-everything", () => {
+    const r = plantedAt("app.js", s => s.replace("const type = m[1], off = 19 + type.length;", "return true; const type = m[1], off = 19 + type.length;"));
+    check(extractionFails(r, /accepts PNG bytes labelled jpeg/), "a guard that accepts everything fails the self-check's known-bad leg", why(r));
   });
   run("image-archived", () => {
     const f = fs.readdirSync(path.join(tmp, "testdata", "archive")).find(x => x.indexOf("@") !== -1 &&

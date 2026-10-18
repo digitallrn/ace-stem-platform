@@ -291,10 +291,12 @@ Three rules:
    for one. The source must match `CHOICE_IMAGE_RE` (a `data:image/…;base64`
    URI, which can fetch nothing), and since 2026-10-18 its decoded bytes must
    be the type it declares (`imageSourceOk`: PNG signature, JPEG `FF D8 FF`;
-   an SVG read as XML 1.0 reads it as far as its root start tag, which must
-   be `<svg>` in the SVG namespace. The rules are XML's exactly, because
-   Chrome draws an `<img>` SVG only if it is well-formed. `figureSrc` runs
-   the same guard). Anything
+   an SVG must be valid UTF-8 throughout, with no character XML forbids,
+   and XML 1.0's productions are applied up to its root start tag, which
+   must be `<svg>` in the SVG namespace. That is because Chrome draws an
+   `<img>` SVG only if it is UTF-8 and well-formed. The stated refusals and
+   unchecked parts are in IMAGE-CHOICES-SPEC §2.4. `figureSrc` runs the same
+   guard). Anything
    else renders a placeholder, never a throw. `tests/image-choice.test.js`
    pins the seam, the bytes check at both sites (with mutants) and every
    shipped image; keep-classes audits every shipped image choice through the
