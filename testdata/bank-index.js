@@ -7,7 +7,7 @@
 window.BANK_INDEX = {
  "indexVersion": 1,
  "questionCount": 246,
- "activeCount": 187,
+ "activeCount": 186,
  "entries": [
   {
    "ref": "bank-202608-salvage:q0001",
@@ -3260,8 +3260,8 @@ window.BANK_INDEX = {
     "src:202608asiav4:rw2-q24"
    ],
    "keyType": "mcq",
-   "retired": false,
-   "supersededBy": null,
+   "retired": true,
+   "supersededBy": "q0204",
    "stemPreview": "Which choice most effectively uses data from the table to complete the statemen…"
   },
   {

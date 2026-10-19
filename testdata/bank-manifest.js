@@ -24,12 +24,12 @@ window.BANK_MANIFEST = [
   "type": "bank",
   "owner": "david",
   "bankName": "2026 August salvage",
-  "bankVersion": "sha-370591ed8845",
+  "bankVersion": "sha-902cc9ed8dc1",
   "questionCount": 245,
-  "activeCount": 186,
-  "retiredCount": 59,
+  "activeCount": 185,
+  "retiredCount": 60,
   "subjectCounts": {
-   "rw": 78,
+   "rw": 77,
    "math": 108
   }
  }

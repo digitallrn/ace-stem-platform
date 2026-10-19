@@ -1051,14 +1051,34 @@ run("retired", () => {
   d86.seed({ builder: d86.fns.builderFromSet({ setId: "pset-86", name: "", subject: E(S("q0086")).subject, refs: [bankRef(S("q0086"))] }), bankIndexFresh: BANK_INDEX });
   check(d86.fns.replacementNote(bankRef(S("q0086"))) === "its replacement q0214 is newer than this page — reload the dashboard to add it",
     "a reskin replacement (another class) missing from this page's picker: 'reload', never 'can be added now'", d86.fns.replacementNote(bankRef(S("q0086"))));
-  /* a retired copy plus a LIVE copy of one canonical item (verification fix 5) */
-  check(E(S("q0044")).retired && E(S("q0044")).supersededBy === "q0204" && !E(S("q0217")).retired &&
+  /* a retired copy plus a LIVE copy of one canonical item (verification fix 5).
+     The real library held this shape (q0044 retired → q0204, q0217 live in the
+     same class) until ruling R12 retired q0217 → q0204 as q0204's duplicate
+     (test-bank export batch twelve, 2026-10-19). So the case now runs on a
+     page whose bank index still lists q0217 active — the page86 pattern
+     above — and the real post-R12 state is pinned after it. */
+  const page217 = JSON.parse(JSON.stringify(BANK_INDEX));
+  const e217 = page217.entries.find(e => e.ref === S("q0217"));
+  if(e217){ e217.retired = false; e217.supersededBy = null; page217.activeCount += 1; }
+  const d217 = build({ inlined: REAL_INDEX, bankIndex: page217 });
+  d217.fns.ensureDedupLoaded();
+  check(E(S("q0044")).retired && E(S("q0044")).supersededBy === "q0204" && !!e217 && !e217.retired &&
         IT(S("q0044")).canonical === IT(S("q0217")).canonical && IT(S("q0204")).canonical === IT(S("q0044")).canonical,
-    "PIN: q0044 (retired → q0204) shares its canonical item with live q0217 and with q0204");
+    "PIN: q0044 (retired → q0204) shares its canonical item with q0217 (active on this page) and with q0204");
+  for(const order of [["q0044", "q0217"], ["q0217", "q0044"]]){
+    d217.seed({ builder: d217.fns.builderFromSet({ setId: "pset-44", name: "", subject: E(S("q0044")).subject, refs: order.map(q => bankRef(S(q))) }), bankIndexFresh: null });
+    check(d217.fns.replacementNote(bankRef(S("q0044"))) === "its replacement q0204 is in the set as bank-202608-salvage q0217",
+      "a retired copy beside a LIVE copy of its item (" + order.join(", ") + "): the note names the live copy holding the place, never a retired one",
+      d217.fns.replacementNote(bankRef(S("q0044"))));
+  }
+  /* the real state since R12: both copies retired → q0204, so beside q0044 no
+     live copy holds the place and the note waits for both (the q0148/q0211 shape) */
+  check(E(S("q0217")).retired && E(S("q0217")).supersededBy === "q0204" && !E(S("q0204")).retired,
+    "PIN: R12 — q0217 is retired → q0204 (export batch twelve), and q0204 is active");
   for(const order of [["q0044", "q0217"], ["q0217", "q0044"]]){
     d.seed({ builder: d.fns.builderFromSet({ setId: "pset-44", name: "", subject: E(S("q0044")).subject, refs: order.map(q => bankRef(S(q))) }) });
-    check(d.fns.replacementNote(bankRef(S("q0044"))) === "its replacement q0204 is in the set as bank-202608-salvage q0217",
-      "a retired copy beside a LIVE copy of its item (" + order.join(", ") + "): the note names the live copy holding the place, never a retired one",
+    check(d.fns.replacementNote(bankRef(S("q0044"))) === "its replacement q0204 can be added once this one and bank-202608-salvage q0217 are removed",
+      "two retired copies of one item, both → q0204 (" + order.join(", ") + "): the replacement waits for BOTH to go, never 'in the set as' a retired copy",
       d.fns.replacementNote(bankRef(S("q0044"))));
   }
   /* Add whole module: goes through the one door (no duplicate, no retired),
