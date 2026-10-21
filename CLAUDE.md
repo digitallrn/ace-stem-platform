@@ -164,15 +164,22 @@ generation moved, so Save and Exit / Back to home stop instead of painting
 home over whatever ended the session (a deletion landing included), and Save
 and Exit fences its own save too (a landing that arrives during `suspend()`
 keeps the screen: no refresh, no home, no clock restarted) and runs one exit
-at a time (`saveExitInFlight`: a second press while the first saves or reads
-does nothing — it used to take the refused branch and leave a module clock
-running under home, which also kept `sittingInFlight` true); `suspend()`
-answers only for the record it began with (`rec !== mine`), so a stale exit
-can never stop the recorder of a sitting begun after a deletion landed; a
-"student deleted" refusal never ends a page that holds a tutor token (the
-dashboard's student views borrow that student's code as `state.userName`,
-and its deletion must not drop the dashboard or the viewer to the student
-sign-in); a TYPED
+at a time (`saveExitGen` / `exitInFlight()`: while an exit saves or reads,
+a second press does nothing and `submitModule` refuses — the review page's
+Next — since either used to leave a module clock running under home, which
+also kept `sittingInFlight` true; the hold is the session generation the
+exit runs for, so an exit stranded behind a slow save whose session a
+deletion ended never swallows the next sitting's exit or Next, and it is
+released in a `finally`); `suspend()` answers only for the recorder
+hand-over it began in (`recEpoch`, bumped by begin / resume / detach /
+abandonDeleted — not an object comparison, since `resume()` adopts the
+caller's record object), so a stale exit can never stop the recorder of a
+sitting begun or re-resumed after a deletion landed; a "student deleted"
+refusal never ends a page that holds a tutor token (the dashboard's student
+views borrow that student's code as `state.userName`, and its deletion must
+not drop the dashboard or the viewer to the student sign-in) — which is
+only sound because a student session never carries one: `signInWithCode`
+and the home Sign out drop any tutor token first; a TYPED
 student code also bumps `sessionGen`, so it supersedes a boot restore in
 flight. A sitting RUNNING or (re)starting on the page
 (`sittingInFlight`: module clock, the Ready/resume beat, module-over, break —

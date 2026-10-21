@@ -594,6 +594,12 @@ window.Attempts = (function(){
   const iso = t => new Date(t).toISOString();
 
   let rec = null;          // the live attempt record (spec §2 shape)
+  /* bumped every time the recorder changes hands (begin, resume, detach,
+     abandonDeleted): an exit parked behind a slow save answers only for the
+     hand-over it began in. An object comparison is not enough — resume()
+     adopts the caller's record object, so re-resuming the SAME sitting from
+     a stale card hands back the very object the exit captured. */
+  let recEpoch = 0;
   let appState = null;     // app.js state object (moduleState is read at build time)
   let qMeta = {};          // qid -> {firstGiven, lastCommitted, changeCount, visitCount, timeMs, everAnswered, visited}
   let clock = null;        // {qid, shownAt} while a question is on screen
@@ -958,6 +964,7 @@ window.Attempts = (function(){
     begin(test, studentCode, conditions, stateRef, assignmentId, timing, setMeta){
       try{
         appState = stateRef;
+        recEpoch++;
         deliberateExit = false;                  // fresh sitting: interruptible
         qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
         const now = Date.now();
@@ -1146,9 +1153,9 @@ window.Attempts = (function(){
             }catch(e){}
           }
         }
-        rec = null; appState = null;
+        rec = null; appState = null; recEpoch++;
         qMeta = {}; liveSpr = {}; clock = null; curModule = null;
-      }catch(e){ rec = null; appState = null; }
+      }catch(e){ rec = null; appState = null; recEpoch++; }
     },
 
     /* for tests/diagnostics: snapshots whose write never landed */
@@ -1167,14 +1174,14 @@ window.Attempts = (function(){
         if(!rec || (key && rec.attemptId !== key)) return null;
         const gone = rec.attemptId;
         stopTicker();
-        rec = null; appState = null;
+        rec = null; appState = null; recEpoch++;
         qMeta = {}; liveSpr = {}; clock = null; curModule = null;
         dirty = false; pendingSave = false; lastSaveOk = null;
         orphans = orphans.filter(s => s && s.attemptId !== gone);
         AttemptStore.dropQueued(gone);
         drainWaiters.splice(0).forEach(res => res());
         return gone;
-      }catch(e){ rec = null; appState = null; return null; }
+      }catch(e){ rec = null; appState = null; recEpoch++; return null; }
     },
 
     /* ---- Save and Exit + Resume (BLUEBOOK-PARITY Phase C; failure semantics
@@ -1198,7 +1205,7 @@ window.Attempts = (function(){
            save(), because save() calls build() and build() is what writes the
            checkpoint — clearing it here directly would just be overwritten. */
         deliberateExit = true;
-        const mine = rec;                         // the sitting this exit belongs to
+        const mine = recEpoch;                    // the hand-over this exit belongs to
         await save();                             // flush immediately, then leave
         /* abandonDeleted() ran while this call was parked behind an
            in-flight save: the tutor deleted the sitting, `rec` is gone and
@@ -1206,11 +1213,11 @@ window.Attempts = (function(){
            or re-arming the ticker here would be recording into a deleted
            sitting, and reading rec.* would throw. The deletion landing owns
            the screen from here. And if the student has since STARTED
-           another sitting (artifact mode, where this save is a network
-           round trip that can outlast the landing), `rec` is that sitting's:
-           this exit must not stop its recorder, so it answers for its own
-           record only. */
-        if(!rec || rec !== mine) return true;
+           another sitting — or re-resumed THIS one from a stale card (artifact
+           mode, where this save is a network round trip that can outlast the
+           landing) — `rec` belongs to that later hand-over: this exit must
+           not stop its recorder, so it answers for its own hand-over only. */
+        if(!rec || recEpoch !== mine) return true;
         if(lastSaveOk !== true){
           // exit refused — keep recording, but drop the blob: the student is
           // still testing, so a later successful checkpoint must not persist
@@ -1244,6 +1251,7 @@ window.Attempts = (function(){
       try{
         appState = stateRef;
         rec = record;
+        recEpoch++;
         deliberateExit = false;                  // testing again: interruptible again
         qMeta = {}; liveSpr = {}; clock = null; curModule = null; lastSaveOk = null;
         // rebuild per-question meta so time/visits/changes keep accumulating

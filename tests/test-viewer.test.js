@@ -904,9 +904,12 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
      — so ANY handler wired, by any route, is recorded */
   const wiring = (src, reviewMode, q) => {
     const wired = [];
-    const node = id => ({ id, value: "", dataset: {}, addEventListener: t => wired.push(id + ":" + t),
+    /* a Proxy, so a handler ASSIGNED as a property (el(x).onclick = …, a
+       route app.js uses elsewhere) is recorded as well as addEventListener */
+    const node = id => new Proxy({ id, value: "", dataset: {}, addEventListener: t => wired.push(id + ":" + t),
       classList: { add(){}, remove(){}, toggle(){}, contains: () => false },
-      querySelector: sel => node(id + " " + sel), querySelectorAll: sel => [node(id + " " + sel)] });
+      querySelector: sel => node(id + " " + sel), querySelectorAll: sel => [node(id + " " + sel)] },
+      { set(t, k, v){ if(typeof k === "string" && /^on/.test(k) && typeof v === "function") wired.push(id + ":" + k); t[k] = v; return true; } });
     const document = { querySelector: sel => node(sel), querySelectorAll: sel => [node(sel)] };
     const deps = { state: { reviewMode }, el: node, document, makeDraggable: () => {}, attachFigureHandlers: () => {},
       currentQuestion: () => (q || AQ_SPR), currentModState: () => ({ answers: {}, flags: new Set(), eliminated: {} }) };
@@ -932,6 +935,10 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
     control(aqMut !== appSrc && wiring(aqMut, VIEWER_RM, q).wired.indexOf("flagBtn:click") !== -1,
       "mutant (the `handlers` target: its early return removed), " + kind + " — the viewer's Mark for Review gets a handler, and the probe sees it");
   });
+  const AQ_ANCHOR = "    attachFigureHandlers(q);   // zoom/expand is read-only — wired in review too\n";
+  const byProperty = appSrc.replace(AQ_ANCHOR, AQ_ANCHOR + "    el(\"flagBtn\").onclick = ()=>{ ms.flags.add(q.id); };\n");
+  control(appSrc.split(AQ_ANCHOR).length === 2 && wiring(byProperty, VIEWER_RM, AQ_MCQ).wired.indexOf("flagBtn:onclick") !== -1,
+    "mutant (a handler ASSIGNED as a property before the early return, `el(\"flagBtn\").onclick = …`) — the probe sees that route too");
   check(v.sprOn && v.sprOff, "viewer SPR: Show Keypad as a sitting shows it; with answers ON the key and its alternates beneath, no verdict; OFF nothing more");
   const rv = render(appSrc, "review", true, MCQ), lv = render(appSrc, "live", true, MCQ), rs = render(appSrc, "review", true, SPR);
   check(keyOn(rv) && has(rv, "rv-omitted") && has(rv, "rv-time") && /id="flagBtn" disabled/.test(rv) && !has(rv, "abcToggle") && has(rs, "rv-banner") && !has(rs, "kpToggle"),
@@ -1011,7 +1018,7 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     const step = (name, answer) => async () => { if(bumpAt === name) state.sessionGen++; calls.push(name); return answer; };
     const deps = {
       StudentCode: { valid: () => true }, el: id => els[id] || (els[id] = node(id)), state,
-      AttemptStore: { getProfile: step("profile", null), clearRefused: () => calls.push("clearRefused") },
+      AttemptStore: { getProfile: step("profile", null), clearRefused: () => calls.push("clearRefused"), signOutTutor: () => calls.push("dropTutorToken") },
       Attempts: { assignments: step("assign", assignAnswer === undefined ? [] : assignAnswer) }, refreshStudentState: step("refresh", true),
       displayLabel: () => "X", firstName: () => "X", manifestLoaded: () => true,
       showOnly: id => calls.push("show:" + id), endDeletedSession: async () => calls.push("endDeleted"),
@@ -1027,6 +1034,17 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   let r = await runSignIn(appSrc, null);
   check(r.ok === true && r.calls.indexOf("REMEMBER") !== -1 && r.calls.indexOf("show:screen-home") !== -1 && r.calls.some(paintsName),
     "(an uninterrupted restore signs the student in, paints their name, remembers the code and shows home — unchanged)", r.calls.join(" > "));
+  check(r.calls[0] === "dropTutorToken",
+    "a student sign-in drops any tutor token FIRST — a student session never carries one, so a held token really does mean the tutor's page (onAttemptDeleted)", r.calls.join(" > "));
+  const keepsToken = appSrc.replace("    AttemptStore.signOutTutor();\n    el(\"signinError\").classList.add(\"hidden\");", "    el(\"signinError\").classList.add(\"hidden\");");
+  control(keepsToken !== appSrc && (await runSignIn(keepsToken, null)).calls.indexOf("dropTutorToken") === -1,
+    "without it a token left by a tutor rides into the student's session — the probe sees it");
+  const signout = (() => {
+    const at = appSrc.indexOf('el("homeSignoutBtn").addEventListener("click", ()=>{');
+    return at === -1 ? "" : appSrc.slice(at, appSrc.indexOf("\n  });", at));
+  })();
+  check(/state\.sessionGen\+\+;[^\n]*\n\s*AttemptStore\.signOutTutor\(\);/.test(signout),
+    "the student home's Sign out drops any tutor token with the session");
   r = await runSignIn(appSrc, "profile");
   check(r.ok === false && !r.calls.some(paintsName) && r.calls.indexOf("assign") === -1,
     "overtaken during the profile read: no student name painted into the tutor's page, no further reads", r.calls.join(" > "));
@@ -1222,7 +1240,7 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   };
   const CALLERS = {
     /* the guarded entry, its in-flight flag and the body, as the page has them */
-    "Save and Exit": src => ((src.match(/^[ \t]*let saveExitInFlight = false;[ \t]*$/m) || [""])[0]) +
+    "Save and Exit": src => ((src.match(/^[ \t]*let saveExitGen = null;[ \t]*$/m) || [""])[0]) + "\n" + extractFn(src, "exitInFlight") +
       "\nasync " + extractFn(src, "saveAndExit") + "\nasync " + extractFn(src, "saveAndExitNow") + "\nreturn saveAndExit;",
     "Back to home (submitted)": src => "return async ()=>{" + handlerOf(src, 'el("subHomeBtn").addEventListener("click", async ()=>{') + "}",
     "Back to home (set done)": src => "return async ()=>{" + handlerOf(src, 'el("setDoneHomeBtn").addEventListener("click", async ()=>{') + "}"
@@ -1314,7 +1332,7 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   control(appSrc.split(SAVE_FENCE).length === 2 && (await SEQ(noSaveFence, { landing: true })) !== "suspend>landing"
     && (await SEQ(noSaveFence, { landing: true, refused: true })) !== "suspend>landing",
     "Save and Exit without its own fence paints home (or restarts the clock under the save-failed modal) over the landing — the probe sees it");
-  const ONE_EXIT = "    if(saveExitInFlight) return;\n";
+  const ONE_EXIT = "    if(exitInFlight()) return;\n";
   const twoExits = appSrc.replace(ONE_EXIT, "");
   const twoSeq = await SEQ(twoExits, { secondPress: true });
   control(appSrc.split(ONE_EXIT).length === 2 && /\|second>suspend>startTimer>renderTest>show:saveFailModal>\|/.test(twoSeq),
@@ -1323,6 +1341,150 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   const quietRefusal = appSrc.replace(REFUSED, "");
   control(appSrc.split(REFUSED).length === 2 && (await SEQ(quietRefusal, { refused: true })) !== "suspend>startTimer>renderTest>show:saveFailModal",
     "with the refused branch emptied (no clock, no modal) the refused sequence goes red — the probe sees it");
+
+  /* The exit guard's other half and its reach, run for real: Save and Exit,
+     its flag, submitModule and refreshStudentState in one world, with the
+     recorder's suspend and the records read gateable. */
+  const exitWorld = (src) => {
+    const calls = [];
+    const state = { sessionGen: 1, userName: "AS-VWPRF234", tombstoned: {}, pastAttempts: [], resumeRecords: {}, reviewMode: null,
+      currentTest: { testId: "t", modules: [{ section: "RW" }, { section: "RW" }] }, moduleIndex: 0, activeAssignment: null, lastWasProctored: false };
+    const gates = {};
+    const ctl = { refuseNext: 0, throwRead: 0 };
+    let exited = false;
+    const hold = name => { let release; gates[name] = new Promise(r => { release = r; }); return () => release(); };
+    const take = async name => { const g = gates[name]; if(g){ delete gates[name]; await g; } };
+    const Attempts = { positionBlob: () => ({}), moduleEnd: () => calls.push("moduleEnd"),
+      suspend: async () => {
+        calls.push("suspend");
+        await take("suspend");
+        if(ctl.refuseNext){ ctl.refuseNext--; return false; }
+        if(exited) return false;                 // the recorder is gone after one exit (attempts.js: no rec)
+        exited = true;
+        return true;
+      },
+      loadStudentRecords: async () => {
+        calls.push("read");
+        await take("read");
+        if(ctl.throwRead){ ctl.throwRead--; throw new Error("read failed"); }
+        return { live: [], tombstones: [] };
+      } };
+    const noop = () => {};
+    const deps = { state, Attempts, endDeletedSession: async () => calls.push("endDeleted"), buildAssignmentIndex: () => ({}), byStartDesc: () => 0,
+      renderHome: () => calls.push("renderHome"), showOnly: id => calls.push("show:" + id), show: id => calls.push("show:" + id),
+      startTimer: () => calls.push("startTimer"), renderTest: () => calls.push("renderTest"),
+      clearInterval: noop, closeDirections: noop, closeQnav: noop, hideHlPopup: noop, closeCalc: noop, closeRef: noop, hide: noop,
+      setLineReader: noop, closeMoreMenu: noop, currentModule: () => state.currentTest.modules[state.moduleIndex],
+      showModuleOver: () => calls.push("moduleOver"), showBreak: () => calls.push("break") };
+    const decl = (src.match(/^[ \t]*let saveExitGen = null;[ \t]*$/m) || [""])[0];
+    const body = decl + "\n" + extractFn(src, "exitInFlight") + "\nasync " + extractFn(src, "saveAndExit") + "\nasync " + extractFn(src, "saveAndExitNow") +
+      "\n" + extractFn(src, "submitModule") + "\nasync " + extractFn(src, "refreshStudentState") + "\nreturn { saveAndExit, submitModule };";
+    const names = Object.keys(deps);
+    const api = new Function(...names, body)(...names.map(n => deps[n]));
+    return { calls, state, ctl, hold, api };
+  };
+  const turns = async n => { for(let i = 0; i < (n || 20); i++) await new Promise(r => setImmediate(r)); };
+  const count = (c, x) => c.filter(y => y === x).length;
+
+  /* (a) the flag is RELEASED: a refused exit, then a retry, goes through */
+  const refusedThenRetry = async src => {
+    const w = exitWorld(src);
+    w.ctl.refuseNext = 1;
+    await w.api.saveAndExit();
+    w.calls.push("|retry");
+    await w.api.saveAndExit();
+    return w.calls.join(">");
+  };
+  /* (b) ...and after an exit that THREW (its records read failed) */
+  const thrownThenRetry = async src => {
+    const w = exitWorld(src);
+    w.ctl.throwRead = 1;
+    try{ await w.api.saveAndExit(); }catch(e){ w.calls.push("threw"); }
+    w.calls.push("|retry");
+    try{ await w.api.saveAndExit(); }catch(e){ w.calls.push("threw"); }
+    return w.calls.join(">");
+  };
+  /* (c) an exit stranded behind a slow save whose session a deletion ended
+     does not swallow the next exit; and the stranded exit, settling, does
+     not release the NEW exit's hold (a third press while it runs does nothing) */
+  const staleThenNew = async src => {
+    const w = exitWorld(src);
+    const releaseOld = w.hold("suspend");
+    const p1 = w.api.saveAndExit();
+    await turns();
+    w.state.sessionGen++;                                  // the deletion landing ended that session
+    w.calls.push("|landing");
+    const releaseRead = w.hold("read");
+    const p2 = w.api.saveAndExit();                        // the next sitting's Save and Exit
+    await turns();
+    w.calls.push("|old-settles");
+    releaseOld();
+    await p1;
+    await turns();
+    w.calls.push("|third");
+    const p3 = w.api.saveAndExit();
+    await turns();
+    w.calls.push("|");
+    releaseRead();
+    await p2; await p3;
+    return w.calls.join(">");
+  };
+  /* (d) the review page's Next during an exit submits nothing (it used to
+     run the module-over beat into the next module's clock under home) */
+  const nextDuringExit = async src => {
+    const w = exitWorld(src);
+    const releaseRead = w.hold("read");
+    const p = w.api.saveAndExit();
+    await turns();
+    w.calls.push("|Next");
+    w.api.submitModule();
+    w.calls.push("|");
+    releaseRead();
+    await p;
+    return w.calls.join(">");
+  };
+  const nextNoExit = async src => { const w = exitWorld(src); w.api.submitModule(); return w.calls.join(">"); };
+
+  const ra = await refusedThenRetry(appSrc);
+  check(ra === "suspend>startTimer>renderTest>show:saveFailModal>|retry>suspend>read>renderHome>show:screen-home",
+    "Save and Exit's hold is RELEASED: refused once (the save-failed modal), the retry goes through to home", ra);
+  const rb = await thrownThenRetry(appSrc);
+  check(/^suspend>read>threw>\|retry>suspend/.test(rb), "...and released after an exit that threw: the retry reaches the recorder again", rb);
+  const rc = await staleThenNew(appSrc);
+  check(count(rc.split(">"), "suspend") === 2 && /\|landing>suspend>read>\|old-settles>\|third>\|>renderHome>show:screen-home$/.test(rc),
+    "an exit stranded behind a slow save, its session ended by a deletion, swallows nothing: the next sitting's exit goes ahead, and the stranded one settling does not release it (a third press meanwhile does nothing)", rc);
+  const rd = await nextDuringExit(appSrc);
+  check(rd === "suspend>read>|Next>|>renderHome>show:screen-home",
+    "the review page's Next during an exit submits nothing — no module-over beat, so no next module's clock under the home screen the exit paints", rd);
+  const rn = await nextNoExit(appSrc);
+  check(rn === "moduleEnd>moduleOver", "(with no exit running, Next submits the module as before)", rn);
+
+  const RELEASE = "    finally{ if(saveExitGen === mine) saveExitGen = null; }";
+  control(appSrc.split(RELEASE).length === 2, "the hold's release is where this suite expects it");
+  const neverReleased = appSrc.replace(RELEASE, "    finally{ }");
+  control(!/>\|retry>suspend/.test(await refusedThenRetry(neverReleased)), "never released: the retry after a refused exit is swallowed — the probe sees it");
+  const successOnly = appSrc.replace("    try{ await saveAndExitNow(); }\n" + RELEASE, "    try{ await saveAndExitNow(); if(saveExitGen === mine) saveExitGen = null; }\n    finally{ }");
+  control(successOnly !== appSrc && !/>\|retry>suspend/.test(await thrownThenRetry(successOnly)), "released only on success: the retry after a thrown exit is swallowed — the probe sees it");
+  const pageWide = appSrc.replace("    if(exitInFlight()) return;\n    const mine = state.sessionGen;", "    if(saveExitGen !== null) return;\n    const mine = state.sessionGen;");
+  control(pageWide !== appSrc && !/\|landing>suspend/.test(await staleThenNew(pageWide)), "a page-wide flag: the stranded exit swallows the next sitting's Save and Exit — the probe sees it");
+  const clearsAny = appSrc.replace(RELEASE, "    finally{ saveExitGen = null; }");
+  control(count((await staleThenNew(clearsAny)).split(">"), "suspend") === 3, "a release that clears whatever is held: the stranded exit settling lets a third press run beside the new exit — the probe sees it");
+  const SUBMIT_GUARD = "    if(exitInFlight()) return;     // a Save and Exit owns the sitting until it lands (see saveAndExit)\n";
+  const submitsDuring = appSrc.replace(SUBMIT_GUARD, "");
+  control(appSrc.split(SUBMIT_GUARD).length === 2 && /\|Next>moduleEnd>moduleOver/.test(await nextDuringExit(submitsDuring)),
+    "without submitModule's guard, Next during the exit runs the module-over beat — the probe sees it");
+
+  /* (e) the menu item is wired to the GUARDED entry, and the body has no
+     other way in */
+  const wiredGuarded = src => {
+    const s = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'\\])\/\/[^\n]*/g, "$1");   // comments out, as §7's sweeps do
+    return (s.match(/el\("miSaveExit"\)\.addEventListener\("click", saveAndExit\);/g) || []).length === 1
+      && (s.match(/\bsaveAndExitNow\b/g) || []).length === 2
+      && /try\{ await saveAndExitNow\(\); \}/.test(extractFn(src, "saveAndExit"));
+  };
+  check(wiredGuarded(appSrc), "Save and Exit's menu item calls the guarded entry, and nothing else calls its body (one declaration, one call, inside the guard)");
+  const rewired = appSrc.replace('el("miSaveExit").addEventListener("click", saveAndExit);', 'el("miSaveExit").addEventListener("click", saveAndExitNow);');
+  control(rewired !== appSrc && !wiredGuarded(rewired), "the menu item rewired to the unguarded body — the pin sees it");
 
   /* boot answers a false restore with sign-in only if the session is still its own */
   const boot = extractFn(appSrc, "boot");

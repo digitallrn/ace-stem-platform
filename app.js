@@ -650,6 +650,13 @@
      not complete, leaving the student on the sign-in screen with a reason. */
   async function signInWithCode(code){
     if(!StudentCode.valid(code)) return false;
+    /* A student session never carries a tutor token. A tutor who left the
+       dashboard by some way other than its Sign out (a Score Details load
+       error's "Back to home") would otherwise lend it to the next student
+       signed in on this page — and onAttemptDeleted reads a held token as
+       "this page is the tutor's", so that student's deletion would land
+       nowhere. (The token is memory-only; at boot there is none.) */
+    AttemptStore.signOutTutor();
     el("signinError").classList.add("hidden");
     /* A tutor who signs in while this is still awaiting (a boot-time restore
        of a remembered code on a slow connection) retires the session
@@ -791,6 +798,7 @@
      untouched — in local mode it is the only copy. */
   el("homeSignoutBtn").addEventListener("click", ()=>{
     state.sessionGen++;                  // a fetch still in flight belongs to the old session
+    AttemptStore.signOutTutor();         // whoever was on this home, no tutor token outlives it
     forgetSession();
     AttemptStore.clearRefused();
     state.userName = "Student";
@@ -3758,6 +3766,7 @@
 
   function submitModule(endedBy){
     if(state.reviewMode) return;   // review has no submit path, by construction and by guard
+    if(exitInFlight()) return;     // a Save and Exit owns the sitting until it lands (see saveAndExit)
     clearInterval(state.timerInterval);
     state.timerRunning = false;
     closeDirections(); closeQnav(); hideHlPopup(); closeCalc(); closeRef(); hide("figOverlay");
@@ -3960,13 +3969,21 @@
      (suspend answers false) and took the refused branch: a false
      save-failed modal, and a module clock restarted under the home screen
      the first exit went on to paint — a countdown that throws at 0:00 and
-     keeps sittingInFlight() true, refusing the tutor's sign-in. */
-  let saveExitInFlight = false;
+     keeps sittingInFlight() true, refusing the tutor's sign-in. The same
+     clock came back through the review page's Next (submitModule → the
+     module-over beat → the next module's clock), so submitModule refuses
+     too while an exit runs (exitInFlight). The flag is the session
+     generation the exit runs for, not a page-wide boolean: an exit stranded
+     behind a slow save whose session a deletion ended must never swallow
+     the next sitting's Save and Exit or Next. */
+  let saveExitGen = null;
+  function exitInFlight(){ return saveExitGen !== null && saveExitGen === state.sessionGen; }
   async function saveAndExit(){
-    if(saveExitInFlight) return;
-    saveExitInFlight = true;
+    if(exitInFlight()) return;
+    const mine = state.sessionGen;
+    saveExitGen = mine;
     try{ await saveAndExitNow(); }
-    finally{ saveExitInFlight = false; }
+    finally{ if(saveExitGen === mine) saveExitGen = null; }
   }
   async function saveAndExitNow(){
     if(state.reviewMode) return;   // menu item is hidden in review; nothing to save either way

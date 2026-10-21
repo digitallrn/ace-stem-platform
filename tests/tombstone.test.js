@@ -956,11 +956,41 @@ function sqlContract(sql){
     const r = await scenario();
     check(r.parked === 1 && r.gone && r.ok === true && r.NEW && r.now === r.NEW,
       "the abandoned sitting's exit reports itself exited, and the sitting begun meanwhile keeps its recorder", JSON.stringify(r));
-    const SUSPEND_IDENTITY = "        if(!rec || rec !== mine) return true;\n";
+    const SUSPEND_IDENTITY = "        if(!rec || recEpoch !== mine) return true;\n";
     const stale = attemptsSrc.replace(SUSPEND_IDENTITY, "        if(!rec) return true;\n");
     const rs = await scenario(stale);
     check(attemptsSrc.split(SUSPEND_IDENTITY).length === 2 && rs.now === null,
-      "control: without the identity check the stale exit stops the NEW sitting's recorder — the probe sees it", JSON.stringify(rs));
+      "control: without the hand-over check the stale exit stops the NEW sitting's recorder — the probe sees it", JSON.stringify(rs));
+    /* the SAME sitting re-resumed from a card rendered before the marker
+       landed: resume() adopts the caller's record object, so it is the very
+       object the exit captured — only a hand-over counter tells them apart */
+    const LIVE2 = "attempt:t1:500:eeee";
+    const sameObject = async (src) => {
+      const gate = { next: false, waiters: [] };
+      const w = loadAttempts({ sharedStorage: { gate }, src });
+      const R = rec(LIVE2, { status: "in-progress", submittedAt: null });
+      const st = { currentTest: { testId: "t1", modules: [] }, moduleState: {} };
+      w.AT.resume(R, st);
+      await tick();
+      gate.next = true;
+      const p = w.AT.suspend({ moduleIndex: 0 });
+      await tick();
+      const parked = gate.waiters.length;
+      const gone = w.AT.abandonDeleted(LIVE2);
+      w.AT.resume(R, st);                                  // the stale card's Resume: the SAME object
+      gate.waiters.splice(0).forEach(res => res());
+      const ok = await p;
+      await tick();
+      return { parked, gone: gone === LIVE2, ok, now: w.AT.currentAttemptId() };
+    };
+    const so = await sameObject();
+    check(so.parked === 1 && so.gone && so.ok === true && so.now === LIVE2,
+      "the same sitting re-resumed (same record object) while the abandoned exit was parked keeps its recorder — so its next save meets the marker again and the landing comes back", JSON.stringify(so));
+    const byObject = attemptsSrc.replace("        const mine = recEpoch;                    // the hand-over this exit belongs to\n",
+      "        const mine = rec;\n").replace(SUSPEND_IDENTITY, "        if(!rec || rec !== mine) return true;\n");
+    const sob = await sameObject(byObject);
+    check(byObject !== attemptsSrc && sob.now === null,
+      "control: with an object comparison instead, the re-resumed sitting loses its recorder to the stale exit — the probe sees it", JSON.stringify(sob));
   });
   await run("(i) app.js routes the kill signal: this sitting ends, a stale key is ignored, a deleted student ends the session", async () => {
     const A = "attempt:t1:100:aaaa";
