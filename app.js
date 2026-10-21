@@ -120,12 +120,37 @@
      attempt. So the tutor's entry forgets it (only when one is stored), drops
      the student identity from memory, and retires the session generation so
      a student load still in flight from boot lands nowhere. Nothing recorded
-     on this device is touched. */
-  function enterTutorSession(){
+     on this device is touched.
+     It also stops a sitting already RUNNING behind the sign-in form — a
+     boot-time crash-resume that landed behind the tutor sign-in dialog on a
+     slow connection — exactly as a deletion verdict tears one down: clocks
+     off (a countdown left running would submit the student's module on the
+     tutor's screen), chrome reset, and the recorder let go after draining its
+     last save (the student's own pending write, which a tab-hide would have
+     made anyway; the checkpoint stays, so the student resumes later). With
+     nothing running, every step here is a no-op. Async: callers await it
+     before the dashboard opens. */
+  async function enterTutorSession(){
     state.sessionGen++;
     try{ if(localStorage.getItem(SESSION_KEY) !== null) forgetSession(); }catch(e){}
+    clearInterval(state.timerInterval); state.timerInterval = null;
+    clearInterval(state.breakInterval); state.breakInterval = null;
+    state.timerRunning = false;
+    if(state.readyTimer){ clearTimeout(state.readyTimer); state.readyTimer = null; }
+    if(state.moduleOverTimer){ clearTimeout(state.moduleOverTimer); state.moduleOverTimer = null; }
+    resetTestChrome();
+    try{ await Attempts.detach(); }catch(e){}    // while currentTest is still set, as endDeletedSession does
+    state.currentTest = null;
+    state.moduleState = {};
+    state.reviewMode = null;
+    state.pendingStart = null;
+    state.activeAssignment = null;
     state.userName = "Student";
     state.displayName = null;
+    state.assignments = null;
+    state.pastAttempts = [];
+    state.tombstoned = {};
+    state.resumeRecords = {};
   }
 
   /* ---- magic link ----
@@ -449,7 +474,7 @@
     } else if(v.toLowerCase() === "acestem-admin"){   // tutor dashboard — never records (spec §4)
       el("nameInput").value = "";
       el("signinError").classList.add("hidden");
-      enterTutorSession();
+      await enterTutorSession();
       if(window.Dashboard) Dashboard.open(showOnly);
       return;
     }
@@ -595,10 +620,16 @@
   async function signInWithCode(code){
     if(!StudentCode.valid(code)) return false;
     el("signinError").classList.add("hidden");
+    /* A tutor who signs in while this is still awaiting (a boot-time restore
+       of a remembered code on a slow connection) retires the session
+       (enterTutorSession): from then on this sign-in must land nowhere — no
+       remembered code, no home or crash-resumed sitting over the dashboard. */
+    const gen = state.sessionGen;
     state.userName = code;
     // display name is a separate profile row, fetched by code; absent is fine
     let prof = null;
     try{ prof = await AttemptStore.getProfile(code); }catch(e){}
+    if(gen !== state.sessionGen) return false;
     state.displayName = (prof && typeof prof.displayName === "string" && prof.displayName.trim())
       ? prof.displayName.trim() : null;
     const shown = displayLabel();
@@ -619,6 +650,7 @@
     }
     // Phase F §2: assignment objects; absent resolves to [] (nothing granted)
     const assigns = await Attempts.assignments(code);
+    if(gen !== state.sessionGen) return false;
     /* The tutor deleted this student (2026-09-18 tombstones): the server —
        or, without one, the tomb:student row in this store — refused the code.
        Fail CLOSED on every entry (typed code, magic link, saved session):
@@ -648,6 +680,7 @@
        closes. */
     const refreshed = await refreshStudentState(code);
     if(refreshed === "deleted") return false;    // session already ended, message already shown
+    if(gen !== state.sessionGen) return false;
     if(!refreshed){
       el("signinError").textContent = "Couldn't reach your test history. Check your connection and try again.";
       el("signinError").classList.remove("hidden");
@@ -858,8 +891,12 @@
     try{
       await AttemptStore.signInTutor(email, pw);
       el("tutorPassword").value = "";           // never keep the password around
+      /* Cancelled (or closed) while the request was in flight: by the time it
+         answers the page may be someone else's — a student who signed in
+         meanwhile — so a late answer opens nothing and keeps no session. */
+      if(el("tutorAuthModal").classList.contains("hidden")){ AttemptStore.signOutTutor(); return; }
       closeTutorAuth();
-      enterTutorSession();
+      await enterTutorSession();
       if(window.Dashboard) Dashboard.open(showOnly);
     }catch(e){
       el("tutorAuthError").textContent = e.status === 400
@@ -1840,7 +1877,11 @@
     el("loadErrRetry").onclick = retry;
     el("loadErrHome").textContent = toDashboard ? "Back to dashboard" : "Back to home";
     el("loadErrHome").onclick = toDashboard
-      ? ()=>{ showOnly("screen-dashboard"); }
+      ? ()=>{
+          showOnly("screen-dashboard");
+          // the viewer's own way back: the Tests tab resumes (its counts pause off-screen)
+          if(fromViewer && window.Dashboard && Dashboard.viewerClosed) Dashboard.viewerClosed();
+        }
       : ()=>{ renderHome(); showOnly("screen-home"); };
     showOnly("screen-loaderror");
   }
@@ -2910,7 +2951,9 @@
     el("qnavBtnLabel").textContent = `Question ${state.questionIndex+1} of ${total}`;
     el("qnavBtn").style.visibility = "visible";
     const review = !!state.reviewMode;
-    el("tBody").classList.toggle("review-mode", review);
+    const viewer = review && state.reviewMode.viewer === true;
+    // the tutor test viewer keeps a sitting's look (hover, pointer); its controls are inert all the same
+    el("tBody").classList.toggle("review-mode", review && !viewer);
     /* Review navigates ACROSS modules (there is no Check Your Work / submit
        beat to cross), so Back stays visible at question 1 of a later module
        and Next disappears only at the very last question of the test. */
@@ -2925,7 +2968,6 @@
        review's back control only in review — derived on every render rather
        than trusted to an exit path, so neither can survive into a sitting
        that starts some other way (a deletion verdict, a boot-time resume). */
-    const viewer = review && state.reviewMode.viewer === true;
     el("tvBar").classList.toggle("hidden", !viewer);
     el("rvBackBtn").classList.toggle("hidden", !review);
     if(viewer) renderViewerChrome(q);
@@ -3205,7 +3247,7 @@
           <input type="text" class="spr-input" id="sprInput" value="${escapeHtml(cur)}" autocomplete="off" spellcheck="false"${review ? " readonly" : ""}>
           <div class="ap-label">Answer Preview:</div>
           <div id="sprPreview">${sprPreviewHtml(cur)}</div>
-          ${review ? sprReviewHtml(q) : '<div><button class="keypad-toggle" id="kpToggle">⌨&nbsp; Show Keypad</button></div>'}
+          ${review && !viewer ? sprReviewHtml(q) : '<div><button class="keypad-toggle" id="kpToggle">⌨&nbsp; Show Keypad</button></div>'}${viewer ? sprReviewHtml(q) : ""}
         </div>` + (review ? "" : `
         <div class="keypad hidden" id="keypad">
           <div class="keypad-head" id="keypadHead">Keypad
@@ -3286,9 +3328,9 @@
     return `
       <div class="q-head">
         <div class="q-num">${state.questionIndex+1}</div>
-        <button class="q-flag ${flagged?"on":""}" id="flagBtn"${review ? " disabled" : ""}><span class="bkm"><svg viewBox="0 0 24 24" width="15" height="17" aria-hidden="true"><path d="M5.5 3h13v18l-6.5-4.8L5.5 21z" stroke-width="2" stroke-linejoin="round"/></svg></span> Mark for Review</button>
+        <button class="q-flag ${flagged?"on":""}" id="flagBtn"${review && !viewer ? " disabled" : ""}><span class="bkm"><svg viewBox="0 0 24 24" width="15" height="17" aria-hidden="true"><path d="M5.5 3h13v18l-6.5-4.8L5.5 21z" stroke-width="2" stroke-linejoin="round"/></svg></span> Mark for Review</button>
         ${review && !viewer ? reviewTimeHtml(q) : ""}
-        ${(isSpr || review) ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
+        ${(isSpr || (review && !viewer)) ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
       </div>
       ${noticeHtml}
       ${figHtml}
@@ -5772,8 +5814,11 @@
     const code = fromLink || storedSession();
     showOnly("screen-signin");
     if(code){
-      signInWithCode(code).then(ok => { if(!ok) showOnly("screen-signin"); })
-                          .catch(()=> showOnly("screen-signin"));
+      /* a tutor may sign in while this restore is still in flight: the
+         sign-in then answers false, and the screen is the tutor's now */
+      const gen = state.sessionGen;
+      signInWithCode(code).then(ok => { if(!ok && gen === state.sessionGen) showOnly("screen-signin"); })
+                          .catch(()=> { if(gen === state.sessionGen) showOnly("screen-signin"); });
     }
   })();
 })();

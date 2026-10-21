@@ -588,6 +588,20 @@ function tabWorld(src, manifest, opts){
     "a poisoned manifest name, version and pathway render as text, never markup (escaped into cells AND the data attribute)");
   check(!/<button class="tv-open" data-tv-test="">/.test(html) && /No id at all/.test(html),
     "an entry with no testId is listed but offers no open button");
+  /* the testId itself is manifest data too: it lands in three attributes
+     (data-tv-test, data-tv-qpm, a pick's data-tv-test) and a cell */
+  const hostileId = 'zz"><img src=x onerror="window.__XSS=1">';
+  const hm = [{ testId: hostileId, testName: "x", testVersion: "v", legacyIds: [] }, { testId: hostileId + "2", testName: "y", testVersion: "v", legacyIds: [] }];
+  const hw = tabWorld(dashSrc, hm, { typed: "zz ma1-q1" });
+  hw.api.testsGo();
+  const hHtml = hw.api.viewTests();
+  check(hw.api.picks.length === 2 && hHtml.indexOf("<img") === -1 && hHtml.indexOf("<img src=x onerror=") === -1
+    && (hHtml.match(/data-tv-test="zz&quot;&gt;&lt;img/g) || []).length === 4 && /data-tv-qpm="zz&quot;&gt;&lt;img/.test(hHtml),
+    "a hostile testId is escaped into every attribute it reaches (row button, count cell, ambiguous picks) and its cell");
+  const rawAttr = dashSrc.replace('<td class="tv-mono" data-tv-qpm="${escAttr(id)}">', '<td class="tv-mono" data-tv-qpm="${id}">');
+  control(rawAttr !== dashSrc, "the count cell's attribute line is where this suite expects it");
+  const rw = tabWorld(rawAttr, hm);
+  control(rw.api.viewTests().indexOf("<img src=x onerror=") !== -1, "with that attribute unescaped the hostile id breaks out — the probe sees it");
   check(w.calls.filter(c => c[0] === "load").length >= 1 && !w.calls.some(c => c[0] === "FORBIDDEN"),
     "the per-module counts load through AppTestViewer.counts — never ensureTestLoaded / qIndex / AppTestLoader.load (they write the cache)",
     JSON.stringify(w.calls));
@@ -756,31 +770,238 @@ console.log("--- 7. source sweeps ---");
   check(/el\("tvShowAnswers"\)\.addEventListener\("change", \(\)=>\{\n\s*if\(!\(state\.reviewMode && state\.reviewMode\.viewer === true\)\) return;/.test(appSrc),
     "the Show answers toggle refuses unless the viewer is open");
 
-  /* the tutor takes the device: a remembered student session is forgotten */
-  const tutorBody = extractConst(appSrc, "SESSION_KEY") + "\n" + extractFn(appSrc, "forgetSession") + "\n" + extractFn(appSrc, "enterTutorSession") +
-    "\nreturn enterTutorSession;";
-  const runEntry = (src, stored) => {
+  /* the tutor takes the device: a remembered student session is forgotten,
+     and a sitting running behind the sign-in form is stopped */
+  const tutorBody = extractConst(appSrc, "SESSION_KEY") + "\n" + extractFn(appSrc, "forgetSession") + "\n" +
+    "async " + extractFn(appSrc, "enterTutorSession") + "\nreturn enterTutorSession;";
+  const runEntry = async (src, stored, live) => {
     const ls = memStorage();
     if(stored) ls._d["acestem:code"] = stored;
-    const state = { sessionGen: 4, userName: "AS-STALE234", displayName: "Stale" };
-    new Function("localStorage", "state", src)(ls, state)();
-    return { ls, state };
+    const calls = [];
+    const state = { sessionGen: 4, userName: "AS-STALE234", displayName: "Stale",
+      currentTest: live ? { testId: "t" } : null, moduleState: live ? { m: {} } : {}, reviewMode: null,
+      timerInterval: live ? 11 : null, breakInterval: null, timerRunning: !!live, readyTimer: live ? 12 : null, moduleOverTimer: null,
+      assignments: [{}], pastAttempts: [{}], tombstoned: { x: 1 }, resumeRecords: { y: 1 } };
+    const Attempts = { detach: async () => { calls.push("detach:" + (state.currentTest ? "test-still-set" : "test-gone")); } };
+    await new Function("localStorage", "state", "clearInterval", "clearTimeout", "resetTestChrome", "Attempts", src)(
+      ls, state, id => calls.push("clearInterval:" + id), id => calls.push("clearTimeout:" + id), () => calls.push("resetTestChrome"), Attempts)();
+    return { ls, state, calls };
   };
-  let r = runEntry(tutorBody, "AS-VWPRF234");
+  let r = await runEntry(tutorBody, "AS-VWPRF234");
   check(!("acestem:code" in r.ls._d) && r.state.sessionGen === 5 && r.state.userName === "Student" && r.state.displayName === null,
     "tutor entry forgets a remembered student session, retires the session generation and drops the student identity — so a reload from the dashboard or the viewer can't resume that student's sitting");
-  r = runEntry(tutorBody, null);
+  r = await runEntry(tutorBody, null);
   check(r.ls.calls.length === 0, "tutor entry with nothing remembered makes no storage call at all");
   const keeps = tutorBody.replace("    try{ if(localStorage.getItem(SESSION_KEY) !== null) forgetSession(); }catch(e){}\n", "");
   control(keeps !== tutorBody, "the forget line is where this suite expects it");
-  r = runEntry(keeps, "AS-VWPRF234");
+  r = await runEntry(keeps, "AS-VWPRF234");
   control("acestem:code" in r.ls._d, "without it the remembered code survives the tutor's sign-in — the probe sees it");
-  const entries = strip(appSrc).split("\n").map((l, i) => ({ l: l.trim(), i })).filter(x => x.l === "enterTutorSession();");
+  r = await runEntry(tutorBody, null, true);
+  check(r.calls.indexOf("clearInterval:11") !== -1 && r.calls.indexOf("clearTimeout:12") !== -1 && r.state.timerRunning === false
+    && r.calls.indexOf("resetTestChrome") !== -1 && r.calls.indexOf("detach:test-still-set") !== -1 && r.state.currentTest === null
+    && r.state.assignments === null && Object.keys(r.state.resumeRecords).length === 0,
+    "a sitting running behind the sign-in form (a boot crash-resume that landed behind the tutor dialog) is stopped: clocks off, chrome reset, recorder let go after its last save, student state dropped", r.calls.join(" > "));
+  const noStop = tutorBody.replace("    try{ await Attempts.detach(); }catch(e){}    // while currentTest is still set, as endDeletedSession does\n", "")
+    .replace("    clearInterval(state.timerInterval); state.timerInterval = null;\n", "");
+  control(noStop !== tutorBody, "the stop lines are where this suite expects them");
+  r = await runEntry(noStop, null, true);
+  control(r.calls.indexOf("clearInterval:11") === -1 && !r.calls.some(c => /^detach/.test(c)), "without them the student's clock keeps running and the recorder stays attached — the probe sees it");
+
+  /* every route into the dashboard: the two sign-ins (each after the tutor's
+     entry) and three Back exits that only exist on a surface the dashboard
+     itself opened (origin "dashboard") — nothing else, in any spelling */
   const lines = strip(appSrc).split("\n");
-  check(entries.length === 2 && entries.every(x => lines[x.i + 1].trim() === "if(window.Dashboard) Dashboard.open(showOnly);"),
-    "both tutor entries (acestem-admin, and Supabase sign-in) call it immediately before the dashboard opens", entries.map(x => x.i + 1).join(","));
-  const opens = lines.filter(l => /Dashboard\.open\(showOnly\)/.test(l) && /if\(window\.Dashboard\) Dashboard\.open\(showOnly\);/.test(l.trim()) && l.trim() === "if(window.Dashboard) Dashboard.open(showOnly);");
-  check(opens.length === 2, "and those are the only two sign-in routes into the dashboard (every other Dashboard.open returns from a surface the dashboard opened)", opens.length);
+  const sites = lines.map((l, i) => ({ l: l.trim(), i })).filter(x => /Dashboard\s*\.\s*open\s*\(/.test(x.l));
+  const SIGN_IN = "if(window.Dashboard) Dashboard.open(showOnly);";
+  const BACKS = [
+    'if(sdCtx && sdCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }',
+    'if(setOrigin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }',
+    'if(scCtx && scCtx.origin === "dashboard" && window.Dashboard){ Dashboard.open(showOnly); return; }'];
+  const signIns = sites.filter(x => x.l === SIGN_IN);
+  const backs = sites.filter(x => BACKS.indexOf(x.l) !== -1);
+  check(sites.length === 5 && signIns.length === 2 && backs.length === 3 && signIns.every(x => lines[x.i - 1].trim() === "await enterTutorSession();"),
+    "every Dashboard.open in app.js is one of the two sign-ins (each right after await enterTutorSession()) or one of the three dashboard-origin Back exits",
+    sites.map(x => (x.i + 1) + ":" + x.l.slice(0, 60)).join(" | "));
+  const thirdRoute = appSrc.replace('    } else if(v.toLowerCase() === "acestem-admin"){', '    } else if(v === "zz"){ window.Dashboard.open(showOnly); return;\n    } else if(v.toLowerCase() === "acestem-admin"){');
+  control(thirdRoute !== appSrc, "the acestem-admin branch is where this suite expects it");
+  const tSites = strip(thirdRoute).split("\n").filter(l => /Dashboard\s*\.\s*open\s*\(/.test(l));
+  control(tSites.length === 6, "a third, differently spelled route into the dashboard is counted — the probe sees it");
+}
+
+/* ================= §9 the viewer's branches in the shared renderer ================= */
+console.log("--- 9. what the viewer renders, against review and a live sitting ---");
+{
+  /* buildQuestionHtml + sprReviewHtml + sprKeyHtml, the REAL functions, with
+     the content helpers stubbed to plain text (their own suites cover them) */
+  const RENDER_BODY = src => "let viewerShowAnswers = SHOW;\n" + extractFn(src, "buildQuestionHtml") + "\n" +
+    extractFn(src, "sprReviewHtml") + "\n" + extractFn(src, "sprKeyHtml") + "\nreturn buildQuestionHtml;";
+  const render = (src, mode, show, q) => {
+    const mod = { moduleId: "m", section: q.type === "spr" ? "Math" : "Reading and Writing", moduleLabel: "Module 1", questions: [q] };
+    const state = { elimMode: false, questionIndex: 0,
+      reviewMode: mode === "live" ? null : mode === "review" ? { record: { answers: {} }, rowByQid: { [q.id]: { noKey: false, given: null, correct: false } } }
+        : { record: { attemptId: "viewer:t", answers: {} }, rowByQid: {}, viewer: true } };
+    const deps = { state, currentModule: () => mod, figureGoesLeft: () => false, figureFrameHtml: () => "", replaysAnnotations: () => false,
+      sanitizeSavedHtml: s => s, fmt: s => escapeHtml(s), escapeHtml, sprPreviewHtml: () => "", hasKey,
+      choiceBodyHtml: c => '<span class="ctext">' + escapeHtml(c) + "</span>", reviewTimeHtml: () => '<span class="rv-time">Time</span>', stemHtml: () => "",
+      SHOW: show };
+    const names = Object.keys(deps);
+    const ms = { answers: {}, flags: new Set(), eliminated: {}, passageHtml: {}, stemHtml: {}, choiceHtml: {}, notes: {} };
+    return new Function(...names, RENDER_BODY(src))(...names.map(n => deps[n]))(q, ms);
+  };
+  const MCQ = { id: "re1-q1", type: "mcq", choices: ["a", "b", "c", "d"], correctAnswer: 1, rationale: "Because." };
+  const SPR = { id: "ma1-q4", type: "spr", correctAnswer: "3/4", altAnswers: [".75"] };
+  const has = (h, s) => h.indexOf(s) !== -1;
+  const keyOn = h => /class="choice rv[^"]*rv-key[^"]*" data-idx="1"/.test(h) && (h.match(/rv-key/g) || []).length === 1 && has(h, "✓ Correct answer");
+  const live = h => has(h, 'id="abcToggle"') && !/id="flagBtn" disabled/.test(h);
+  const viewerChecks = (src) => {
+    const on = render(src, "viewer", true, MCQ), off = render(src, "viewer", false, MCQ);
+    const sOn = render(src, "viewer", true, SPR), sOff = render(src, "viewer", false, SPR);
+    return {
+      onKey: keyOn(on), onRationale: has(on, "rv-rationale"),
+      offClean: !/rv-key|rv-mark|rv-rationale/.test(off),
+      noOmitted: !has(on, "rv-omitted") && !has(off, "rv-omitted"), noTime: !has(on, "rv-time") && !has(off, "rv-time"),
+      parity: live(on) && live(off),
+      sprOn: has(sOn, 'id="kpToggle"') && has(sOn, "Correct answer:</b> 3/4") && has(sOn, ".75") && !has(sOn, "rv-banner"),
+      sprOff: has(sOff, 'id="kpToggle"') && !has(sOff, "rv-spr-key") && !has(sOff, "rv-banner")
+    };
+  };
+  const v = viewerChecks(appSrc);
+  check(v.onKey && v.onRationale, "viewer, Show answers ON: the keyed choice alone is marked as review marks it (✓ Correct answer), rationale shown");
+  check(v.offClean, "viewer, Show answers OFF: no key mark, no rationale — nothing a student would not see");
+  check(v.noOmitted && v.noTime, "viewer: no \"You omitted this question.\" and no time (there was no sitting), ON or OFF");
+  check(v.parity, "viewer: the header is a sitting's — Mark for Review live-looking, the ABC toggle shown (inert: no handler is attached in review)");
+  check(v.sprOn && v.sprOff, "viewer SPR: Show Keypad as a sitting shows it; with answers ON the key and its alternates beneath, no verdict; OFF nothing more");
+  const rv = render(appSrc, "review", true, MCQ), lv = render(appSrc, "live", true, MCQ), rs = render(appSrc, "review", true, SPR);
+  check(keyOn(rv) && has(rv, "rv-omitted") && has(rv, "rv-time") && /id="flagBtn" disabled/.test(rv) && !has(rv, "abcToggle") && has(rs, "rv-banner") && !has(rs, "kpToggle"),
+    "(ordinary review is unchanged: key marked, omitted banner, time, flag disabled, no ABC; SPR verdict + key, no keypad)");
+  check(!/rv-key|rv-mark|rv-omitted|rv-time/.test(lv) && live(lv), "(a live sitting is unchanged: no marks, live header)");
+  const MUT = [
+    ["key shown with answers off", "    const keyShown = !viewer || viewerShowAnswers;", "    const keyShown = true;", x => !x.offClean],
+    ["omitted banner in the viewer", "(review && !viewer && !isSpr && !ms.answers.hasOwnProperty(q.id))", "(review && !isSpr && !ms.answers.hasOwnProperty(q.id))", x => !x.noOmitted],
+    ["time in the viewer", "${review && !viewer ? reviewTimeHtml(q) : \"\"}", "${review ? reviewTimeHtml(q) : \"\"}", x => !x.noTime],
+    ["rationale with answers off", "(review && keyShown && q.rationale)", "(review && q.rationale)", x => !x.offClean],
+    ["flag greyed in the viewer", "${review && !viewer ? \" disabled\" : \"\"}", "${review ? \" disabled\" : \"\"}", x => !x.parity],
+    ["SPR key with answers off", "      if(!viewerShowAnswers) return \"\";\n", "", x => !x.sprOff]
+  ];
+  MUT.forEach(([what, a, b, red]) => {
+    const n = appSrc.split(a).length - 1;
+    const m = appSrc.replace(a, b);
+    control(n === 1 && red(viewerChecks(m)), "mutant (" + what + ") turns its check red", "needle x" + n);
+  });
+
+  /* updateHeaderTools, REAL, over a DOM whose innerHTML registers the ids it sets */
+  const headerWorld = (src, mode, section) => {
+    const reg = {};
+    const mk = id => {
+      const cls = new Set();
+      const n = { id, _html: "", classList: { add: c => cls.add(c), remove: c => cls.delete(c), toggle: (c, on) => { (on === undefined ? !cls.has(c) : on) ? cls.add(c) : cls.delete(c); }, contains: c => cls.has(c) },
+        addEventListener(){}, remove(){ delete reg[id]; } };
+      Object.defineProperty(n, "innerHTML", { get(){ return n._html; }, set(h){ n._html = h; (String(h).match(/id="([^"]+)"/g) || []).forEach(m => { const k = m.slice(4, -1); reg[k] = mk(k); }); } });
+      return n;
+    };
+    ["thTools", "tBody"].forEach(k => { reg[k] = mk(k); });
+    const state = { hlMode: false, reviewMode: mode === "live" ? null : mode === "review" ? { record: {} } : { viewer: true } };
+    const body = extractConst(src, "MORE_MENU_HTML") + "\n" + extractFn(src, "updateHeaderTools") + "\nreturn updateHeaderTools;";
+    new Function("el", "state", "wireMoreMenu", "wireHlModeBtn", "toggleCalc", "toggleRef", body)(id => reg[id], state, () => {}, () => {}, () => {}, () => {})({ section });
+    return { calc: !!reg.toolCalc, hl: !!reg.hlModeBtn, bugHidden: !!reg.miBugReport && reg.miBugReport.classList.contains("hidden"),
+      saveHidden: !!reg.miSaveExit && reg.miSaveExit.classList.contains("hidden"), lineReader: !!reg.miLineReader };
+  };
+  const hv = headerWorld(appSrc, "viewer", "Math"), hvr = headerWorld(appSrc, "viewer", "Reading and Writing");
+  check(!hv.calc && hv.bugHidden && hv.saveHidden && hv.lineReader && !hvr.hl && hvr.bugHidden,
+    "viewer header: no Calculator, no Highlights & Notes, Report a bug and Save and Exit hidden; Line Reader kept", JSON.stringify(hv));
+  const hr = headerWorld(appSrc, "review", "Math"), hl = headerWorld(appSrc, "live", "Math");
+  check(hr.calc && !hr.bugHidden && hr.saveHidden && hl.calc && !hl.bugHidden && !hl.saveHidden,
+    "(review and a live sitting keep their tools: Calculator and Report a bug; review hides only Save and Exit)");
+  const hdrMut = appSrc.replace("    if(review && state.reviewMode.viewer === true){\n      el(\"miBugReport\")", "    if(false && review && state.reviewMode.viewer === true){\n      el(\"miBugReport\")");
+  control(hdrMut !== appSrc && headerWorld(hdrMut, "viewer", "Math").calc && !headerWorld(hdrMut, "viewer", "Math").bugHidden,
+    "mutant (viewer header branch disabled) brings the Calculator and Report a bug back — the probe sees it");
+}
+
+/* ================= §8 a restore in flight when the tutor signs in ================= */
+console.log("--- 8. a boot-time student restore that the tutor's sign-in overtakes ---");
+{
+  /* signInWithCode, run for real: the tutor's entry (sessionGen bump) lands
+     while it awaits — after the profile read, the assignments read, or the
+     records read — and from then on the restore must land nowhere */
+  const runSignIn = async (src, bumpAt) => {
+    const calls = [];
+    const state = { sessionGen: 0, userName: "Student", displayName: null, tests: [{ testId: "t" }] };
+    const node = () => ({ textContent: "", classList: { add(){}, remove(){} } });
+    const els = {};
+    const step = name => async () => { if(bumpAt === name) state.sessionGen++; calls.push(name); return name === "assign" ? [] : name === "refresh" ? true : null; };
+    const deps = {
+      StudentCode: { valid: () => true }, el: id => els[id] || (els[id] = node()), state,
+      AttemptStore: { getProfile: step("profile"), clearRefused: () => calls.push("clearRefused") },
+      Attempts: { assignments: step("assign") }, refreshStudentState: step("refresh"),
+      displayLabel: () => "X", firstName: () => "X", manifestLoaded: () => true,
+      showOnly: id => calls.push("show:" + id), endDeletedSession: async () => calls.push("endDeleted"),
+      rememberSession: () => calls.push("REMEMBER"), crashResumeCandidate: () => null,
+      renderHome: () => calls.push("renderHome"), resumeSetFlow: () => calls.push("RESUME"), resumeTestFlow: () => calls.push("RESUME")
+    };
+    const names = Object.keys(deps);
+    const fn = new Function(...names, "return async " + extractFn(src, "signInWithCode"))(...names.map(n => deps[n]));
+    const ok = await fn("AS-VWPRF234");
+    return { ok, calls, state };
+  };
+  let r = await runSignIn(appSrc, null);
+  check(r.ok === true && r.calls.indexOf("REMEMBER") !== -1 && r.calls.indexOf("show:screen-home") !== -1,
+    "(an uninterrupted restore signs the student in, remembers the code and shows home — unchanged)", r.calls.join(" > "));
+  for(const at of ["profile", "assign", "refresh"]){
+    r = await runSignIn(appSrc, at);
+    check(r.ok === false && r.calls.indexOf("REMEMBER") === -1 && !r.calls.some(c => /^show:|renderHome|RESUME|clearRefused/.test(c)),
+      "a tutor entering during the " + at + " read: the restore remembers nothing, paints nothing, resumes nothing", r.calls.join(" > "));
+  }
+  const unfencedSignIn = appSrc.replace(/(    try\{ prof = await AttemptStore\.getProfile\(code\); \}catch\(e\)\{\}\r?\n)    if\(gen !== state\.sessionGen\) return false;\r?\n/, "$1")
+    .replace(/(    const assigns = await Attempts\.assignments\(code\);\r?\n)    if\(gen !== state\.sessionGen\) return false;\r?\n/, "$1")
+    .replace(/(    if\(refreshed === "deleted"\) return false;[^\n]*\n)    if\(gen !== state\.sessionGen\) return false;\r?\n/, "$1");
+  control(unfencedSignIn !== appSrc && (unfencedSignIn.match(/if\(gen !== state\.sessionGen\) return false;/g) || []).length < (appSrc.match(/if\(gen !== state\.sessionGen\) return false;/g) || []).length - 2,
+    "the three sign-in fences are where this suite expects them");
+  r = await runSignIn(unfencedSignIn, "profile");
+  control(r.calls.indexOf("REMEMBER") !== -1, "without them the overtaken restore re-remembers the code and paints home over the tutor — the probe sees it");
+
+  /* a tutor sign-in cancelled while its request is in flight opens nothing
+     when the answer arrives: the page may be a student's by then */
+  const authHandler = src => {
+    const at = src.indexOf('el("tutorAuthGo").addEventListener("click", async ()=>{');
+    if(at === -1) throw new Error("tutorAuthGo handler not found");
+    let i = src.indexOf("{", src.indexOf("=>", at)) + 1, depth = 1;
+    const start = i;
+    while(depth > 0 && i < src.length){ if(src[i] === "{") depth++; else if(src[i] === "}") depth--; i++; }
+    return src.slice(start, i - 1);
+  };
+  const runAuth = async (src, cancelMidway) => {
+    const calls = [];
+    const hidden = { tutorAuthModal: false };
+    const node = id => ({ id, value: id === "tutorEmail" ? "tutor@example.test" : id === "tutorPassword" ? "pw" : "",
+      disabled: false, textContent: "", focus(){},
+      classList: { contains: c => c === "hidden" && !!hidden[id], add(){}, remove(){} } });
+    const els = {};
+    const el = id => els[id] || (els[id] = node(id));
+    const AttemptStore = {
+      signInTutor: async () => { calls.push("signIn"); if(cancelMidway) hidden.tutorAuthModal = true; },
+      signOutTutor: () => calls.push("signOut")
+    };
+    const deps = { el, AttemptStore, closeTutorAuth: () => calls.push("close"), enterTutorSession: () => calls.push("ENTER"),
+      Dashboard: { open: () => calls.push("DASHBOARD") }, window: { Dashboard: { open: () => calls.push("DASHBOARD") } }, showOnly: () => {} };
+    const names = Object.keys(deps);
+    await new Function(...names, "return async ()=>{" + authHandler(src) + "}")(...names.map(n => deps[n]))();
+    return calls;
+  };
+  let ac = await runAuth(appSrc, false);
+  check(ac.join(">") === "signIn>close>ENTER>DASHBOARD", "(a tutor sign-in that is not cancelled enters and opens the dashboard — unchanged)", ac.join(">"));
+  ac = await runAuth(appSrc, true);
+  check(ac.indexOf("DASHBOARD") === -1 && ac.indexOf("ENTER") === -1 && ac.indexOf("signOut") !== -1,
+    "a tutor sign-in Cancelled while in flight opens no dashboard (and so no viewer) for whoever is on the page when it answers, and keeps no token", ac.join(">"));
+  const noCancel = appSrc.replace('      if(el("tutorAuthModal").classList.contains("hidden")){ AttemptStore.signOutTutor(); return; }\n', "")
+    .replace('      if(el("tutorAuthModal").classList.contains("hidden")){ AttemptStore.signOutTutor(); return; }\r\n', "");
+  control(noCancel !== appSrc, "the cancelled-sign-in line is where this suite expects it");
+  ac = await runAuth(noCancel, true);
+  control(ac.indexOf("DASHBOARD") !== -1, "without it a cancelled sign-in's late answer opens the dashboard — the probe sees it");
+
+  /* boot answers a false restore with sign-in only if the session is still its own */
+  const boot = extractFn(appSrc, "boot");
+  check(/const gen = state\.sessionGen;\s*signInWithCode\(code\)\.then\(ok => \{ if\(!ok && gen === state\.sessionGen\) showOnly\("screen-signin"\); \}\)\s*\.catch\(\(\)=> \{ if\(gen === state\.sessionGen\) showOnly\("screen-signin"\); \}\);/.test(boot),
+    "boot never paints sign-in over a tutor who took the device while the restore was in flight");
 }
 
 console.log("\n" + (fail === 0 ? "ALL PASS — " : "FAILURES — ") + pass + " passed, " + fail + " failed");

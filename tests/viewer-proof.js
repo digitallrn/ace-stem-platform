@@ -43,12 +43,21 @@
    viewer's detach, that flush would rebuild the student's record from the
    viewer's empty answers.)
 
-   CONTROLS. The in-page control proves the write net can see a write. The
-   guard controls are mutant builds: serve a copy of the app with one write
-   re-enabled (the viewer loading through the caching loadTest; the detach
-   removed; the exit going through Dashboard.open) and this proof must go
-   red — see the report of the commit that added it. A proof that cannot
-   fail proves nothing. */
+   CONTROLS. The in-page controls prove the write net can see a write and
+   (remote) that the stub saw the server calls. The guard controls are
+   mutant builds made by `node tests/viewer-proof-mutants.js`: the real app
+   with ONE guard removed each (the viewer loading through the caching
+   loadTest; the detach removed; the exit through Dashboard.open; Report a
+   bug shown; the key leaking with answers off; a server deployment's local
+   dashboard allowed in) — that file lists each target, how to open it, and
+   the check this proof must turn red on it. A proof that cannot fail proves
+   nothing.
+
+   It needs a real viewport (it refuses below 1000×600: a background tab can
+   report 0×0, where layout checks mean nothing). In a hidden pane the
+   timers it waits on are throttled; routing setTimeout through a
+   MessageChannel before evaluating it keeps a full run to minutes (that
+   changes no check). */
 (async () => {
   "use strict";
   const $ = id => document.getElementById(id);
@@ -78,6 +87,11 @@
     throw new Error("the sync queue on this origin is not empty — a forced 'online' would drain it and read as the viewer's write");
   if(MODE === "remote" && AttemptStore.hasAuthToken()) throw new Error("a tutor token is already held — reload first");
   if(typeof window.AppTestViewer !== "object") throw new Error("this build has no AppTestViewer");
+  /* the layout checks (the toggle never moves the pane) need a real
+     viewport: a background tab can report 0×0, where every column is sized
+     by its content and the measurement means nothing */
+  if(window.innerWidth < 1000 || window.innerHeight < 600)
+    throw new Error("viewer-proof needs a real viewport of at least 1000×600 (this one is " + window.innerWidth + "×" + window.innerHeight + ") — front the tab or emulate a desktop size");
   const keysAtStart = new Set(Object.keys(localStorage));
 
   /* ---------- the write net ---------- */
@@ -160,7 +174,11 @@
     /* ---------- setup: the recorder leg (local mode) ---------- */
     const CODE = "AS-VWPRF234";
     let recorderLeg = false;
-    if(MODE === "local" && !OPTS.skipRecorder){
+    /* only where the viewer will open (no server): on a server deployment
+       forced local the viewer refuses, nothing detaches the recorder, and
+       the page's own unload flush would rewrite the student's record after
+       this proof's cleanup */
+    if(MODE === "local" && !AttemptStore.remoteConfigured() && !OPTS.skipRecorder){
       const target = forms[0];
       localStorage.setItem("devstore:assign:" + CODE + ":viewerproof-a1", JSON.stringify({
         assignmentId: "viewerproof-a1", testId: target.testId, category: "practice", startCode: null,
@@ -286,9 +304,13 @@
       if($("thTitle").textContent !== sectionTitleOf(mod)) qfail(where, "title " + $("thTitle").textContent);
       if($("qnavBtnLabel").textContent !== "Question " + (qi + 1) + " of " + mod.questions.length) qfail(where, "label " + $("qnavBtnLabel").textContent);
       if(P.querySelector(".q-num").textContent !== String(qi + 1)) qfail(where, "q-num");
-      /* read-only, every question */
-      if(!$("flagBtn").disabled) qfail(where, "flag enabled");
-      if(P.querySelector(".elim-btn, #abcToggle, #kpToggle, #keypad")) qfail(where, "a live-sitting control rendered");
+      /* the student's own controls, as a sitting shows them — and inert
+         (no handler is attached in the viewer; the click probes below and
+         the zero-write diff are what prove it) */
+      if($("flagBtn").disabled) qfail(where, "Mark for Review greyed (a sitting shows it live)");
+      if(q.type === "spr" ? (!$("kpToggle") || $("abcToggle")) : (!$("abcToggle") || $("kpToggle"))) qfail(where, "ABC / Show Keypad not as a sitting shows them");
+      if(P.querySelector(".elim-btn, #keypad")) qfail(where, "a cross-out button or the keypad panel rendered");
+      if($("tBody").classList.contains("review-mode")) qfail(where, "review styling (no hover) on the viewer");
       if(P.querySelector(".rv-omitted, .rv-time, .selected, .rv-wrong")) qfail(where, "review residue (omitted / time / your answer)");
       if(q.type === "spr" && !($("sprInput") && $("sprInput").readOnly && $("sprInput").value === "")) qfail(where, "SPR input not empty+readonly");
       const keyEls = P.querySelectorAll(".choice.rv-key");
@@ -315,11 +337,25 @@
       }
     }
 
+    /* a tab-hide and an unload. Forced WHILE the viewer is open as well as at
+       the end: the recorder's build() reads state.currentTest, so a recorder
+       still attached here would rebuild its student's record from the
+       viewer's test and empty answers — after the viewer closes it builds
+       nothing, and a flush there would prove nothing */
+    const forceFlushes = () => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+      delete document.visibilityState;
+      window.dispatchEvent(new Event("beforeunload"));
+    };
+
     for(const entry of forms){
       const test = CONTENT[entry.testId];
       await openForm(entry.testId);
       if(!visible("screen-test")){ qfail(entry.testId, "did not open"); continue; }
       stats.forms++;
+      forceFlushes();
+      await sleep(50);
       const W = entry.testId;
       /* chrome, once per form */
       if(!(visible("tvBar") && $("timerDisplay").textContent === "Viewer" && !visible("timerBtn") && !visible("fiveMinPopup")
@@ -352,11 +388,14 @@
           if(!$("tvShowAnswers").checked) qfail(where, "Show answers not ON");
           assertQuestion(where, test, mod, q, qi, true);
           const boxOn = boxOf("tBody") + "|" + boxOf("paneRight");
-          /* inertness: a click on a choice, on the flag, selects nothing */
+          /* inertness: a click on a choice, the flag, ABC or Show Keypad
+             selects, flags, crosses out and opens nothing */
           const c0 = pane().querySelector(".choice");
           if(c0) c0.click();
           $("flagBtn").click();
-          if(pane().querySelector(".choice.selected, .q-flag.on")) qfail(where, "a click selected or flagged");
+          if($("abcToggle")) $("abcToggle").click();
+          if($("kpToggle")) $("kpToggle").click();
+          if(pane().querySelector(".choice.selected, .q-flag.on, .abc-toggle.on, .choices.elim-mode, #keypad")) qfail(where, "a click selected, flagged, crossed out or opened the keypad");
           $("tvShowAnswers").click();
           assertQuestion(where + " (off)", test, mod, q, qi, false);
           if(boxOf("tBody") + "|" + boxOf("paneRight") !== boxOn) qfail(where, "the toggle moved the pane");
@@ -452,13 +491,8 @@
     $("rvBackBtn").click();
     await until(() => visible("screen-dashboard"), 5000, "the dashboard");
 
-    /* the page-wide flushes a still-attached recorder would answer */
-    const vs = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
-    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-    document.dispatchEvent(new Event("visibilitychange"));
-    delete document.visibilityState;
-    void vs;
-    window.dispatchEvent(new Event("beforeunload"));
+    /* the page-wide flushes again, plus `online` (queue drain, orphan retry) */
+    forceFlushes();
     window.dispatchEvent(new Event("online"));
     await sleep(400);
     if(recorderLeg) check("The recorder the student left attached was let go when the viewer opened (no flush can rebuild that record now)",
@@ -471,7 +505,7 @@
       memDrift.length === 0, memDrift.join(", "));
     /* ======================= THE DIFF ======================= */
     const wWrites = NET.storage.filter(w => w.phase === "window");
-    check("ZERO storage write calls during the whole window (Tests tab, every form, every question, both toggles, Go-to, Back, forced tab-hide/unload/online)",
+    check("ZERO storage write calls during the whole window (Tests tab, every form, every question, both toggles, Go-to, Back, a forced tab-hide + unload inside every form, and tab-hide/unload/online after)",
       wWrites.length === 0, wWrites.slice(0, 8).map(w => w.op + ":" + w.key).join(", "));
     const changed = Object.keys(Object.assign({}, before, after)).filter(k => before[k] !== after[k]);
     check("localStorage byte-identical before and after (" + Object.keys(before).length + " keys: the offline content cache and the sync queue included)",

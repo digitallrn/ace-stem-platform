@@ -1664,6 +1664,7 @@
       const t = JSON.parse(JSON.stringify(test));
       t.testId = id; t.testName = PAYLOAD; t.testVersion = ATTR_PAY + PAYLOAD;
       t.modules.forEach(m => m.questions.forEach(q => { q.skill = PAYLOAD; }));
+      t.modules[0].questions[0].id = "re1-q1" + PAYLOAD;           // the strip prints the id too
       const spr = t.modules.map(m => m.questions.find(q => q.type === "spr")).find(Boolean);
       if(spr){ spr.correctAnswer = PAYLOAD; spr.altAnswers = [PAYLOAD, ATTR_PAY]; }
       return t;
@@ -1718,8 +1719,10 @@
         $("tvGoto").value = PAYLOAD;
         $("tvGotoBtn").click();
         await wait(150);
+        // the echo is clipped to 40 characters: the payload's own first 40
+        // must come back as visible TEXT, with no element made of them
         results.push({ surface: "Test viewer Go-to echoes what was typed as text",
-          pass: $("tvGotoMsg").textContent.indexOf("PWN") !== -1 && !$("tvGotoMsg").querySelector("*"), note: "textContent sink" });
+          pass: $("tvGotoMsg").textContent.indexOf(PAYLOAD.slice(0, 40)) !== -1 && !$("tvGotoMsg").querySelector("*"), note: "textContent sink, clipped echo" });
         results.push(audit("Test viewer Go-to echo (hostile input)", $("screen-test")));
         $("rvBackBtn").click();
         await wait(250);

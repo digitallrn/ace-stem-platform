@@ -153,18 +153,34 @@ server (single-file, Stage-3 preview, file://) keep the local dashboard as
 the tutor's way in. Its one caller is the Tests tab; no URL, hash or magic
 link reaches it (a source sweep pins the seven pre-existing URL reads). Tutor
 entry (`enterTutorSession`, both routes) forgets a remembered student code,
-drops the student identity and bumps `sessionGen`, so a reload from the
-dashboard or viewer lands on sign-in — never in that student's crash-resumed
-sitting. Nothing persists, so "reload lands on the dashboard" is NOT met: the
+drops the student identity and bumps `sessionGen`, and `signInWithCode`
+bails after each of its awaits when the generation moved (boot then leaves
+the screen alone), so a boot-time restore the tutor overtakes lands nowhere
+and a reload from the dashboard or viewer lands on sign-in — never in that
+student's crash-resumed sitting. A sitting already RUNNING behind the sign-in
+form (a crash-resume that landed behind the tutor dialog on a slow
+connection) is stopped by the same entry, as a deletion verdict stops one:
+clocks off, recorder detached after its last save, checkpoint kept for the
+student. A tutor sign-in Cancelled while in flight opens nothing when it
+answers. (Trades, stated: a student remembered in ANOTHER tab on this device
+re-types their code after a reload, and their sitting then resumes as
+normal; and the memory restore is best-effort — a fetch that times out at
+20 s and lands later stays loaded, which changes only display: a Past card
+then shows the scaled total, the Score Calculator may default to that form.) Nothing persists, so "reload lands on the dashboard" is NOT met: the
 tutor session is memory-only by design and persisting it would be a write.
 Go-to takes `rw1-q7`/`re1-q7`, `m2-q21`/`ma2-q21`, `m1-q08`, `m2-07`; the
 Tests-tab box also takes a test id or its start ("202606 ma2-q21" lists the
-matches, never guesses). Proofs: `tests/test-viewer.test.js` (node, every
-check with a control) and `tests/viewer-proof.js` (browser: walks every
-question of every form, answers on/off, and diffs storage write CALLS,
-localStorage bytes, the queue and every request; local and stubbed-remote;
-red against the mutant builds that re-enable one write); the viewer's
-surfaces are in `tests/injection-proof.js`. Keep the test-bank's Stage-3
+matches, never guesses). Proofs: `tests/test-viewer.test.js` (node; every
+guard has a control that removes it and goes red) and `tests/viewer-proof.js`
+(browser: walks every question of every form, answers on/off, a forced
+tab-hide inside each, and diffs storage write CALLS, localStorage bytes, the
+queue and every request; remote with a stubbed network, local split build,
+single file; red against each target `node tests/viewer-proof-mutants.js`
+builds — that file says which check each one must turn red); the viewer's
+surfaces are in `tests/injection-proof.js`. In the viewer a sitting's own
+controls (Mark for Review, ABC, Show Keypad) render as a student sees them
+and are inert — review attaches no handler; only the key marks differ
+between Show answers on and off. Keep the test-bank's Stage-3
 anchor `state.assignments = assigns;` appearing exactly once in app.js
 (build_stage3_preview.py replaces its first occurrence).
 
