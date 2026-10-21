@@ -1039,12 +1039,30 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   const keepsToken = appSrc.replace("    AttemptStore.signOutTutor();\n    el(\"signinError\").classList.add(\"hidden\");", "    el(\"signinError\").classList.add(\"hidden\");");
   control(keepsToken !== appSrc && (await runSignIn(keepsToken, null)).calls.indexOf("dropTutorToken") === -1,
     "without it a token left by a tutor rides into the student's session — the probe sees it");
-  const signout = (() => {
-    const at = appSrc.indexOf('el("homeSignoutBtn").addEventListener("click", ()=>{');
-    return at === -1 ? "" : appSrc.slice(at, appSrc.indexOf("\n  });", at));
-  })();
-  check(/state\.sessionGen\+\+;[^\n]*\n\s*AttemptStore\.signOutTutor\(\);/.test(signout),
-    "the student home's Sign out drops any tutor token with the session");
+  /* the student home's Sign out, run for real (its own handler body) */
+  const runSignout = src => {
+    const OPEN = 'el("homeSignoutBtn").addEventListener("click", ()=>{';
+    const at = src.indexOf(OPEN);
+    if(at === -1) throw new Error("homeSignoutBtn handler not found");
+    let i = at + OPEN.length, depth = 1;
+    const start = i;
+    while(depth > 0 && i < src.length){ if(src[i] === "{") depth++; else if(src[i] === "}") depth--; i++; }
+    const calls = [];
+    const node = () => ({ value: "x", classList: { add(){}, remove(){} } });
+    const deps = { state: { sessionGen: 1, userName: "AS-VWPRF234" }, forgetSession: () => calls.push("forget"),
+      AttemptStore: { signOutTutor: () => calls.push("dropTutorToken"), clearRefused: () => calls.push("clearRefused") },
+      el: node, showOnly: id => calls.push("show:" + id) };
+    const names = Object.keys(deps);
+    new Function(...names, src.slice(start, i - 1))(...names.map(n => deps[n]));
+    return calls;
+  };
+  const so = runSignout(appSrc);
+  check(so.indexOf("dropTutorToken") !== -1 && so.indexOf("show:screen-signin") !== -1 && so.indexOf("dropTutorToken") < so.indexOf("show:screen-signin"),
+    "the student home's Sign out, run for real, drops any tutor token with the session", so.join(" > "));
+  const SIGNOUT_DROP = "    AttemptStore.signOutTutor();         // whoever was on this home, no tutor token outlives it\n";
+  const signoutKeeps = appSrc.replace(SIGNOUT_DROP, "");
+  control(appSrc.split(SIGNOUT_DROP).length === 2 && runSignout(signoutKeeps).indexOf("dropTutorToken") === -1,
+    "without it the Sign out leaves the token for the next student signed in on this page — the probe sees it");
   r = await runSignIn(appSrc, "profile");
   check(r.ok === false && !r.calls.some(paintsName) && r.calls.indexOf("assign") === -1,
     "overtaken during the profile read: no student name painted into the tutor's page, no further reads", r.calls.join(" > "));
@@ -1458,6 +1476,32 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     "the review page's Next during an exit submits nothing — no module-over beat, so no next module's clock under the home screen the exit paints", rd);
   const rn = await nextNoExit(appSrc);
   check(rn === "moduleEnd>moduleOver", "(with no exit running, Next submits the module as before)", rn);
+  /* (f) the stranded exit does not swallow the next sitting's Next either;
+     and the countdown's own expiry still submits when no exit runs */
+  const staleThenNext = async src => {
+    const w = exitWorld(src);
+    const releaseOld = w.hold("suspend");
+    const p1 = w.api.saveAndExit();
+    await turns();
+    w.state.sessionGen++;                                  // the deletion landing ended that session
+    w.calls.push("|landing");
+    w.calls.push("|Next");
+    w.api.submitModule();                                  // the next sitting's review-page Next
+    w.calls.push("|");
+    releaseOld();
+    await p1;
+    return w.calls.join(">");
+  };
+  const rf = await staleThenNext(appSrc);
+  check(rf === "suspend>|landing>|Next>moduleEnd>moduleOver>|",
+    "an exit stranded behind a slow save, its session ended by a deletion, does not block the next sitting's Next: the module is submitted", rf);
+  const expiry = async src => { const w = exitWorld(src); w.api.submitModule("timer-expired"); return w.calls.join(">"); };
+  const re = await expiry(appSrc);
+  check(re === "moduleEnd>moduleOver", "(a countdown reaching 0:00 with no exit running still submits the module)", re);
+  const pageWideHold = appSrc.replace("function exitInFlight(){ return saveExitGen !== null && saveExitGen === state.sessionGen; }",
+    "function exitInFlight(){ return saveExitGen !== null; }");
+  control(pageWideHold !== appSrc && !/\|Next>moduleEnd/.test(await staleThenNext(pageWideHold)),
+    "a page-wide hold: the stranded exit swallows the next sitting's Next — the probe sees it");
 
   const RELEASE = "    finally{ if(saveExitGen === mine) saveExitGen = null; }";
   control(appSrc.split(RELEASE).length === 2, "the hold's release is where this suite expects it");
