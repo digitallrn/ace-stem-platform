@@ -63,6 +63,13 @@ function newestDefining(fn){
 
 let pass = 0, fail = 0;
 const failures = [];
+/* The suite ends through process.exit(), which never fires beforeExit — so
+   reaching it means a case awaited something that never settled (a gated
+   storage call, say) and node drained the loop: report it, never exit 0. */
+process.on("beforeExit", () => {
+  console.log("HARNESS HUNG — a case never settled. " + pass + " passed, " + fail + " failed before it.");
+  process.exit(2);
+});
 function check(ok, label, detail){
   if(ok){ pass++; console.log("PASS | " + label); }
   else { fail++; failures.push(label + (detail ? " — " + detail : ""));
@@ -110,15 +117,19 @@ function loadAttempts(opts){
   if(opts.config) sandbox.ACESTEM_CONFIG = opts.config;
   if(opts.sharedStorage){
     const throwOn = (opts.sharedStorage && opts.sharedStorage.throwOn) || null;   // RegExp: keys whose get() throws
+    /* gate: {next:true} parks the NEXT set() until the test releases it
+       (gate.waiters) — an artifact-storage round trip that outlasts what
+       happens on the page meanwhile */
+    const gate = (opts.sharedStorage && opts.sharedStorage.gate) || null;
     sandbox.storage = {
-      async set(k, v){ store[k] = v; return true; },
+      async set(k, v){ if(gate && gate.next){ gate.next = false; await new Promise(r => gate.waiters.push(r)); } store[k] = v; return true; },
       async get(k){ if(throwOn && throwOn.test(k)) throw new Error("storage blip"); return k in store ? { value: store[k] } : null; },
       async list(p){ return { keys: Object.keys(store).filter(k => k.startsWith(p)) }; },
       async delete(k){ delete store[k]; return true; }
     };
   }
   vm.createContext(sandbox);
-  vm.runInContext(attemptsSrc, sandbox);
+  vm.runInContext(opts.src || attemptsSrc, sandbox);
   const flush = async () => {
     const t = timers.splice(0);
     for(const f of t) f();
@@ -913,6 +924,44 @@ function sqlContract(sql){
     await new Promise(r => setImmediate(r));
     check(killed3.length === 0, "control: someone else's marker never reports this sitting", JSON.stringify(killed3));
   });
+  await run("(i) a Save and Exit parked behind a deletion never stops the NEXT sitting's recorder", async () => {
+    /* artifact mode, REAL attempts.js: the exit's save is a storage round
+       trip that can outlast the deletion landing AND the student starting
+       another assignment from it. When it finally answers, the old exit
+       answers for its own record only — it must not stop the new one's
+       recorder (which would record nothing while the screens say it did). */
+    const tick = async () => { for(let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
+    const T = id => ({ testId: id, testName: id, testVersion: "v1", modules: [{ moduleId: "m1", questions: [{ id: "q1" }] }] });
+    const ST = t => ({ currentTest: t, moduleState: { m1: { answers: {}, flags: new Set(), eliminated: {} } }, moduleIndex: 0, questionIndex: 0, timeRemainingSec: 100 });
+    const scenario = async (src) => {
+      const gate = { next: false, waiters: [] };
+      const w = loadAttempts({ sharedStorage: { gate }, src });
+      const t1 = T("t1");
+      w.AT.begin(t1, CODE, "self-administered", ST(t1), "a1", 1);
+      const OLD = w.AT.currentAttemptId();
+      await tick();
+      gate.next = true;                                   // Save and Exit's write hangs
+      const p = w.AT.suspend(w.AT.positionBlob());
+      await tick();
+      const parked = gate.waiters.length;
+      const gone = w.AT.abandonDeleted(OLD);              // the deletion lands (endSittingDeleted)
+      const t2 = T("t2");
+      w.AT.begin(t2, CODE, "self-administered", ST(t2), "a2", 1);   // Back to home, the next assignment
+      const NEW = w.AT.currentAttemptId();
+      gate.waiters.splice(0).forEach(r => r());           // the old write finally answers
+      const ok = await p;
+      await tick();
+      return { parked, gone: gone === OLD, ok, now: w.AT.currentAttemptId(), NEW };
+    };
+    const r = await scenario();
+    check(r.parked === 1 && r.gone && r.ok === true && r.NEW && r.now === r.NEW,
+      "the abandoned sitting's exit reports itself exited, and the sitting begun meanwhile keeps its recorder", JSON.stringify(r));
+    const SUSPEND_IDENTITY = "        if(!rec || rec !== mine) return true;\n";
+    const stale = attemptsSrc.replace(SUSPEND_IDENTITY, "        if(!rec) return true;\n");
+    const rs = await scenario(stale);
+    check(attemptsSrc.split(SUSPEND_IDENTITY).length === 2 && rs.now === null,
+      "control: without the identity check the stale exit stops the NEW sitting's recorder — the probe sees it", JSON.stringify(rs));
+  });
   await run("(i) app.js routes the kill signal: this sitting ends, a stale key is ignored, a deleted student ends the session", async () => {
     const A = "attempt:t1:100:aaaa";
     /* app.js's OWN registration line is lifted verbatim and evaluated with
@@ -920,7 +969,9 @@ function sqlContract(sql){
        Without it the whole kill path hangs on one line nothing checked. */
     const regLine = (appSrc.match(/^[ \t]*AttemptStore\.onDeleted\([A-Za-z0-9_$]+\);[ \t]*$/m) || [])[0];
     check(!!regLine, "app.js subscribes its router to the store's deletion signal (the one line the whole kill path hangs on)", String(regLine));
-    const build = (liveKey, refresh, liveStatus) => {
+    /* token: a tutor token is held on this page; src: an app.js variant */
+    const build = (liveKey, refresh, liveStatus, token, src) => {
+      src = src || appSrc;
       const calls = [];
       const state = { sessionGen: 1, timerInterval: 5, breakInterval: 6, readyTimer: 7, moduleOverTimer: null, timerRunning: true,
         currentTest: { testId: "t1" }, moduleState: { m: 1 }, activeAssignment: { assignmentId: "a1" }, reviewMode: null, pendingStart: {}, userName: CODE };
@@ -928,8 +979,9 @@ function sqlContract(sql){
       const el = id => els[id] || (els[id] = { textContent: "", value: "", onclick: null,
         classList: { add(){ calls.push("hide:" + id); }, remove(){}, toggle(){}, contains(){ return true; } } });
       const subList = [];
-      const AttemptStore = { onDeleted(fn){ subList.push(fn); }, notifyDeleted(k, r, c){ subList.slice().forEach(fn => { try{ fn(k, r, c); }catch(e){} }); } };
-      const body = extractFn(appSrc, "onAttemptDeleted") + "\nasync " + extractFn(appSrc, "endSittingDeleted") + "\n" + (regLine || "") +
+      const AttemptStore = { onDeleted(fn){ subList.push(fn); }, notifyDeleted(k, r, c){ subList.slice().forEach(fn => { try{ fn(k, r, c); }catch(e){} }); },
+        hasAuthToken: () => !!token };
+      const body = extractFn(src, "onAttemptDeleted") + "\nasync " + extractFn(src, "endSittingDeleted") + "\n" + (regLine || "") +
         "\nreturn { onAttemptDeleted, endSittingDeleted, els, calls, state, subs: AttemptStore, notify: (k, r, c) => AttemptStore.notifyDeleted(k, r, c) };";
       return new Function("state", "el", "calls", "els", "Attempts", "resetTestChrome", "refreshStudentState", "endDeletedSession", "renderHome", "showOnly", "clearInterval", "clearTimeout", "AttemptStore",
         body)(state, el, calls, els,
@@ -1027,6 +1079,22 @@ function sqlContract(sql){
     d8.onAttemptDeleted(A, "student", CODE.toLowerCase());
     await new Promise(r => setImmediate(r));
     check(d8.calls.indexOf("endDeletedSession") !== -1, "control: the same signal with the signed-in code (any case) does end the session");
+    /* THE TUTOR'S PAGE: the dashboard's student views (AppScoreView /
+       AppSetReview) borrow the student's code as state.userName, and a queued
+       write of that student's can be refused after the tutor deletes them —
+       the dashboard and an open test viewer must stay up */
+    const d9 = build(null, undefined, undefined, true);
+    d9.onAttemptDeleted("attempt:t1:900:zzzz", "student", CODE);
+    await new Promise(r => setImmediate(r));
+    check(d9.calls.length === 0 && d9.state.sessionGen === 1,
+      "a page the TUTOR holds (a tutor token): a 'student deleted' refusal for the student whose view the tutor opened ends nothing — no student sign-in over the dashboard or the test viewer", d9.calls.join(","));
+    const TOKEN_GUARD = "      if(AttemptStore.hasAuthToken()) return;\n";
+    const noTokenGuard = appSrc.replace(TOKEN_GUARD, "");
+    const d10 = build(null, undefined, undefined, true, noTokenGuard);
+    d10.onAttemptDeleted("attempt:t1:900:zzzz", "student", CODE);
+    await new Promise(r => setImmediate(r));
+    check(appSrc.split(TOKEN_GUARD).length === 2 && d10.calls.indexOf("endDeletedSession") !== -1,
+      "control: without the token check the same refusal ends the tutor's session — the probe sees it", d10.calls.join(","));
     /* the refresh says the code is gone too: the session's landing replaces
        the sitting one (painted first, since the refresh is unbounded) */
     const d5 = build(A, "deleted");

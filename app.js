@@ -614,6 +614,13 @@
          signed-in code. No code (an older signal, or one from a path that
          cannot know) is not a match either — the session ends only on a
          positive one. */
+      /* A page the TUTOR holds (a tutor token: the only mode where this
+         reason arrives is remote, where the tutor is always signed in with
+         one) is no student's session: the dashboard's student views borrow
+         that student's code as state.userName for display, and their
+         deletion must never tear the dashboard or the test viewer down into
+         the student sign-in screen, with the token still held. */
+      if(AttemptStore.hasAuthToken()) return;
       const mine = String(state.userName || "").trim().toUpperCase();
       if(!code || String(code).trim().toUpperCase() !== mine) return;
       if(live) Attempts.abandonDeleted(live);   // no write: every write is refused now
@@ -3948,7 +3955,20 @@
     if(menu && !menu.classList.contains("hidden") && !e.target.closest(".more-wrap")) closeMoreMenu();
   });
 
+  /* One Save and Exit at a time. The test screen stays live while an exit's
+     save and refresh run, and a second press then found no recorder
+     (suspend answers false) and took the refused branch: a false
+     save-failed modal, and a module clock restarted under the home screen
+     the first exit went on to paint — a countdown that throws at 0:00 and
+     keeps sittingInFlight() true, refusing the tutor's sign-in. */
+  let saveExitInFlight = false;
   async function saveAndExit(){
+    if(saveExitInFlight) return;
+    saveExitInFlight = true;
+    try{ await saveAndExitNow(); }
+    finally{ saveExitInFlight = false; }
+  }
+  async function saveAndExitNow(){
     if(state.reviewMode) return;   // menu item is hidden in review; nothing to save either way
     clearInterval(state.timerInterval);           // timer pauses while exited
     state.timerRunning = false;

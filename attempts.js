@@ -1198,14 +1198,19 @@ window.Attempts = (function(){
            save(), because save() calls build() and build() is what writes the
            checkpoint — clearing it here directly would just be overwritten. */
         deliberateExit = true;
+        const mine = rec;                         // the sitting this exit belongs to
         await save();                             // flush immediately, then leave
         /* abandonDeleted() ran while this call was parked behind an
            in-flight save: the tutor deleted the sitting, `rec` is gone and
            every write to that key is refused. Report it as exited — writing
            or re-arming the ticker here would be recording into a deleted
            sitting, and reading rec.* would throw. The deletion landing owns
-           the screen from here. */
-        if(!rec) return true;
+           the screen from here. And if the student has since STARTED
+           another sitting (artifact mode, where this save is a network
+           round trip that can outlast the landing), `rec` is that sitting's:
+           this exit must not stop its recorder, so it answers for its own
+           record only. */
+        if(!rec || rec !== mine) return true;
         if(lastSaveOk !== true){
           // exit refused — keep recording, but drop the blob: the student is
           // still testing, so a later successful checkpoint must not persist

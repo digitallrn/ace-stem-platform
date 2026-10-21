@@ -54,6 +54,15 @@ const renderSrc = readLf(path.join(repo, "render.js"));
 const gradingSrc = readLf(path.join(repo, "grading.js"));
 
 let pass = 0, fail = 0;
+/* A probe that awaits something that never resolves lets node drain the
+   event loop and exit 0 with no summary — a silent green. Reaching
+   beforeExit before the summary means the suite did not finish. */
+let finished = false;
+process.on("beforeExit", () => {
+  if(finished) return;
+  console.log("HARNESS HUNG — a probe never settled (awaited behind its own gate?). " + pass + " passed, " + fail + " failed before it.");
+  process.exit(2);
+});
 const failures = [];
 function check(ok, label, detail){
   if(ok){ pass++; console.log("PASS | " + label); }
@@ -889,11 +898,17 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
      with this return removed): in the viewer it must wire nothing at all */
   const AQ_SPR = { id: "ma1-q4", type: "spr" };
   const AQ_MCQ = { id: "re1-q1", type: "mcq", choices: ["a", "b", "c", "d"] };
+  /* every lookup answers with a probe node named by what was asked for —
+     el(id), el(id).querySelectorAll(sel) and document.querySelectorAll(sel)
+     alike (an MCQ's choices and cross-outs are wired through the document)
+     — so ANY handler wired, by any route, is recorded */
   const wiring = (src, reviewMode, q) => {
     const wired = [];
-    const node = id => ({ id, value: "", addEventListener: t => wired.push(id + ":" + t),
-      classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, querySelector: () => null, querySelectorAll: () => [] });
-    const deps = { state: { reviewMode }, el: node, attachFigureHandlers: () => {},
+    const node = id => ({ id, value: "", dataset: {}, addEventListener: t => wired.push(id + ":" + t),
+      classList: { add(){}, remove(){}, toggle(){}, contains: () => false },
+      querySelector: sel => node(id + " " + sel), querySelectorAll: sel => [node(id + " " + sel)] });
+    const document = { querySelector: sel => node(sel), querySelectorAll: sel => [node(sel)] };
+    const deps = { state: { reviewMode }, el: node, document, makeDraggable: () => {}, attachFigureHandlers: () => {},
       currentQuestion: () => (q || AQ_SPR), currentModState: () => ({ answers: {}, flags: new Set(), eliminated: {} }) };
     const names = Object.keys(deps);
     let threw = null;
@@ -907,7 +922,13 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
     const aq = wiring(appSrc, VIEWER_RM, q);
     check(aq.wired.length === 0 && aq.threw === null,
       "attachQuestionHandlers, run for real in the viewer on an " + kind + ", wires nothing — no answer, flag, cross-out or keypad handler", aq.wired.join(" ") + (aq.threw ? " threw " + aq.threw.message : ""));
-    check(wiring(appSrc, null, q).wired.indexOf("flagBtn:click") !== -1, "(" + kind + ": a live sitting still gets its handlers — the probe can see wiring)");
+    /* the live run must get all the way through, and show the kind's own
+       answer handlers — otherwise the probe cannot see what it claims to */
+    const lv = wiring(appSrc, null, q);
+    const own = kind === "SPR" ? ["flagBtn:click", "sprInput:input", "kpToggle:click"]
+      : ["flagBtn:click", "abcToggle:click", "#paneRight .choice:click", "#paneRight .elim-btn:click", "#paneRight .elim-undo:click"];
+    check(lv.threw === null && own.every(h => lv.wired.indexOf(h) !== -1),
+      "(" + kind + ": a live sitting still gets its handlers, run to the end — the probe sees " + own.join(", ") + ")", lv.wired.join(" ") + (lv.threw ? " threw " + lv.threw.message : ""));
     control(aqMut !== appSrc && wiring(aqMut, VIEWER_RM, q).wired.indexOf("flagBtn:click") !== -1,
       "mutant (the `handlers` target: its early return removed), " + kind + " — the viewer's Mark for Review gets a handler, and the probe sees it");
   });
@@ -1200,22 +1221,37 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     return src.slice(start, i - 1);
   };
   const CALLERS = {
-    "Save and Exit": src => "return async " + extractFn(src, "saveAndExit"),
+    /* the guarded entry, its in-flight flag and the body, as the page has them */
+    "Save and Exit": src => ((src.match(/^[ \t]*let saveExitInFlight = false;[ \t]*$/m) || [""])[0]) +
+      "\nasync " + extractFn(src, "saveAndExit") + "\nasync " + extractFn(src, "saveAndExitNow") + "\nreturn saveAndExit;",
     "Back to home (submitted)": src => "return async ()=>{" + handlerOf(src, 'el("subHomeBtn").addEventListener("click", async ()=>{') + "}",
     "Back to home (set done)": src => "return async ()=>{" + handlerOf(src, 'el("setDoneHomeBtn").addEventListener("click", async ()=>{') + "}"
   };
-  /* duringSave: a deletion landing arrives while Save and Exit's own save
-     runs — it retires the generation (both landings do, before they paint)
-     and suspend() reports the abandoned sitting as exited ("ok"), or the
-     exit was refused ("refused") */
-  const runCaller = async (src, which, endMidway, duringSave) => {
+  /* o.endMidway: the session ends while the caller's refresh read runs;
+     o.landing: a deletion landing arrives while Save and Exit's own save
+     runs (it retires the generation, as both landings do before they
+     paint); o.refused: the save is refused (suspend answers false);
+     o.secondPress: Save and Exit is pressed again while the first exit's
+     refresh read is still out. Like the real recorder, suspend() answers
+     false once an exit has gone through (attempts.js: no rec). */
+  const runCaller = async (src, which, o) => {
+    o = o || {};
     const calls = [];
     const state = { sessionGen: 1, userName: "AS-VWPRF234", tombstoned: {}, pastAttempts: [], currentTest: { testId: "t" }, reviewMode: null, lastWasProctored: true };
+    let exited = false, releaseRead = null;
+    const readGate = o.secondPress ? new Promise(r => { releaseRead = r; }) : null;
     const Attempts = { positionBlob: () => ({}),
-      suspend: async () => { if(duringSave){ state.sessionGen++; calls.push("landing"); } return duringSave !== "refused"; },
+      suspend: async () => {
+        calls.push("suspend");
+        if(o.landing){ state.sessionGen++; calls.push("landing"); }
+        if(o.refused || exited) return false;
+        exited = true;
+        return true;
+      },
       loadStudentRecords: async () => {
         calls.push("read");
-        if(endMidway){ state.sessionGen++; calls.push("ended-elsewhere"); return "deleted"; }
+        if(readGate) await readGate;
+        if(o.endMidway){ state.sessionGen++; calls.push("ended-elsewhere"); return "deleted"; }
         return { live: [], tombstones: [] };
       } };
     const base = { state, Attempts, endDeletedSession: async () => calls.push("endDeleted"), buildAssignmentIndex: () => ({}), byStartDesc: () => 0 };
@@ -1226,31 +1262,67 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
       setLineReader: noop, closeMoreMenu: noop, startTimer: () => calls.push("startTimer"), renderTest: () => calls.push("renderTest"),
       show: id => calls.push("show:" + id) });
     const names = Object.keys(deps);
-    await new Function(...names, CALLERS[which](src))(...names.map(n => deps[n]))();
+    const fn = new Function(...names, CALLERS[which](src))(...names.map(n => deps[n]));
+    const first = fn();
+    if(o.secondPress){
+      for(let i = 0; i < 50 && calls.indexOf("read") === -1; i++) await new Promise(r => setImmediate(r));
+      calls.push("|second");
+      /* never AWAIT the second press before the read is released: a build
+         where it reaches the read too would wait on a gate only released
+         after it — so give it a bounded number of turns, then release */
+      const second = fn();
+      let secondDone = false;
+      second.then(() => { secondDone = true; }, () => { secondDone = true; });
+      for(let i = 0; i < 50 && !secondDone; i++) await new Promise(r => setImmediate(r));
+      calls.push(secondDone ? "|" : "|second-still-waiting");
+      releaseRead();
+      await second;
+    }
+    await first;
     return calls;
   };
   const paintsHome = c => c.indexOf("renderHome") !== -1 || c.indexOf("show:screen-home") !== -1;
   const oldFence = appSrc.replace(RF_FENCE, "    const res = await Attempts.loadStudentRecords(code);\n    if(gen !== state.sessionGen) return false;\n");
   control(oldFence !== appSrc, "the fence's answer is where this suite expects it");
   for(const which of Object.keys(CALLERS)){
-    const plain = await runCaller(appSrc, which, false);
-    const over = await runCaller(appSrc, which, true);
+    const plain = await runCaller(appSrc, which);
+    const over = await runCaller(appSrc, which, { endMidway: true });
     check(paintsHome(plain) && !paintsHome(over) && over.indexOf("endDeleted") === -1,
       which + ": a session that ended while its read ran keeps whatever landing ended it — no home painted over a deletion screen (and with nothing ended it still goes home, unchanged)", over.join(">"));
-    control(paintsHome(await runCaller(oldFence, which, true)), which + ": with the fence answering false (\"carry on\") the caller paints home over the landing — the probe sees it");
+    control(paintsHome(await runCaller(oldFence, which, { endMidway: true })), which + ": with the fence answering false (\"carry on\") the caller paints home over the landing — the probe sees it");
   }
-  /* Save and Exit's OWN await: the landing arrives during the save itself,
-     before the refresh has captured anything */
-  const paintsOver = c => paintsHome(c) || c.some(x => /^read$|^startTimer$|^renderTest$|^show:/.test(x));
-  for(const how of ["ok", "refused"]){
-    const c = await runCaller(appSrc, "Save and Exit", false, how);
-    check(c.join(">") === "landing", "Save and Exit: a deletion landing during the save itself (suspend " + (how === "ok" ? "reporting the abandoned sitting as exited" : "refusing the exit") + ") is left on screen — no refresh, no home, no clock restarted, no save-failed modal over it", c.join(">"));
+  /* Save and Exit, every outcome of its own save, as exact sequences — so a
+     change that strands the student, sends a refused exit home, or drops
+     the clock restart or the save-failed modal turns a check red */
+  const SEQ = async (src, o) => (await runCaller(src, "Save and Exit", o)).join(">");
+  const SAVE_EXPECT = [
+    ["the save goes through: home, with the record re-read", {}, "suspend>read>renderHome>show:screen-home"],
+    ["the save is REFUSED with nothing else happening: the student stays in the test, the clock restarts, the save-failed modal explains (Phase F §8)", { refused: true },
+      "suspend>startTimer>renderTest>show:saveFailModal"],
+    ["a deletion landing during the save, the abandoned sitting reported exited: the landing is left on screen", { landing: true }, "suspend>landing"],
+    ["a deletion landing during a REFUSED save: the landing is left on screen — no clock restarted, no modal over it", { landing: true, refused: true }, "suspend>landing"],
+    ["pressed AGAIN while the first exit's read is out: the second press does nothing at all, and the first lands home — no false save-failed modal, no clock restarted under home", { secondPress: true },
+      "suspend>read>|second>|>renderHome>show:screen-home"]
+  ];
+  for(const [what, o, want] of SAVE_EXPECT){
+    const got = await SEQ(appSrc, o);
+    check(got === want, "Save and Exit, run for real — " + what, got);
   }
+  /* controls: each guard taken away turns its own sequence red */
   const SAVE_FENCE = "    if(gen !== state.sessionGen) return;          // a deletion landing took the screen meanwhile\n";
   const noSaveFence = appSrc.replace(SAVE_FENCE, "");
-  control(appSrc.split(SAVE_FENCE).length === 2 && paintsOver(await runCaller(noSaveFence, "Save and Exit", false, "ok"))
-    && paintsOver(await runCaller(noSaveFence, "Save and Exit", false, "refused")),
+  control(appSrc.split(SAVE_FENCE).length === 2 && (await SEQ(noSaveFence, { landing: true })) !== "suspend>landing"
+    && (await SEQ(noSaveFence, { landing: true, refused: true })) !== "suspend>landing",
     "Save and Exit without its own fence paints home (or restarts the clock under the save-failed modal) over the landing — the probe sees it");
+  const ONE_EXIT = "    if(saveExitInFlight) return;\n";
+  const twoExits = appSrc.replace(ONE_EXIT, "");
+  const twoSeq = await SEQ(twoExits, { secondPress: true });
+  control(appSrc.split(ONE_EXIT).length === 2 && /\|second>suspend>startTimer>renderTest>show:saveFailModal>\|/.test(twoSeq),
+    "without the one-exit-at-a-time guard the second press restarts the clock and shows a false save-failed modal under the first exit's home — the probe sees it", twoSeq);
+  const REFUSED = "      startTimer();\n      renderTest();                               // reopens the per-question clock\n      show(\"saveFailModal\");\n";
+  const quietRefusal = appSrc.replace(REFUSED, "");
+  control(appSrc.split(REFUSED).length === 2 && (await SEQ(quietRefusal, { refused: true })) !== "suspend>startTimer>renderTest>show:saveFailModal",
+    "with the refused branch emptied (no clock, no modal) the refused sequence goes red — the probe sees it");
 
   /* boot answers a false restore with sign-in only if the session is still its own */
   const boot = extractFn(appSrc, "boot");
@@ -1258,6 +1330,7 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     "boot never paints sign-in over a tutor who took the device while the restore was in flight");
 }
 
+finished = true;
 console.log("\n" + (fail === 0 ? "ALL PASS — " : "FAILURES — ") + pass + " passed, " + fail + " failed");
 if(fail){ failures.forEach(f => console.log("  - " + f)); process.exit(1); }
 })().catch(e => { console.error("HARNESS ERROR:", e && e.stack || e); process.exit(2); });
