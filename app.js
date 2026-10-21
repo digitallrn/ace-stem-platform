@@ -3957,11 +3957,19 @@
     hide("fiveMinPopup");
     closeMoreMenu();
     const test = state.currentTest;
+    /* the session this exit belongs to: a deletion verdict that lands while
+       the save runs (the sitting's, endSittingDeleted; or the whole code's,
+       endDeletedSession — both retire the generation before they paint)
+       owns the screen from then on, and suspend() reports that case as
+       exited (attempts.js), so this exit must neither paint home nor
+       restart the clock over it */
+    const gen = state.sessionGen;
     /* Ask the recorder for the position/annotation blob rather than rebuilding
        it here. This used to be a second, hand-maintained copy that carried only
        passageHtml + notes, so widening annotation to the stem and choices would
        have persisted nothing from them on Save-and-Exit. */
     const ok = await Attempts.suspend(Attempts.positionBlob());
+    if(gen !== state.sessionGen) return;          // a deletion landing took the screen meanwhile
     if(!ok){
       // Phase F §8: never return home over unrecoverable progress — stay in
       // the test, restart the clock, explain, and offer the JSON fallback

@@ -83,6 +83,14 @@
       if(localStorage.getItem(k) !== cacheBefore[k]) localStorage.setItem(k, cacheBefore[k]);
     });
   }
+  /* "as found" is only clean if what was found was clean: an origin a run
+     poisoned BEFORE this restore existed still holds the payload as a test's
+     content, and restoring it would let the row below pass over it. So the
+     starting caches are checked for the proof's own markers too, and a hit
+     fails the run, naming the keys to remove by hand. */
+  const POISON_MARKERS = ["__XSS_FIRED", "__ATTR_FIRED"];
+  const poisonedAtStart = Object.keys(cacheBefore).filter(k =>
+    POISON_MARKERS.some(m => String(cacheBefore[k]).indexOf(m) !== -1));
   const cacheAsFound = () => {
     const now = Object.keys(localStorage).filter(isCacheKey);
     return now.length === Object.keys(cacheBefore).length &&
@@ -1983,6 +1991,9 @@
     results.push({ surface: "The run leaves the offline content cache as it found it",
       pass: cacheAsFound(),
       note: "poisoned test objects never outlive the run in acestem:testcache / bankcache" });
+    results.push({ surface: "...and what it found held no payload from an earlier run",
+      pass: poisonedAtStart.length === 0,
+      note: poisonedAtStart.length ? "remove by hand, then rerun: " + poisonedAtStart.join(", ") : "no proof marker in any starting cache entry" });
     const failed = results.filter(r => !r.pass);
     console.table(results);
     console.log(failed.length ? "FAIL — " + failed.length + " surface(s)" :

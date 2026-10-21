@@ -161,7 +161,9 @@ and a reload from the dashboard or viewer lands on sign-in — never in that
 student's crash-resumed sitting. `refreshStudentState` has the same fence
 and answers `"deleted"` (session over — never `false`, "carry on") when the
 generation moved, so Save and Exit / Back to home stop instead of painting
-home over whatever ended the session (a deletion landing included); a TYPED
+home over whatever ended the session (a deletion landing included), and Save
+and Exit fences its own save too (a landing that arrives during `suspend()`
+keeps the screen: no refresh, no home, no clock restarted); a TYPED
 student code also bumps `sessionGen`, so it supersedes a boot restore in
 flight. A sitting RUNNING or (re)starting on the page
 (`sittingInFlight`: module clock, the Ready/resume beat, module-over, break —

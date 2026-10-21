@@ -28,7 +28,15 @@
         the counts loader never touching the caching loader;
      §7 source sweeps: no viewer function reaches a write API, the only
         caller of the bridge is the Tests tab, no new URL input, the
-        test-bank's Stage-3 anchor still appears exactly once.
+        test-bank's Stage-3 anchor still appears exactly once; the tutor's
+        entry run for real (forget, let go of a finished sitting's recorder);
+     §9 the shared renderer's viewer branches, run for real against review
+        and a live sitting (key marks, rationale, SPR, the header tools,
+        attachQuestionHandlers wiring nothing);
+     §8 the tutor's sign-in against a student session: every signInWithCode
+        fence, doSignin's refusal and typed-code bump, the cancelled tutor
+        sign-in, sittingInFlight per beat and through the real break, and the
+        refreshStudentState fence through its callers.
 
    app.js and dashboard.js are pulled apart by source text, as the other
    suites do (tests/extract-helper.js). */
@@ -879,12 +887,14 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
   /* attachQuestionHandlers, REAL (a source pin here used to run past the
      function's end into a lookalike line ~1,000 lines on, and so stayed green
      with this return removed): in the viewer it must wire nothing at all */
-  const wiring = (src, reviewMode) => {
+  const AQ_SPR = { id: "ma1-q4", type: "spr" };
+  const AQ_MCQ = { id: "re1-q1", type: "mcq", choices: ["a", "b", "c", "d"] };
+  const wiring = (src, reviewMode, q) => {
     const wired = [];
     const node = id => ({ id, value: "", addEventListener: t => wired.push(id + ":" + t),
       classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, querySelector: () => null, querySelectorAll: () => [] });
     const deps = { state: { reviewMode }, el: node, attachFigureHandlers: () => {},
-      currentQuestion: () => ({ id: "ma1-q4", type: "spr" }), currentModState: () => ({ answers: {}, flags: new Set(), eliminated: {} }) };
+      currentQuestion: () => (q || AQ_SPR), currentModState: () => ({ answers: {}, flags: new Set(), eliminated: {} }) };
     const names = Object.keys(deps);
     let threw = null;
     try{ new Function(...names, extractFn(src, "attachQuestionHandlers") + "\nreturn attachQuestionHandlers;")(...names.map(n => deps[n]))(); }
@@ -892,13 +902,15 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
     return { wired, threw };
   };
   const VIEWER_RM = { record: { attemptId: "viewer:t", answers: {} }, rowByQid: {}, viewer: true };
-  const aq = wiring(appSrc, VIEWER_RM);
-  check(aq.wired.length === 0 && aq.threw === null,
-    "attachQuestionHandlers, run for real in the viewer, wires nothing — no answer, flag, cross-out or keypad handler", aq.wired.join(" ") + (aq.threw ? " threw " + aq.threw.message : ""));
-  check(wiring(appSrc, null).wired.indexOf("flagBtn:click") !== -1, "(a live sitting still gets its handlers — the probe can see wiring)");
   const aqMut = appSrc.replace("       it do anything. */\n    if(state.reviewMode) return;\n", "       it do anything. */\n");
-  control(aqMut !== appSrc && wiring(aqMut, VIEWER_RM).wired.indexOf("flagBtn:click") !== -1,
-    "mutant (the `handlers` target: its early return removed) — the viewer's Mark for Review gets a handler, and the probe sees it");
+  [["SPR", AQ_SPR], ["MCQ", AQ_MCQ]].forEach(([kind, q]) => {
+    const aq = wiring(appSrc, VIEWER_RM, q);
+    check(aq.wired.length === 0 && aq.threw === null,
+      "attachQuestionHandlers, run for real in the viewer on an " + kind + ", wires nothing — no answer, flag, cross-out or keypad handler", aq.wired.join(" ") + (aq.threw ? " threw " + aq.threw.message : ""));
+    check(wiring(appSrc, null, q).wired.indexOf("flagBtn:click") !== -1, "(" + kind + ": a live sitting still gets its handlers — the probe can see wiring)");
+    control(aqMut !== appSrc && wiring(aqMut, VIEWER_RM, q).wired.indexOf("flagBtn:click") !== -1,
+      "mutant (the `handlers` target: its early return removed), " + kind + " — the viewer's Mark for Review gets a handler, and the probe sees it");
+  });
   check(v.sprOn && v.sprOff, "viewer SPR: Show Keypad as a sitting shows it; with answers ON the key and its alternates beneath, no verdict; OFF nothing more");
   const rv = render(appSrc, "review", true, MCQ), lv = render(appSrc, "live", true, MCQ), rs = render(appSrc, "review", true, SPR);
   check(keyOn(rv) && has(rv, "rv-omitted") && has(rv, "rv-time") && /id="flagBtn" disabled/.test(rv) && !has(rv, "abcToggle") && has(rs, "rv-banner") && !has(rs, "kpToggle"),
@@ -1111,7 +1123,9 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   const off = { timerRunning: false, readyTimer: null, moduleOverTimer: null, breakInterval: null };
   check(!sif(off)() && ["timerRunning", "readyTimer", "moduleOverTimer", "breakInterval"].every(k => sif(Object.assign({}, off, { [k]: k === "timerRunning" ? true : 7 }))()),
     "sittingInFlight answers true for each beat alone — the module clock, the Ready/resume beat (where a teardown would save the record without its checkpoint), module-over, the break — and false with all four off");
-  const breakWorld = src => {
+  /* expire: let the ten minutes run out first (the interval clears itself
+     at 0 and the student stays on "Resume Testing Now") */
+  const breakWorld = (src, expire) => {
     const timers = {}; let next = 40;
     const handlers = {};
     const node = id => ({ id, textContent: "", classList: { add(){}, remove(){} }, addEventListener: (t, fn) => { handlers[id + ":" + t] = fn; } });
@@ -1127,12 +1141,26 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     new Function(...names, src.slice(at, end) + "\nreturn showBreak;")(...names.map(n => deps[n]))();
     const sitting = new Function("state", extractFn(src, "sittingInFlight") + "\nreturn sittingInFlight;")(state);
     const atBreak = sitting();
+    let expired = null;
+    if(expire){
+      const id = state.breakInterval;
+      for(let i = 0; i < 700 && timers[id]; i++) timers[id]();
+      expired = { inFlight: sitting(), ticking: Object.keys(timers).length, remaining: state.breakRemaining };
+    }
     handlers["brkResumeBtn:click"]();
-    return { atBreak, afterResume: sitting(), live: Object.keys(timers).length };
+    return { atBreak, expired, afterResume: sitting(), live: Object.keys(timers).length };
   };
   const bw = breakWorld(appSrc);
   check(bw.atBreak === true && bw.afterResume === false && bw.live === 0,
     "the break counts as in flight while it is on screen, and Resume Testing leaves nothing behind: a full-length sitting that took the break does not lock the tutor out until a reload", JSON.stringify(bw));
+  const bx = breakWorld(appSrc, true);
+  check(bx.atBreak === true && bx.expired && bx.expired.inFlight === true && bx.expired.ticking === 0 && bx.expired.remaining === 0
+    && bx.afterResume === false && bx.live === 0,
+    "a break whose ten minutes ran out still counts as in flight (the student is on \"Resume Testing Now\", the countdown stopped) until Resume Testing, which then leaves nothing behind", JSON.stringify(bx));
+  const expiryNulls = appSrc.replace("        clearInterval(state.breakInterval);\n        el(\"brkTimer\").classList.add(\"hidden\");",
+    "        clearInterval(state.breakInterval); state.breakInterval = null;\n        el(\"brkTimer\").classList.add(\"hidden\");");
+  control(expiryNulls !== appSrc && breakWorld(expiryNulls, true).expired.inFlight === false,
+    "if the countdown's own stop also cleared the field, a student still on \"Resume Testing Now\" would read as not in flight — the probe sees it");
   const keepId = appSrc.replace("    clearInterval(state.breakInterval); state.breakInterval = null;\n    beginModule(state.moduleIndex);", "    clearInterval(state.breakInterval);\n    beginModule(state.moduleIndex);");
   control(keepId !== appSrc && breakWorld(keepId).afterResume === true, "with the dead interval id left in state, the finished break still reads as in flight — the probe sees it");
 
@@ -1176,11 +1204,17 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     "Back to home (submitted)": src => "return async ()=>{" + handlerOf(src, 'el("subHomeBtn").addEventListener("click", async ()=>{') + "}",
     "Back to home (set done)": src => "return async ()=>{" + handlerOf(src, 'el("setDoneHomeBtn").addEventListener("click", async ()=>{') + "}"
   };
-  const runCaller = async (src, which, endMidway) => {
+  /* duringSave: a deletion landing arrives while Save and Exit's own save
+     runs — it retires the generation (both landings do, before they paint)
+     and suspend() reports the abandoned sitting as exited ("ok"), or the
+     exit was refused ("refused") */
+  const runCaller = async (src, which, endMidway, duringSave) => {
     const calls = [];
     const state = { sessionGen: 1, userName: "AS-VWPRF234", tombstoned: {}, pastAttempts: [], currentTest: { testId: "t" }, reviewMode: null, lastWasProctored: true };
-    const Attempts = { suspend: async () => true, positionBlob: () => ({}),
+    const Attempts = { positionBlob: () => ({}),
+      suspend: async () => { if(duringSave){ state.sessionGen++; calls.push("landing"); } return duringSave !== "refused"; },
       loadStudentRecords: async () => {
+        calls.push("read");
         if(endMidway){ state.sessionGen++; calls.push("ended-elsewhere"); return "deleted"; }
         return { live: [], tombstones: [] };
       } };
@@ -1189,7 +1223,8 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     const noop = () => {};
     const deps = Object.assign({}, base, { refreshStudentState: rss, renderHome: () => calls.push("renderHome"), showOnly: id => calls.push("show:" + id),
       clearInterval: noop, closeDirections: noop, closeQnav: noop, hideHlPopup: noop, closeCalc: noop, closeRef: noop, hide: noop,
-      setLineReader: noop, closeMoreMenu: noop, startTimer: noop, renderTest: noop, show: noop });
+      setLineReader: noop, closeMoreMenu: noop, startTimer: () => calls.push("startTimer"), renderTest: () => calls.push("renderTest"),
+      show: id => calls.push("show:" + id) });
     const names = Object.keys(deps);
     await new Function(...names, CALLERS[which](src))(...names.map(n => deps[n]))();
     return calls;
@@ -1204,6 +1239,18 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
       which + ": a session that ended while its read ran keeps whatever landing ended it — no home painted over a deletion screen (and with nothing ended it still goes home, unchanged)", over.join(">"));
     control(paintsHome(await runCaller(oldFence, which, true)), which + ": with the fence answering false (\"carry on\") the caller paints home over the landing — the probe sees it");
   }
+  /* Save and Exit's OWN await: the landing arrives during the save itself,
+     before the refresh has captured anything */
+  const paintsOver = c => paintsHome(c) || c.some(x => /^read$|^startTimer$|^renderTest$|^show:/.test(x));
+  for(const how of ["ok", "refused"]){
+    const c = await runCaller(appSrc, "Save and Exit", false, how);
+    check(c.join(">") === "landing", "Save and Exit: a deletion landing during the save itself (suspend " + (how === "ok" ? "reporting the abandoned sitting as exited" : "refusing the exit") + ") is left on screen — no refresh, no home, no clock restarted, no save-failed modal over it", c.join(">"));
+  }
+  const SAVE_FENCE = "    if(gen !== state.sessionGen) return;          // a deletion landing took the screen meanwhile\n";
+  const noSaveFence = appSrc.replace(SAVE_FENCE, "");
+  control(appSrc.split(SAVE_FENCE).length === 2 && paintsOver(await runCaller(noSaveFence, "Save and Exit", false, "ok"))
+    && paintsOver(await runCaller(noSaveFence, "Save and Exit", false, "refused")),
+    "Save and Exit without its own fence paints home (or restarts the clock under the save-failed modal) over the landing — the probe sees it");
 
   /* boot answers a false restore with sign-in only if the session is still its own */
   const boot = extractFn(appSrc, "boot");
