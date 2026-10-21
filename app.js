@@ -121,15 +121,27 @@
      the student identity from memory, and retires the session generation so
      a student load still in flight from boot lands nowhere. Nothing recorded
      on this device is touched.
-     It also stops a sitting already RUNNING behind the sign-in form — a
-     boot-time crash-resume that landed behind the tutor sign-in dialog on a
-     slow connection — exactly as a deletion verdict tears one down: clocks
-     off (a countdown left running would submit the student's module on the
-     tutor's screen), chrome reset, and the recorder let go after draining its
-     last save (the student's own pending write, which a tab-hide would have
-     made anyway; the checkpoint stays, so the student resumes later). With
-     nothing running, every step here is a no-op. Async: callers await it
-     before the dashboard opens. */
+     A sitting still running or starting never gets here (both entries refuse
+     first: sittingInFlight). What can: a sitting that FINISHED, or was backed
+     out of at the Ready screen, earlier on this page — its recorder stays
+     attached to `state`, so it is let go here after draining any save it
+     still owes (that student's own write, which a tab-hide would make
+     anyway), as a deletion verdict does, before any dashboard surface (the
+     test viewer included) puts its own content into `state`. Clocks and
+     chrome are reset with it; with nothing attached every step is a no-op.
+     Async: callers await it before the dashboard opens. */
+  /* A sitting running or about to (re)start on this page — a module clock,
+     the Ready / resume beat, the module-over beat, the break. Reachable at
+     tutor sign-in only when a boot-time crash-resume landed behind the tutor
+     dialog on a slow connection. The tutor does not take the device over it:
+     tearing it down mid-resume would save the record without its checkpoint
+     (Attempts.resume consumed it and beginModule has not written the next),
+     and the student could never resume. It finishes, or a reload resumes it
+     for its student; then the tutor signs in. */
+  const SITTING_IN_FLIGHT_MSG = "A test is running on this device. Let it finish (or reload the page, which resumes it for its student) before signing in as the tutor.";
+  function sittingInFlight(){
+    return !!(state.timerRunning || state.readyTimer || state.moduleOverTimer || state.breakInterval);
+  }
   async function enterTutorSession(){
     state.sessionGen++;
     try{ if(localStorage.getItem(SESSION_KEY) !== null) forgetSession(); }catch(e){}
@@ -472,6 +484,11 @@
         return;
       }
     } else if(v.toLowerCase() === "acestem-admin"){   // tutor dashboard — never records (spec §4)
+      if(sittingInFlight()){
+        el("signinError").textContent = SITTING_IN_FLIGHT_MSG;
+        el("signinError").classList.remove("hidden");
+        return;
+      }
       el("nameInput").value = "";
       el("signinError").classList.add("hidden");
       await enterTutorSession();
@@ -488,6 +505,11 @@
       return;
     }
     el("nameInput").value = code;
+    /* a typed code supersedes a boot-time restore still in flight (a
+       remembered code on a slow connection): that restore lands nowhere, so
+       it can neither paint its home or sitting over this one nor end this
+       session with its own deletion verdict */
+    state.sessionGen++;
     await signInWithCode(code);
   }
 
@@ -879,7 +901,11 @@
     show("tutorAuthModal");
     el(prefillEmail ? "tutorPassword" : "tutorEmail").focus();
   }
-  function closeTutorAuth(){ hide("tutorAuthModal"); }
+  /* every Cancel / close retires the sign-in request in flight; the Sign in
+     button stays disabled until that request settles, even across a reopen,
+     so two requests never overlap */
+  let tutorAuthAttempt = 0;
+  function closeTutorAuth(){ tutorAuthAttempt++; hide("tutorAuthModal"); }
   el("tutorAuthClose").addEventListener("click", closeTutorAuth);
   el("tutorAuthCancel").addEventListener("click", closeTutorAuth);
   el("tutorPassword").addEventListener("keydown", e=>{ if(e.key === "Enter") el("tutorAuthGo").click(); });
@@ -888,13 +914,23 @@
     const pw = el("tutorPassword").value;
     if(!email || !pw){ el("tutorPassword").focus(); return; }
     el("tutorAuthGo").disabled = true;
+    const attempt = tutorAuthAttempt;
     try{
       await AttemptStore.signInTutor(email, pw);
       el("tutorPassword").value = "";           // never keep the password around
-      /* Cancelled (or closed) while the request was in flight: by the time it
-         answers the page may be someone else's — a student who signed in
-         meanwhile — so a late answer opens nothing and keeps no session. */
-      if(el("tutorAuthModal").classList.contains("hidden")){ AttemptStore.signOutTutor(); return; }
+      /* Cancelled (or closed) while the request was in flight — reopening the
+         dialog does not revive it: by the time it answers the page may be
+         someone else's (a student who signed in meanwhile), so a late answer
+         opens nothing and keeps no session. */
+      if(attempt !== tutorAuthAttempt){ AttemptStore.signOutTutor(); return; }
+      /* a student's sitting running behind this dialog: the tutor does not
+         take the device over it (see sittingInFlight) */
+      if(sittingInFlight()){
+        AttemptStore.signOutTutor();
+        el("tutorAuthError").textContent = SITTING_IN_FLIGHT_MSG;
+        el("tutorAuthError").classList.remove("hidden");
+        return;
+      }
       closeTutorAuth();
       await enterTutorSession();
       if(window.Dashboard) Dashboard.open(showOnly);
@@ -2044,7 +2080,13 @@
      (endDeletedSession: sign-in screen + message), and the caller must NOT
      paint another screen over it. Every caller checks for "deleted" first. */
   async function refreshStudentState(code){
+    /* the session this read belongs to: if it ended meanwhile (a tutor took
+       the device, a typed sign-in replaced a boot restore, a sign-out), the
+       answer lands nowhere — no student state refilled under someone else,
+       no deletion landing painted over their screen */
+    const gen = state.sessionGen;
     const res = await Attempts.loadStudentRecords(code);
+    if(gen !== state.sessionGen) return false;
     if(res === "deleted"){
       await endDeletedSession();
       return "deleted";
@@ -3996,19 +4038,21 @@
   function updateHeaderTools(mod){
     const tools = el("thTools");
     const review = !!state.reviewMode;
+    const viewer = review && state.reviewMode.viewer === true;
     if(mod.section === "Math"){
       // calculator + reference are read-only tools — they stay in review
       tools.innerHTML = `
         <button class="th-tool" id="toolCalc"><span class="ticon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="2.2"/><rect x="7.5" y="5" width="9" height="3.6" rx="0.8"/><path d="M8.5 12.5h0M12 12.5h0M15.5 12.5h0M8.5 15.5h0M12 15.5h0M15.5 15.5h0M8.5 18.5h0M12 18.5h0"/><path d="M15.5 17.5v2" stroke-width="1.7"/></svg></span>Calculator</button>
         <button class="th-tool" id="toolRef"><span class="ticon" style="font-family:var(--serif);font-style:italic;">x²</span>Reference</button>` +
         MORE_MENU_HTML;
-      el("toolCalc").addEventListener("click", toggleCalc);
+      if(!viewer) el("toolCalc").addEventListener("click", toggleCalc);
       el("toolRef").addEventListener("click", toggleRef);
       wireMoreMenu();
     } else {
       // the Highlights & Notes toggle exists to CREATE annotations — in
-      // review they replay read-only, so the toggle doesn't render at all
-      tools.innerHTML = (review ? "" : `
+      // review they replay read-only, so the toggle doesn't render at all;
+      // the tutor test viewer shows it as a sitting does, never wired (inert)
+      tools.innerHTML = (review && !viewer ? "" : `
         <span class="hl-mode-wrap">
           <button class="th-tool" id="hlModeBtn" title="Toggle highlight mode"><span class="ticon">✎</span><span class="tlabel">Highlights &amp; Notes</span></button>
           <div class="hl-tip hidden" id="hlTip"><b>Highlight mode on:</b> Select text to create a highlight automatically.</div>
@@ -4020,15 +4064,16 @@
     // review has nothing to save and no exit-to-home — Back goes to Score
     // Details instead. Line Reader and the bug report stay useful.
     if(review) el("miSaveExit").classList.add("hidden");
-    /* The tutor test viewer writes nothing, so the bug report goes too (it
-       stores a bug: row and queues it). So does the Calculator: Desmos is
-       third-party code running in this origin that nothing here vouches for
-       on writes, and its expressions outlive the viewer into the next sitting
-       on this page. Reference, Directions and Line Reader are read-only. */
-    if(review && state.reviewMode.viewer === true){
+    /* The tutor test viewer writes nothing, so the bug report goes (it
+       stores a bug: row and queues it). The Calculator and Highlights &
+       Notes render as a student sees them but are never wired: Desmos is
+       third-party code in this origin that nothing here vouches for on
+       writes, and its expressions would outlive the viewer into the next
+       sitting on this page; a replay has nothing to highlight. Reference,
+       Directions and Line Reader are read-only and work. */
+    if(viewer){
       el("miBugReport").classList.add("hidden");
-      const calcBtn = el("toolCalc");
-      if(calcBtn) calcBtn.remove();
+      ["toolCalc", "hlModeBtn"].forEach(id => { const b = el(id); if(b) b.title = "Not available in the test viewer"; });
     }
     el("tBody").classList.toggle("hl-mode", state.hlMode && mod.section !== "Math" && !review);
   }

@@ -217,6 +217,11 @@
     await until(() => visible("screen-dashboard"), 15000, "the dashboard");
     await until(() => !/Loading/.test($("dashStatus").textContent), 15000, "the dashboard's load");
     await sleep(200);
+    /* the tutor's entry takes the device: the student's recorder is let go
+       (after its last save — setup, outside the window) before any viewer
+       exists; the viewer's own detach is the second layer behind it */
+    if(recorderLeg) check("The tutor's entry let go of the recorder the student's sitting left attached (before the viewer can open)",
+      Attempts.isRecording() === false);
 
     /* ======================= THE WINDOW ======================= */
     const before = snapshot();
@@ -264,7 +269,9 @@
     check("…in testId order", ids.join(",") === ids.slice().sort().join(","));
     const blank = Array.from(rows).some(tr => Array.from(tr.children).some(td => td.textContent.trim() === "" || /undefined|null/.test(td.textContent)));
     check("…with no blank, undefined or null cell (a missing field is an em dash)", !blank);
-    await until(() => !Array.from(document.querySelectorAll("#dashBody [data-tv-qpm]")).some(td => td.textContent === "…"), 120000, "the per-module counts");
+    /* the split build fetches every form (~13 MB) one at a time to count it;
+       a loaded machine or a shared local server can take minutes */
+    await until(() => !Array.from(document.querySelectorAll("#dashBody [data-tv-qpm]")).some(td => td.textContent === "…"), 300000, "the per-module counts");
     const qpmBad = [];
     const qpmCells = Array.from(document.querySelectorAll("#dashBody [data-tv-qpm]"));
     qpmCells.forEach(td => {
@@ -367,9 +374,13 @@
         $("tvMods").children[mi].click();
         await sleep(300);                                           // navigate()'s lock
         if(!$("tvMods").children[mi].classList.contains("on")) qfail(W + " m" + mi, "module button state");
-        /* tools: no Calculator, no bug report, no Save and Exit, no highlighter */
-        if($("toolCalc") || $("hlModeBtn") || visible("miBugReport") || visible("miSaveExit") || !$("miLineReader"))
-          qfail(W + " m" + mi, "header tools (calculator / highlighter / bug report / save)");
+        /* tools: a sitting's own (Calculator for Math, Highlights & Notes for
+           RW) shown and inert; Report a bug and Save and Exit hidden */
+        const isMathMod = mod.section === "Math";
+        if((isMathMod ? (!$("toolCalc") || $("hlModeBtn")) : (!$("hlModeBtn") || $("toolCalc"))) || visible("miBugReport") || visible("miSaveExit") || !$("miLineReader"))
+          qfail(W + " m" + mi, "header tools (a sitting's Calculator / Highlights & Notes shown; Report a bug and Save and Exit hidden)");
+        if($("toolCalc")){ $("toolCalc").click(); if(visible("calcPanel")) qfail(W + " m" + mi, "the Calculator opened (Desmos)"); }
+        if($("hlModeBtn")){ $("hlModeBtn").click(); if($("tBody").classList.contains("hl-mode")) qfail(W + " m" + mi, "highlight mode turned on"); }
         $("qnavBtn").click();
         const grid = $("qnavGrid");
         if(grid.children.length !== mod.questions.length || grid.querySelector(".rv-ok, .rv-bad, .rv-omit, .rv-nokey")
@@ -395,7 +406,7 @@
           $("flagBtn").click();
           if($("abcToggle")) $("abcToggle").click();
           if($("kpToggle")) $("kpToggle").click();
-          if(pane().querySelector(".choice.selected, .q-flag.on, .abc-toggle.on, .choices.elim-mode, #keypad")) qfail(where, "a click selected, flagged, crossed out or opened the keypad");
+          if(pane().querySelector(".choice.selected, .choice.rv-wrong, .rv-mark.you, .q-flag.on, .abc-toggle.on, .choices.elim-mode, #keypad")) qfail(where, "a click selected, flagged, crossed out or opened the keypad");
           $("tvShowAnswers").click();
           assertQuestion(where + " (off)", test, mod, q, qi, false);
           if(boxOf("tBody") + "|" + boxOf("paneRight") !== boxOn) qfail(where, "the toggle moved the pane");
@@ -495,7 +506,7 @@
     forceFlushes();
     window.dispatchEvent(new Event("online"));
     await sleep(400);
-    if(recorderLeg) check("The recorder the student left attached was let go when the viewer opened (no flush can rebuild that record now)",
+    if(recorderLeg) check("No recorder is attached at the end of the window (no flush can rebuild that student's record from the viewer's state)",
       Attempts.isRecording() === false);
 
     NET.phase = "after";

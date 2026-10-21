@@ -138,10 +138,11 @@ memory when they are done (`restoreMemory`), because Past cards and the Score
 Calculator read what is loaded and a student may sit next on that page;
 `Attempts.detach()` is awaited before any state change (a sitting earlier on
 the page can leave the recorder attached to `state`, and its tab-hide flush
-would rebuild that student's record from the viewer's empty answers); Report a
-bug and the Calculator are removed in the viewer (bug: writes; Desmos is
-unvouched third-party code whose expressions outlive the viewer), with a
-second-layer refusal in the bug send handler; exit is `showOnly
+would rebuild that student's record from the viewer's empty answers — the
+tutor's entry detaches it first, this is the second layer); Report a bug is
+hidden in the viewer (it writes), with a second-layer refusal in the bug send
+handler, and the Calculator is shown but never wired (Desmos is unvouched
+third-party code whose expressions would outlive the viewer); exit is `showOnly
 ("screen-dashboard")`, **never** `Dashboard.open` (its reload pulls and writes
 the mirror in remote mode). Tutor-only: the bridge `AppTestViewer.open`
 refuses unless `#screen-dashboard` is the screen showing and, on any
@@ -157,12 +158,19 @@ drops the student identity and bumps `sessionGen`, and `signInWithCode`
 bails after each of its awaits when the generation moved (boot then leaves
 the screen alone), so a boot-time restore the tutor overtakes lands nowhere
 and a reload from the dashboard or viewer lands on sign-in — never in that
-student's crash-resumed sitting. A sitting already RUNNING behind the sign-in
-form (a crash-resume that landed behind the tutor dialog on a slow
-connection) is stopped by the same entry, as a deletion verdict stops one:
-clocks off, recorder detached after its last save, checkpoint kept for the
-student. A tutor sign-in Cancelled while in flight opens nothing when it
-answers. (Trades, stated: a student remembered in ANOTHER tab on this device
+student's crash-resumed sitting. `refreshStudentState` has the same fence,
+and a TYPED student code also bumps `sessionGen`, so it supersedes a boot
+restore in flight. A sitting RUNNING or (re)starting on the page
+(`sittingInFlight`: module clock, the Ready/resume beat, module-over, break —
+reachable only when a crash-resume landed behind the tutor dialog) makes
+both tutor entries REFUSE with a message: tearing it down there would save
+the record mid-resume without its checkpoint (`Attempts.resume` consumed it;
+`beginModule` had not written the next) and the student could never resume.
+Otherwise the entry detaches a recorder a finished or backed-out sitting
+left attached (its last save drained) before any dashboard surface touches
+`state`. A tutor sign-in Cancelled while in flight opens nothing when it
+answers, even if the dialog was reopened (an attempt counter, not the
+dialog's visibility). (Trades, stated: a student remembered in ANOTHER tab on this device
 re-types their code after a reload, and their sitting then resumes as
 normal; and the memory restore is best-effort — a fetch that times out at
 20 s and lands later stays loaded, which changes only display: a Past card
@@ -178,9 +186,11 @@ queue and every request; remote with a stubbed network, local split build,
 single file; red against each target `node tests/viewer-proof-mutants.js`
 builds — that file says which check each one must turn red); the viewer's
 surfaces are in `tests/injection-proof.js`. In the viewer a sitting's own
-controls (Mark for Review, ABC, Show Keypad) render as a student sees them
-and are inert — review attaches no handler; only the key marks differ
-between Show answers on and off. Keep the test-bank's Stage-3
+controls (Mark for Review, ABC, Show Keypad, Calculator, Highlights & Notes)
+render as a student sees them and are inert — review attaches no question
+handler, and the two header tools are never wired (Desmos never loads);
+only the key marks differ between Show answers on and off. Report a bug is
+hidden (it writes). Keep the test-bank's Stage-3
 anchor `state.assignments = assigns;` appearing exactly once in app.js
 (build_stage3_preview.py replaces its first occurrence).
 

@@ -869,7 +869,9 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
   check(v.onKey && v.onRationale, "viewer, Show answers ON: the keyed choice alone is marked as review marks it (✓ Correct answer), rationale shown");
   check(v.offClean, "viewer, Show answers OFF: no key mark, no rationale — nothing a student would not see");
   check(v.noOmitted && v.noTime, "viewer: no \"You omitted this question.\" and no time (there was no sitting), ON or OFF");
-  check(v.parity, "viewer: the header is a sitting's — Mark for Review live-looking, the ABC toggle shown (inert: no handler is attached in review)");
+  check(v.parity, "viewer: the question header's markup is a sitting's — Mark for Review not greyed, the ABC toggle shown (that they are INERT is the browser proof's click probe, red against the `handlers` mutant)");
+  check(/function attachQuestionHandlers\(\)\{[\s\S]*?attachFigureHandlers\(q\);[\s\S]*?\n    if\(state\.reviewMode\) return;\n/.test(appSrc),
+    "attachQuestionHandlers still returns before wiring answers, flags, cross-outs and the keypad whenever reviewMode is set (the viewer included)");
   check(v.sprOn && v.sprOff, "viewer SPR: Show Keypad as a sitting shows it; with answers ON the key and its alternates beneath, no verdict; OFF nothing more");
   const rv = render(appSrc, "review", true, MCQ), lv = render(appSrc, "live", true, MCQ), rs = render(appSrc, "review", true, SPR);
   check(keyOn(rv) && has(rv, "rv-omitted") && has(rv, "rv-time") && /id="flagBtn" disabled/.test(rv) && !has(rv, "abcToggle") && has(rs, "rv-banner") && !has(rs, "kpToggle"),
@@ -892,29 +894,35 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
   /* updateHeaderTools, REAL, over a DOM whose innerHTML registers the ids it sets */
   const headerWorld = (src, mode, section) => {
     const reg = {};
+    const wired = [];
     const mk = id => {
       const cls = new Set();
-      const n = { id, _html: "", classList: { add: c => cls.add(c), remove: c => cls.delete(c), toggle: (c, on) => { (on === undefined ? !cls.has(c) : on) ? cls.add(c) : cls.delete(c); }, contains: c => cls.has(c) },
-        addEventListener(){}, remove(){ delete reg[id]; } };
+      const n = { id, _html: "", title: "", classList: { add: c => cls.add(c), remove: c => cls.delete(c), toggle: (c, on) => { (on === undefined ? !cls.has(c) : on) ? cls.add(c) : cls.delete(c); }, contains: c => cls.has(c) },
+        addEventListener(type){ wired.push(id + ":" + type); }, remove(){ delete reg[id]; } };
       Object.defineProperty(n, "innerHTML", { get(){ return n._html; }, set(h){ n._html = h; (String(h).match(/id="([^"]+)"/g) || []).forEach(m => { const k = m.slice(4, -1); reg[k] = mk(k); }); } });
       return n;
     };
     ["thTools", "tBody"].forEach(k => { reg[k] = mk(k); });
     const state = { hlMode: false, reviewMode: mode === "live" ? null : mode === "review" ? { record: {} } : { viewer: true } };
     const body = extractConst(src, "MORE_MENU_HTML") + "\n" + extractFn(src, "updateHeaderTools") + "\nreturn updateHeaderTools;";
-    new Function("el", "state", "wireMoreMenu", "wireHlModeBtn", "toggleCalc", "toggleRef", body)(id => reg[id], state, () => {}, () => {}, () => {}, () => {})({ section });
-    return { calc: !!reg.toolCalc, hl: !!reg.hlModeBtn, bugHidden: !!reg.miBugReport && reg.miBugReport.classList.contains("hidden"),
+    let hlWired = 0;
+    new Function("el", "state", "wireMoreMenu", "wireHlModeBtn", "toggleCalc", "toggleRef", body)(id => reg[id], state, () => {}, () => { hlWired++; }, () => {}, () => {})({ section });
+    return { calc: !!reg.toolCalc, calcWired: wired.indexOf("toolCalc:click") !== -1, hl: !!reg.hlModeBtn, hlWired: hlWired > 0,
+      bugHidden: !!reg.miBugReport && reg.miBugReport.classList.contains("hidden"),
       saveHidden: !!reg.miSaveExit && reg.miSaveExit.classList.contains("hidden"), lineReader: !!reg.miLineReader };
   };
   const hv = headerWorld(appSrc, "viewer", "Math"), hvr = headerWorld(appSrc, "viewer", "Reading and Writing");
-  check(!hv.calc && hv.bugHidden && hv.saveHidden && hv.lineReader && !hvr.hl && hvr.bugHidden,
-    "viewer header: no Calculator, no Highlights & Notes, Report a bug and Save and Exit hidden; Line Reader kept", JSON.stringify(hv));
-  const hr = headerWorld(appSrc, "review", "Math"), hl = headerWorld(appSrc, "live", "Math");
-  check(hr.calc && !hr.bugHidden && hr.saveHidden && hl.calc && !hl.bugHidden && !hl.saveHidden,
-    "(review and a live sitting keep their tools: Calculator and Report a bug; review hides only Save and Exit)");
-  const hdrMut = appSrc.replace("    if(review && state.reviewMode.viewer === true){\n      el(\"miBugReport\")", "    if(false && review && state.reviewMode.viewer === true){\n      el(\"miBugReport\")");
-  control(hdrMut !== appSrc && headerWorld(hdrMut, "viewer", "Math").calc && !headerWorld(hdrMut, "viewer", "Math").bugHidden,
-    "mutant (viewer header branch disabled) brings the Calculator and Report a bug back — the probe sees it");
+  check(hv.calc && !hv.calcWired && hvr.hl && !hvr.hlWired && hv.bugHidden && hv.saveHidden && hv.lineReader && hvr.bugHidden,
+    "viewer header: a sitting's tools as a student sees them — Calculator and Highlights & Notes shown but never wired (Desmos never loads); Report a bug and Save and Exit hidden; Line Reader kept",
+    JSON.stringify({ math: hv, rw: hvr }));
+  const hr = headerWorld(appSrc, "review", "Math"), hl = headerWorld(appSrc, "live", "Math"), hlr = headerWorld(appSrc, "live", "Reading and Writing");
+  check(hr.calc && hr.calcWired && !hr.bugHidden && hr.saveHidden && hl.calc && hl.calcWired && !hl.bugHidden && !hl.saveHidden && hlr.hl && hlr.hlWired
+    && !headerWorld(appSrc, "review", "Reading and Writing").hl,
+    "(review and a live sitting keep their tools, wired: Calculator and Report a bug; review hides only Save and Exit and Highlights & Notes)");
+  const calcMut = appSrc.replace("      if(!viewer) el(\"toolCalc\").addEventListener(\"click\", toggleCalc);", "      el(\"toolCalc\").addEventListener(\"click\", toggleCalc);");
+  control(calcMut !== appSrc && headerWorld(calcMut, "viewer", "Math").calcWired, "mutant (Calculator wired in the viewer) — the probe sees it");
+  const bugMut = appSrc.replace("      el(\"miBugReport\").classList.add(\"hidden\");\n      [\"toolCalc\"", "      [\"toolCalc\"");
+  control(bugMut !== appSrc && !headerWorld(bugMut, "viewer", "Math").bugHidden, "mutant (Report a bug left in the viewer) — the probe sees it");
 }
 
 /* ================= §8 a restore in flight when the tutor signs in ================= */
@@ -923,16 +931,21 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   /* signInWithCode, run for real: the tutor's entry (sessionGen bump) lands
      while it awaits — after the profile read, the assignments read, or the
      records read — and from then on the restore must land nowhere */
-  const runSignIn = async (src, bumpAt) => {
+  /* each fence is probed by what ONLY it prevents (the later fences would
+     otherwise mask its removal): after the profile read, the student's name
+     painted into the header/footer and the next read; after the assignments
+     read, that student's deletion landing (assignments answer "deleted");
+     after the records read, the remembered code */
+  const runSignIn = async (src, bumpAt, assignAnswer) => {
     const calls = [];
     const state = { sessionGen: 0, userName: "Student", displayName: null, tests: [{ testId: "t" }] };
-    const node = () => ({ textContent: "", classList: { add(){}, remove(){} } });
     const els = {};
-    const step = name => async () => { if(bumpAt === name) state.sessionGen++; calls.push(name); return name === "assign" ? [] : name === "refresh" ? true : null; };
+    const node = id => ({ set textContent(v){ calls.push("paint:" + id); }, get textContent(){ return ""; }, classList: { add(){}, remove(){} } });
+    const step = (name, answer) => async () => { if(bumpAt === name) state.sessionGen++; calls.push(name); return answer; };
     const deps = {
-      StudentCode: { valid: () => true }, el: id => els[id] || (els[id] = node()), state,
-      AttemptStore: { getProfile: step("profile"), clearRefused: () => calls.push("clearRefused") },
-      Attempts: { assignments: step("assign") }, refreshStudentState: step("refresh"),
+      StudentCode: { valid: () => true }, el: id => els[id] || (els[id] = node(id)), state,
+      AttemptStore: { getProfile: step("profile", null), clearRefused: () => calls.push("clearRefused") },
+      Attempts: { assignments: step("assign", assignAnswer === undefined ? [] : assignAnswer) }, refreshStudentState: step("refresh", true),
       displayLabel: () => "X", firstName: () => "X", manifestLoaded: () => true,
       showOnly: id => calls.push("show:" + id), endDeletedSession: async () => calls.push("endDeleted"),
       rememberSession: () => calls.push("REMEMBER"), crashResumeCandidate: () => null,
@@ -943,21 +956,32 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     const ok = await fn("AS-VWPRF234");
     return { ok, calls, state };
   };
+  const paintsName = c => /^paint:(homeUserName|homeAvatar|welcomeMsg|tfName)$/.test(c);
   let r = await runSignIn(appSrc, null);
-  check(r.ok === true && r.calls.indexOf("REMEMBER") !== -1 && r.calls.indexOf("show:screen-home") !== -1,
-    "(an uninterrupted restore signs the student in, remembers the code and shows home — unchanged)", r.calls.join(" > "));
-  for(const at of ["profile", "assign", "refresh"]){
-    r = await runSignIn(appSrc, at);
-    check(r.ok === false && r.calls.indexOf("REMEMBER") === -1 && !r.calls.some(c => /^show:|renderHome|RESUME|clearRefused/.test(c)),
-      "a tutor entering during the " + at + " read: the restore remembers nothing, paints nothing, resumes nothing", r.calls.join(" > "));
-  }
-  const unfencedSignIn = appSrc.replace(/(    try\{ prof = await AttemptStore\.getProfile\(code\); \}catch\(e\)\{\}\r?\n)    if\(gen !== state\.sessionGen\) return false;\r?\n/, "$1")
-    .replace(/(    const assigns = await Attempts\.assignments\(code\);\r?\n)    if\(gen !== state\.sessionGen\) return false;\r?\n/, "$1")
-    .replace(/(    if\(refreshed === "deleted"\) return false;[^\n]*\n)    if\(gen !== state\.sessionGen\) return false;\r?\n/, "$1");
-  control(unfencedSignIn !== appSrc && (unfencedSignIn.match(/if\(gen !== state\.sessionGen\) return false;/g) || []).length < (appSrc.match(/if\(gen !== state\.sessionGen\) return false;/g) || []).length - 2,
-    "the three sign-in fences are where this suite expects them");
-  r = await runSignIn(unfencedSignIn, "profile");
-  control(r.calls.indexOf("REMEMBER") !== -1, "without them the overtaken restore re-remembers the code and paints home over the tutor — the probe sees it");
+  check(r.ok === true && r.calls.indexOf("REMEMBER") !== -1 && r.calls.indexOf("show:screen-home") !== -1 && r.calls.some(paintsName),
+    "(an uninterrupted restore signs the student in, paints their name, remembers the code and shows home — unchanged)", r.calls.join(" > "));
+  r = await runSignIn(appSrc, "profile");
+  check(r.ok === false && !r.calls.some(paintsName) && r.calls.indexOf("assign") === -1,
+    "overtaken during the profile read: no student name painted into the tutor's page, no further reads", r.calls.join(" > "));
+  r = await runSignIn(appSrc, "assign", "deleted");
+  check(r.ok === false && r.calls.indexOf("endDeleted") === -1 && !r.calls.some(c => /^show:/.test(c)),
+    "overtaken during the assignments read: even a \"deleted\" answer lands no deletion screen on the tutor", r.calls.join(" > "));
+  r = await runSignIn(appSrc, "refresh");
+  check(r.ok === false && r.calls.indexOf("REMEMBER") === -1 && !r.calls.some(c => /^show:|renderHome|RESUME|clearRefused/.test(c)),
+    "overtaken during the records read: the restore remembers nothing, paints nothing, resumes nothing", r.calls.join(" > "));
+  const FENCES = {
+    profile: /(    try\{ prof = await AttemptStore\.getProfile\(code\); \}catch\(e\)\{\}\n)    if\(gen !== state\.sessionGen\) return false;\n/,
+    assign: /(    const assigns = await Attempts\.assignments\(code\);\n)    if\(gen !== state\.sessionGen\) return false;\n/,
+    refresh: /(    if\(refreshed === "deleted"\) return false;[^\n]*\n)    if\(gen !== state\.sessionGen\) return false;\n/
+  };
+  const without = name => appSrc.replace(FENCES[name], "$1");
+  control(Object.keys(FENCES).every(n => without(n) !== appSrc), "each of the three sign-in fences is where this suite expects it");
+  r = await runSignIn(without("profile"), "profile");
+  control(r.calls.some(paintsName), "without the profile fence the overtaken restore paints the student's name over the tutor — the probe sees it");
+  r = await runSignIn(without("assign"), "assign", "deleted");
+  control(r.calls.indexOf("endDeleted") !== -1, "without the assignments fence an overtaken \"deleted\" answer lands its deletion screen — the probe sees it");
+  r = await runSignIn(without("refresh"), "refresh");
+  control(r.calls.indexOf("REMEMBER") !== -1, "without the records fence the overtaken restore re-remembers the code and paints home — the probe sees it");
 
   /* a tutor sign-in cancelled while its request is in flight opens nothing
      when the answer arrives: the page may be a student's by then */
@@ -969,34 +993,76 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     while(depth > 0 && i < src.length){ if(src[i] === "{") depth++; else if(src[i] === "}") depth--; i++; }
     return src.slice(start, i - 1);
   };
-  const runAuth = async (src, cancelMidway) => {
+  /* opts.cancel: the tutor presses Cancel while the request is in flight;
+     opts.reopen: and opens the dialog again before it answers;
+     opts.sitting: a student's sitting is running behind the dialog */
+  const runAuth = async (src, opts) => {
+    opts = opts || {};
     const calls = [];
-    const hidden = { tutorAuthModal: false };
     const node = id => ({ id, value: id === "tutorEmail" ? "tutor@example.test" : id === "tutorPassword" ? "pw" : "",
       disabled: false, textContent: "", focus(){},
-      classList: { contains: c => c === "hidden" && !!hidden[id], add(){}, remove(){} } });
+      classList: { contains: () => false, add(){}, remove: c => { if(id === "tutorAuthError" && c === "hidden") calls.push("ERROR-SHOWN"); } } });
     const els = {};
     const el = id => els[id] || (els[id] = node(id));
+    const hooks = {};
     const AttemptStore = {
-      signInTutor: async () => { calls.push("signIn"); if(cancelMidway) hidden.tutorAuthModal = true; },
+      signInTutor: async () => { calls.push("signIn"); if(opts.cancel) hooks.cancel(); },
       signOutTutor: () => calls.push("signOut")
     };
-    const deps = { el, AttemptStore, closeTutorAuth: () => calls.push("close"), enterTutorSession: () => calls.push("ENTER"),
-      Dashboard: { open: () => calls.push("DASHBOARD") }, window: { Dashboard: { open: () => calls.push("DASHBOARD") } }, showOnly: () => {} };
+    const deps = { el, AttemptStore, enterTutorSession: () => calls.push("ENTER"), hide(){}, hooks,
+      Dashboard: { open: () => calls.push("DASHBOARD") }, window: { Dashboard: { open: () => calls.push("DASHBOARD") } }, showOnly: () => {},
+      sittingInFlight: () => !!opts.sitting, SITTING_IN_FLIGHT_MSG: "running" };
     const names = Object.keys(deps);
-    await new Function(...names, "return async ()=>{" + authHandler(src) + "}")(...names.map(n => deps[n]))();
+    const body = "let tutorAuthAttempt = 0;\n" + extractFn(src, "closeTutorAuth") +
+      "\nhooks.cancel = () => closeTutorAuth();\nreturn async ()=>{" + authHandler(src) + "}";
+    await new Function(...names, body)(...names.map(n => deps[n]))();
     return calls;
   };
-  let ac = await runAuth(appSrc, false);
-  check(ac.join(">") === "signIn>close>ENTER>DASHBOARD", "(a tutor sign-in that is not cancelled enters and opens the dashboard — unchanged)", ac.join(">"));
-  ac = await runAuth(appSrc, true);
+  let ac = await runAuth(appSrc, {});
+  check(ac.join(">") === "signIn>ENTER>DASHBOARD", "(a tutor sign-in that is not cancelled enters and opens the dashboard — unchanged)", ac.join(">"));
+  ac = await runAuth(appSrc, { cancel: true });
   check(ac.indexOf("DASHBOARD") === -1 && ac.indexOf("ENTER") === -1 && ac.indexOf("signOut") !== -1,
-    "a tutor sign-in Cancelled while in flight opens no dashboard (and so no viewer) for whoever is on the page when it answers, and keeps no token", ac.join(">"));
-  const noCancel = appSrc.replace('      if(el("tutorAuthModal").classList.contains("hidden")){ AttemptStore.signOutTutor(); return; }\n', "")
-    .replace('      if(el("tutorAuthModal").classList.contains("hidden")){ AttemptStore.signOutTutor(); return; }\r\n', "");
+    "a tutor sign-in Cancelled while in flight opens no dashboard (and so no viewer) for whoever is on the page when it answers, and keeps no token — reopening the dialog meanwhile does not revive it", ac.join(">"));
+  ac = await runAuth(appSrc, { sitting: true });
+  check(ac.indexOf("DASHBOARD") === -1 && ac.indexOf("ENTER") === -1 && ac.indexOf("signOut") !== -1 && ac.indexOf("ERROR-SHOWN") !== -1,
+    "a student's sitting running behind the dialog: the tutor's sign-in is refused with a message — nothing torn down, no token kept", ac.join(">"));
+  const noCancel = appSrc.replace("      if(attempt !== tutorAuthAttempt){ AttemptStore.signOutTutor(); return; }\n", "");
   control(noCancel !== appSrc, "the cancelled-sign-in line is where this suite expects it");
-  ac = await runAuth(noCancel, true);
+  ac = await runAuth(noCancel, { cancel: true });
   control(ac.indexOf("DASHBOARD") !== -1, "without it a cancelled sign-in's late answer opens the dashboard — the probe sees it");
+  const noRefuse = appSrc.replace("      if(sittingInFlight()){\n        AttemptStore.signOutTutor();", "      if(false){\n        AttemptStore.signOutTutor();");
+  control(noRefuse !== appSrc, "the sitting-in-flight refusal is where this suite expects it");
+  ac = await runAuth(noRefuse, { sitting: true });
+  control(ac.indexOf("ENTER") !== -1, "without it the tutor's entry goes ahead over a running sitting — the probe sees it");
+  /* the acestem-admin route refuses the same way, and a typed code retires
+     a boot restore still in flight */
+  const doSign = extractFn(appSrc, "doSignin");
+  check(/v\.toLowerCase\(\) === "acestem-admin"\)\{[^\n]*\n\s*if\(sittingInFlight\(\)\)\{\s*el\("signinError"\)\.textContent = SITTING_IN_FLIGHT_MSG;/.test(doSign)
+    && /state\.sessionGen\+\+;\s*await signInWithCode\(code\);/.test(doSign),
+    "acestem-admin refuses over a running sitting; a typed student code supersedes a boot restore in flight (sessionGen++ before it signs in)");
+  check(/return !!\(state\.timerRunning \|\| state\.readyTimer \|\| state\.moduleOverTimer \|\| state\.breakInterval\);/.test(extractFn(appSrc, "sittingInFlight")),
+    "sittingInFlight covers the module clock, the Ready/resume beat (where a teardown would save the record without its checkpoint), module-over and the break");
+
+  /* refreshStudentState: an answer for a session that has ended lands nowhere */
+  const runRefresh = async (src, endMidway, payload) => {
+    const ended = [];
+    const state = { sessionGen: 1, tombstoned: { keep: 1 }, pastAttempts: ["keep"] };
+    const body = "async " + extractFn(src, "refreshStudentState") + "\nreturn refreshStudentState;";
+    const fn = new Function("state", "Attempts", "endDeletedSession", "buildAssignmentIndex", "byStartDesc", body)(state,
+      { loadStudentRecords: async () => { if(endMidway) state.sessionGen++; return payload; } }, async () => ended.push(1), () => {}, () => 0);
+    const r = await fn("AS-VWPRF234");
+    return { r, ended, state };
+  };
+  let rr = await runRefresh(appSrc, true, "deleted");
+  check(rr.r === false && rr.ended.length === 0, "an overtaken restore's \"deleted\" answer paints no deletion landing over the tutor (the session that asked is gone)");
+  rr = await runRefresh(appSrc, true, { live: [{ status: "completed" }], tombstones: [] });
+  check(rr.r === false && rr.state.pastAttempts[0] === "keep", "...and its records refill no student state under the tutor");
+  rr = await runRefresh(appSrc, false, "deleted");
+  check(rr.r === "deleted" && rr.ended.length === 1, "(an answer for the live session still ends a deleted student's session — unchanged)");
+  const noRF = appSrc.replace("    const res = await Attempts.loadStudentRecords(code);\n    if(gen !== state.sessionGen) return false;\n", "    const res = await Attempts.loadStudentRecords(code);\n");
+  control(noRF !== appSrc, "the refreshStudentState fence is where this suite expects it");
+  rr = await runRefresh(noRF, true, "deleted");
+  control(rr.ended.length === 1, "without it the overtaken \"deleted\" answer ends the tutor's session — the probe sees it");
 
   /* boot answers a false restore with sign-in only if the session is still its own */
   const boot = extractFn(appSrc, "boot");

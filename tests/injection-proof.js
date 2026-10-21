@@ -1703,6 +1703,13 @@
         open1.click();
         await until(() => !$("screen-test").classList.contains("hidden"), 8000);
         results.push(audit("Test viewer: strip, footer and pane (hostile skill, version, form name)", $("screen-test")));
+        /* the hostile question id is the first RW question: go there, so the
+           strip actually prints it (the pick opened the form at ma1-q1) */
+        $("tvMods").children[0].click();
+        await wait(400);
+        results.push({ surface: "Test viewer strip prints a hostile question id as text",
+          pass: $("tvId").textContent.indexOf("PWN") !== -1 && !$("tvId").querySelector("*"), note: $("tvId").textContent.slice(0, 40) });
+        results.push(audit("Test viewer strip (hostile question id)", $("screen-test")));
         const sprQ = tvTests[0].modules.map(m => m.questions.find(q => q.type === "spr")).find(Boolean);
         if(sprQ){
           $("tvGoto").value = sprQ.id;

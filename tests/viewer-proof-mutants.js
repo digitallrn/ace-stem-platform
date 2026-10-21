@@ -15,10 +15,12 @@
      local      ?devstorage=1  (nothing — this is the real build)
      cache      ?devstorage=1  "ZERO storage write calls" (the viewer loads
                                through the sitting's caching loadTest)
-     nodetach   ?devstorage=1  "The recorder ... was let go", "ZERO storage
-                               write calls", "byte-identical" (the student's
-                               record rebuilt from the viewer's state by the
-                               forced tab-hide)
+     nodetach   ?devstorage=1  "...let go before the viewer opened", "ZERO
+                               storage write calls", "byte-identical" (the
+                               student's record rebuilt from the viewer's
+                               state by the forced tab-hide). Both detaches
+                               are removed — the tutor's entry and the
+                               viewer's open — since either alone holds.
      dashopen   (none: remote) "ZERO storage write calls", "not one server
                                call" (leaving reloads the dashboard: a pull)
      bugreport  ?devstorage=1  the walk: "header tools" (Report a bug shown)
@@ -26,6 +28,9 @@
      authopen   ?devstorage=1  "Opening is authorised exactly when ..." (a
                                server deployment's password-free local
                                dashboard opens the viewer)
+     handlers   ?devstorage=1  the walk: "a click selected, flagged, ..." (the
+                               sitting's controls the viewer shows get their
+                               handlers — the inertness probe must see it)
      noforget   ?devstorage=1  not the proof: the reload demonstration — a
                                remembered student code with a crash
                                checkpoint, tutor sign-in, viewer, reload:
@@ -46,13 +51,20 @@ const L = s => s.split("\n").join(NL);
 const TARGETS = {
   local: { edits: [] },
   cache: { edits: [["      test = await loadTestReadOnly(entry);", "      test = await loadTest(entry);"]] },
+  /* both detaches go: the tutor's entry now lets the recorder go first, and
+     the viewer's own detach is the second layer — removing either alone
+     leaves the other holding, so the control removes the pair */
   nodetach: { edits: [[L("    await Attempts.detach();\n    if(gen !== state.sessionGen){ restoreMemory(memo, test); return; }\n    const standIn"),
-                       L("    const standIn")]] },
+                       L("    const standIn")],
+                      ["    try{ await Attempts.detach(); }catch(e){}    // while currentTest is still set, as endDeletedSession does", ""]] },
   dashopen: { config: true, edits: [[L("    showOnly(\"screen-dashboard\");\n    // the Tests tab picks up where it left off"),
                                      L("    Dashboard.open(showOnly);\n    // the Tests tab picks up where it left off")]] },
   bugreport: { edits: [[L("      el(\"miBugReport\").classList.add(\"hidden\");\n"), ""]] },
   keyleak: { edits: [["    const keyShown = !viewer || viewerShowAnswers;", "    const keyShown = true;"]] },
   noforget: { edits: [[L("    try{ if(localStorage.getItem(SESSION_KEY) !== null) forgetSession(); }catch(e){}\n"), ""]] },
+  /* review's second layer gone: the sitting's controls the viewer shows get
+     their handlers, so a click flags or marks an answer */
+  handlers: { edits: [[L("       it do anything. */\n    if(state.reviewMode) return;\n"), L("       it do anything. */\n")]] },
   authopen: { config: true, edits: [["    return !AttemptStore.remoteConfigured() || AttemptStore.hasAuthToken();", "    return true;"]] }
 };
 
