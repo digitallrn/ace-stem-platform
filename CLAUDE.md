@@ -158,11 +158,16 @@ drops the student identity and bumps `sessionGen`, and `signInWithCode`
 bails after each of its awaits when the generation moved (boot then leaves
 the screen alone), so a boot-time restore the tutor overtakes lands nowhere
 and a reload from the dashboard or viewer lands on sign-in — never in that
-student's crash-resumed sitting. `refreshStudentState` has the same fence,
-and a TYPED student code also bumps `sessionGen`, so it supersedes a boot
-restore in flight. A sitting RUNNING or (re)starting on the page
+student's crash-resumed sitting. `refreshStudentState` has the same fence
+and answers `"deleted"` (session over — never `false`, "carry on") when the
+generation moved, so Save and Exit / Back to home stop instead of painting
+home over whatever ended the session (a deletion landing included); a TYPED
+student code also bumps `sessionGen`, so it supersedes a boot restore in
+flight. A sitting RUNNING or (re)starting on the page
 (`sittingInFlight`: module clock, the Ready/resume beat, module-over, break —
-reachable only when a crash-resume landed behind the tutor dialog) makes
+on screen until Resume Testing, which nulls `breakInterval`, so a finished
+sitting leaves all four off; reachable only when a crash-resume landed
+behind the sign-in form or the tutor dialog) makes
 both tutor entries REFUSE with a message: tearing it down there would save
 the record mid-resume without its checkpoint (`Attempts.resume` consumed it;
 `beginModule` had not written the next) and the student could never resume.

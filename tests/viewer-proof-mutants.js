@@ -31,6 +31,14 @@
      handlers   ?devstorage=1  the walk: "a click selected, flagged, ..." (the
                                sitting's controls the viewer shows get their
                                handlers — the inertness probe must see it)
+     hltool     ?devstorage=1  the walk: "highlight mode turned on" (the
+                               Highlights & Notes toggle the viewer renders
+                               in RW gets wired)
+     calctool   ?devstorage=1  the walk: "the Calculator opened (Desmos)" (the
+                               Calculator the viewer renders in Math gets
+                               wired; also fetches Desmos from its CDN)
+     (hltool / calctool need one form with both sections:
+      window.VIEWER_PROOF_OPTS = {forms:["202606asiav1"]} is enough)
      noforget   ?devstorage=1  not the proof: the reload demonstration — a
                                remembered student code with a crash
                                checkpoint, tutor sign-in, viewer, reload:
@@ -65,6 +73,10 @@ const TARGETS = {
   /* review's second layer gone: the sitting's controls the viewer shows get
      their handlers, so a click flags or marks an answer */
   handlers: { edits: [[L("       it do anything. */\n    if(state.reviewMode) return;\n"), L("       it do anything. */\n")]] },
+  /* the two header tools the viewer renders as a student sees them, each
+     with its never-wired guard taken away */
+  hltool: { edits: [["      if(!review) wireHlModeBtn();", "      wireHlModeBtn();"]] },
+  calctool: { edits: [["      if(!viewer) el(\"toolCalc\").addEventListener(\"click\", toggleCalc);", "      el(\"toolCalc\").addEventListener(\"click\", toggleCalc);"]] },
   authopen: { config: true, edits: [["    return !AttemptStore.remoteConfigured() || AttemptStore.hasAuthToken();", "    return true;"]] }
 };
 

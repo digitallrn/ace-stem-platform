@@ -63,6 +63,32 @@
   const clean = () => Object.keys(localStorage)
     .filter(k => k.indexOf("as:") === 0).forEach(k => localStorage.removeItem(k));
 
+  /* The proof poisons the loaded test OBJECT in memory, and the sitting's
+     loader (loadTest) writes whatever memory holds into the offline content
+     cache — so a run used to leave this origin's acestem:testcache:<first
+     test> carrying the payload as that test's content, and a split build
+     served later from the same origin (the dist preview's port) read the
+     poisoned copy back (found 2026-10-21 by the viewer proof's walk, which
+     compares against the testdata files). Snapshot the content caches now
+     and put them back exactly as found when the run ends, pass or throw. */
+  const CACHE_PREFIXES = ["acestem:testcache:", "acestem:bankcache:"];
+  const isCacheKey = k => CACHE_PREFIXES.some(p => k.indexOf(p) === 0);
+  const cacheBefore = {};
+  Object.keys(localStorage).filter(isCacheKey).forEach(k => { cacheBefore[k] = localStorage.getItem(k); });
+  function restoreCache(){
+    Object.keys(localStorage).filter(isCacheKey).forEach(k => {
+      if(!(k in cacheBefore)) localStorage.removeItem(k);
+    });
+    Object.keys(cacheBefore).forEach(k => {
+      if(localStorage.getItem(k) !== cacheBefore[k]) localStorage.setItem(k, cacheBefore[k]);
+    });
+  }
+  const cacheAsFound = () => {
+    const now = Object.keys(localStorage).filter(isCacheKey);
+    return now.length === Object.keys(cacheBefore).length &&
+           now.every(k => localStorage.getItem(k) === cacheBefore[k]);
+  };
+
   /* A surface passes when the payload produced no live element and no event
      handler. Seeing the payload as visible TEXT is the desired outcome. */
   function audit(label, root){
@@ -1953,6 +1979,10 @@
       note: "old textContent-based escaper planted onfocus here" });
 
     clean();
+    restoreCache();
+    results.push({ surface: "The run leaves the offline content cache as it found it",
+      pass: cacheAsFound(),
+      note: "poisoned test objects never outlive the run in acestem:testcache / bankcache" });
     const failed = results.filter(r => !r.pass);
     console.table(results);
     console.log(failed.length ? "FAIL — " + failed.length + " surface(s)" :
@@ -1965,6 +1995,7 @@
      proof printed nothing because I did not look" — a check whose failure mode
      is silence. Make it always say something. */
   return run().catch(e => {
+    try{ restoreCache(); }catch(e2){}
     console.error("PROOF DID NOT COMPLETE — no surface was verified: " +
       ((e && (e.stack || e.message)) || e));
     throw e;

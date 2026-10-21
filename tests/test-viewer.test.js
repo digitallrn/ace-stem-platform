@@ -771,16 +771,23 @@ console.log("--- 7. source sweeps ---");
     "the Show answers toggle refuses unless the viewer is open");
 
   /* the tutor takes the device: a remembered student session is forgotten,
-     and a sitting running behind the sign-in form is stopped */
+     and a sitting that FINISHED or was backed out of at Ready earlier on this
+     page — clocks off, but its recorder still attached to `state` — is let
+     go. A sitting still RUNNING never reaches enterTutorSession (both entries
+     refuse first: §8 runs that refusal for real), so the fixture here is the
+     reachable one, not a running sitting. */
   const tutorBody = extractConst(appSrc, "SESSION_KEY") + "\n" + extractFn(appSrc, "forgetSession") + "\n" +
     "async " + extractFn(appSrc, "enterTutorSession") + "\nreturn enterTutorSession;";
-  const runEntry = async (src, stored, live) => {
+  const runEntry = async (src, stored, left) => {
     const ls = memStorage();
     if(stored) ls._d["acestem:code"] = stored;
     const calls = [];
+    /* left: the finished / backed-out sitting — currentTest still set, the
+       module clock's DEAD id still in timerInterval (clearInterval sites
+       leave it), nothing running */
     const state = { sessionGen: 4, userName: "AS-STALE234", displayName: "Stale",
-      currentTest: live ? { testId: "t" } : null, moduleState: live ? { m: {} } : {}, reviewMode: null,
-      timerInterval: live ? 11 : null, breakInterval: null, timerRunning: !!live, readyTimer: live ? 12 : null, moduleOverTimer: null,
+      currentTest: left ? { testId: "t" } : null, moduleState: left ? { m: {} } : {}, reviewMode: null,
+      timerInterval: left ? 11 : null, breakInterval: null, timerRunning: false, readyTimer: null, moduleOverTimer: null,
       assignments: [{}], pastAttempts: [{}], tombstoned: { x: 1 }, resumeRecords: { y: 1 } };
     const Attempts = { detach: async () => { calls.push("detach:" + (state.currentTest ? "test-still-set" : "test-gone")); } };
     await new Function("localStorage", "state", "clearInterval", "clearTimeout", "resetTestChrome", "Attempts", src)(
@@ -797,15 +804,14 @@ console.log("--- 7. source sweeps ---");
   r = await runEntry(keeps, "AS-VWPRF234");
   control("acestem:code" in r.ls._d, "without it the remembered code survives the tutor's sign-in — the probe sees it");
   r = await runEntry(tutorBody, null, true);
-  check(r.calls.indexOf("clearInterval:11") !== -1 && r.calls.indexOf("clearTimeout:12") !== -1 && r.state.timerRunning === false
-    && r.calls.indexOf("resetTestChrome") !== -1 && r.calls.indexOf("detach:test-still-set") !== -1 && r.state.currentTest === null
+  check(r.calls.indexOf("resetTestChrome") !== -1 && r.calls.indexOf("detach:test-still-set") !== -1 && r.state.currentTest === null
+    && r.state.moduleState && Object.keys(r.state.moduleState).length === 0
     && r.state.assignments === null && Object.keys(r.state.resumeRecords).length === 0,
-    "a sitting running behind the sign-in form (a boot crash-resume that landed behind the tutor dialog) is stopped: clocks off, chrome reset, recorder let go after its last save, student state dropped", r.calls.join(" > "));
-  const noStop = tutorBody.replace("    try{ await Attempts.detach(); }catch(e){}    // while currentTest is still set, as endDeletedSession does\n", "")
-    .replace("    clearInterval(state.timerInterval); state.timerInterval = null;\n", "");
-  control(noStop !== tutorBody, "the stop lines are where this suite expects them");
-  r = await runEntry(noStop, null, true);
-  control(r.calls.indexOf("clearInterval:11") === -1 && !r.calls.some(c => /^detach/.test(c)), "without them the student's clock keeps running and the recorder stays attached — the probe sees it");
+    "a sitting that finished or was backed out of earlier on this page (clocks off, recorder still attached): chrome reset, the recorder let go while currentTest is still set (its last save drained), student state dropped — before any dashboard surface puts its own content into state", r.calls.join(" > "));
+  const noLetGo = tutorBody.replace("    try{ await Attempts.detach(); }catch(e){}    // while currentTest is still set, as endDeletedSession does\n", "");
+  control(noLetGo !== tutorBody, "the detach line is where this suite expects it");
+  r = await runEntry(noLetGo, null, true);
+  control(!r.calls.some(c => /^detach/.test(c)), "without it the finished sitting's recorder stays attached into the dashboard (and the viewer) — the probe sees it");
 
   /* every route into the dashboard: the two sign-ins (each after the tutor's
      entry) and three Back exits that only exist on a surface the dashboard
@@ -870,8 +876,29 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
   check(v.offClean, "viewer, Show answers OFF: no key mark, no rationale — nothing a student would not see");
   check(v.noOmitted && v.noTime, "viewer: no \"You omitted this question.\" and no time (there was no sitting), ON or OFF");
   check(v.parity, "viewer: the question header's markup is a sitting's — Mark for Review not greyed, the ABC toggle shown (that they are INERT is the browser proof's click probe, red against the `handlers` mutant)");
-  check(/function attachQuestionHandlers\(\)\{[\s\S]*?attachFigureHandlers\(q\);[\s\S]*?\n    if\(state\.reviewMode\) return;\n/.test(appSrc),
-    "attachQuestionHandlers still returns before wiring answers, flags, cross-outs and the keypad whenever reviewMode is set (the viewer included)");
+  /* attachQuestionHandlers, REAL (a source pin here used to run past the
+     function's end into a lookalike line ~1,000 lines on, and so stayed green
+     with this return removed): in the viewer it must wire nothing at all */
+  const wiring = (src, reviewMode) => {
+    const wired = [];
+    const node = id => ({ id, value: "", addEventListener: t => wired.push(id + ":" + t),
+      classList: { add(){}, remove(){}, toggle(){}, contains: () => false }, querySelector: () => null, querySelectorAll: () => [] });
+    const deps = { state: { reviewMode }, el: node, attachFigureHandlers: () => {},
+      currentQuestion: () => ({ id: "ma1-q4", type: "spr" }), currentModState: () => ({ answers: {}, flags: new Set(), eliminated: {} }) };
+    const names = Object.keys(deps);
+    let threw = null;
+    try{ new Function(...names, extractFn(src, "attachQuestionHandlers") + "\nreturn attachQuestionHandlers;")(...names.map(n => deps[n]))(); }
+    catch(e){ threw = e; }          // a live wiring path reaches globals this harness does not supply
+    return { wired, threw };
+  };
+  const VIEWER_RM = { record: { attemptId: "viewer:t", answers: {} }, rowByQid: {}, viewer: true };
+  const aq = wiring(appSrc, VIEWER_RM);
+  check(aq.wired.length === 0 && aq.threw === null,
+    "attachQuestionHandlers, run for real in the viewer, wires nothing — no answer, flag, cross-out or keypad handler", aq.wired.join(" ") + (aq.threw ? " threw " + aq.threw.message : ""));
+  check(wiring(appSrc, null).wired.indexOf("flagBtn:click") !== -1, "(a live sitting still gets its handlers — the probe can see wiring)");
+  const aqMut = appSrc.replace("       it do anything. */\n    if(state.reviewMode) return;\n", "       it do anything. */\n");
+  control(aqMut !== appSrc && wiring(aqMut, VIEWER_RM).wired.indexOf("flagBtn:click") !== -1,
+    "mutant (the `handlers` target: its early return removed) — the viewer's Mark for Review gets a handler, and the probe sees it");
   check(v.sprOn && v.sprOff, "viewer SPR: Show Keypad as a sitting shows it; with answers ON the key and its alternates beneath, no verdict; OFF nothing more");
   const rv = render(appSrc, "review", true, MCQ), lv = render(appSrc, "live", true, MCQ), rs = render(appSrc, "review", true, SPR);
   check(keyOn(rv) && has(rv, "rv-omitted") && has(rv, "rv-time") && /id="flagBtn" disabled/.test(rv) && !has(rv, "abcToggle") && has(rs, "rv-banner") && !has(rs, "kpToggle"),
@@ -923,6 +950,13 @@ console.log("--- 9. what the viewer renders, against review and a live sitting -
   control(calcMut !== appSrc && headerWorld(calcMut, "viewer", "Math").calcWired, "mutant (Calculator wired in the viewer) — the probe sees it");
   const bugMut = appSrc.replace("      el(\"miBugReport\").classList.add(\"hidden\");\n      [\"toolCalc\"", "      [\"toolCalc\"");
   control(bugMut !== appSrc && !headerWorld(bugMut, "viewer", "Math").bugHidden, "mutant (Report a bug left in the viewer) — the probe sees it");
+  /* the viewer renders the RW toggle, so its inertness rests on this guard
+     alone: a wired click would flip state.hlMode, a session preference a
+     later sitting on the page inherits */
+  const hlNeedle = "      if(!review) wireHlModeBtn();";
+  const hlMut = appSrc.replace(hlNeedle, "      wireHlModeBtn();");
+  control(appSrc.split(hlNeedle).length === 2 && headerWorld(hlMut, "viewer", "Reading and Writing").hlWired,
+    "mutant (Highlights & Notes wired in the viewer) — the probe sees it");
 }
 
 /* ================= §8 a restore in flight when the tutor signs in ================= */
@@ -1034,14 +1068,73 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
   control(noRefuse !== appSrc, "the sitting-in-flight refusal is where this suite expects it");
   ac = await runAuth(noRefuse, { sitting: true });
   control(ac.indexOf("ENTER") !== -1, "without it the tutor's entry goes ahead over a running sitting — the probe sees it");
-  /* the acestem-admin route refuses the same way, and a typed code retires
-     a boot restore still in flight */
-  const doSign = extractFn(appSrc, "doSignin");
-  check(/v\.toLowerCase\(\) === "acestem-admin"\)\{[^\n]*\n\s*if\(sittingInFlight\(\)\)\{\s*el\("signinError"\)\.textContent = SITTING_IN_FLIGHT_MSG;/.test(doSign)
-    && /state\.sessionGen\+\+;\s*await signInWithCode\(code\);/.test(doSign),
-    "acestem-admin refuses over a running sitting; a typed student code supersedes a boot restore in flight (sessionGen++ before it signs in)");
-  check(/return !!\(state\.timerRunning \|\| state\.readyTimer \|\| state\.moduleOverTimer \|\| state\.breakInterval\);/.test(extractFn(appSrc, "sittingInFlight")),
-    "sittingInFlight covers the module clock, the Ready/resume beat (where a teardown would save the record without its checkpoint), module-over and the break");
+  /* doSignin, run for real (local mode, where acestem-admin is the ONLY
+     tutor entry): the magic name over a running sitting is refused with the
+     message and reaches neither enterTutorSession nor the dashboard; a typed
+     student code retires a boot restore still in flight */
+  const runDoSignin = async (src, typed, sitting) => {
+    const calls = [];
+    const state = { sessionGen: 3 };
+    const node = id => ({ id, value: id === "nameInput" ? typed : "", textContent: "", focus(){},
+      classList: { add: c => { if(id === "signinError" && c === "hidden") calls.push("error-hidden"); }, remove: c => { if(id === "signinError" && c === "hidden") calls.push("ERROR-SHOWN"); } } });
+    const els = {};
+    const el = id => els[id] || (els[id] = node(id));
+    const dash = { open: () => calls.push("DASHBOARD") };
+    const deps = { el, state, AttemptStore: { isRemote: () => false }, openTutorAuth: () => calls.push("authDialog"),
+      sittingInFlight: () => !!sitting, SITTING_IN_FLIGHT_MSG: "running", enterTutorSession: async () => calls.push("ENTER"),
+      window: { Dashboard: dash }, Dashboard: dash, showOnly: () => {},
+      StudentCode: { normalize: v => v.toUpperCase(), valid: () => true }, signInWithCode: async () => calls.push("signIn@gen" + state.sessionGen) };
+    const names = Object.keys(deps);
+    await new Function(...names, "return async " + extractFn(src, "doSignin"))(...names.map(n => deps[n]))();
+    return { calls, state, input: els.nameInput.value, error: els.signinError ? els.signinError.textContent : "" };
+  };
+  let ds = await runDoSignin(appSrc, "acestem-admin", false);
+  check(ds.calls.join(">") === "error-hidden>ENTER>DASHBOARD" && ds.input === "",
+    "(acestem-admin with nothing running enters and opens the dashboard — unchanged)", ds.calls.join(">"));
+  ds = await runDoSignin(appSrc, "acestem-admin", true);
+  check(ds.calls.indexOf("ENTER") === -1 && ds.calls.indexOf("DASHBOARD") === -1 && ds.calls.indexOf("ERROR-SHOWN") !== -1 && ds.error === "running",
+    "acestem-admin over a running sitting is REFUSED with the message: enterTutorSession is never reached, so nothing is torn down and the student's checkpoint survives", ds.calls.join(">"));
+  const noReturn = appSrc.replace("        el(\"signinError\").classList.remove(\"hidden\");\n        return;\n      }\n      el(\"nameInput\").value = \"\";",
+    "        el(\"signinError\").classList.remove(\"hidden\");\n      }\n      el(\"nameInput\").value = \"\";");
+  control(noReturn !== appSrc, "the acestem-admin refusal's return is where this suite expects it");
+  ds = await runDoSignin(noReturn, "acestem-admin", true);
+  control(ds.calls.indexOf("ENTER") !== -1, "without it the message shows but the entry still tears the sitting down — the probe sees it");
+  ds = await runDoSignin(appSrc, "as-vwprf234", false);
+  check(ds.calls.join(">") === "signIn@gen4", "a typed student code bumps the session generation BEFORE it signs in, so a boot restore still in flight lands nowhere", ds.calls.join(">"));
+  const noBump = appSrc.replace("    state.sessionGen++;\n    await signInWithCode(code);", "    await signInWithCode(code);");
+  control(noBump !== appSrc && (await runDoSignin(noBump, "as-vwprf234", false)).calls.join(">") === "signIn@gen3", "without the bump the typed sign-in shares the restore's generation — the probe sees it");
+
+  /* sittingInFlight, REAL, over each beat — and the break, run through the
+     real showBreak / Resume Testing: a sitting that took the break and went
+     on must not leave the tutor refused for the rest of the page */
+  const sif = new Function("state", extractFn(appSrc, "sittingInFlight") + "\nreturn sittingInFlight;");
+  const off = { timerRunning: false, readyTimer: null, moduleOverTimer: null, breakInterval: null };
+  check(!sif(off)() && ["timerRunning", "readyTimer", "moduleOverTimer", "breakInterval"].every(k => sif(Object.assign({}, off, { [k]: k === "timerRunning" ? true : 7 }))()),
+    "sittingInFlight answers true for each beat alone — the module clock, the Ready/resume beat (where a teardown would save the record without its checkpoint), module-over, the break — and false with all four off");
+  const breakWorld = src => {
+    const timers = {}; let next = 40;
+    const handlers = {};
+    const node = id => ({ id, textContent: "", classList: { add(){}, remove(){} }, addEventListener: (t, fn) => { handlers[id + ":" + t] = fn; } });
+    const els = {};
+    const state = { timerRunning: false, readyTimer: null, moduleOverTimer: null, breakInterval: null, moduleIndex: 2, breakRemaining: 0 };
+    const deps = { state, el: id => els[id] || (els[id] = node(id)), displayLabel: () => "X", showOnly: () => {},
+      setInterval: fn => { const id = ++next; timers[id] = fn; return id; }, clearInterval: id => { delete timers[id]; },
+      beginModule: () => {} };
+    const at = src.indexOf("  function showBreak(){");
+    const end = src.indexOf("  /* ================= SECTION TOOLS");
+    if(at === -1 || end === -1) throw new Error("break block not found");
+    const names = Object.keys(deps);
+    new Function(...names, src.slice(at, end) + "\nreturn showBreak;")(...names.map(n => deps[n]))();
+    const sitting = new Function("state", extractFn(src, "sittingInFlight") + "\nreturn sittingInFlight;")(state);
+    const atBreak = sitting();
+    handlers["brkResumeBtn:click"]();
+    return { atBreak, afterResume: sitting(), live: Object.keys(timers).length };
+  };
+  const bw = breakWorld(appSrc);
+  check(bw.atBreak === true && bw.afterResume === false && bw.live === 0,
+    "the break counts as in flight while it is on screen, and Resume Testing leaves nothing behind: a full-length sitting that took the break does not lock the tutor out until a reload", JSON.stringify(bw));
+  const keepId = appSrc.replace("    clearInterval(state.breakInterval); state.breakInterval = null;\n    beginModule(state.moduleIndex);", "    clearInterval(state.breakInterval);\n    beginModule(state.moduleIndex);");
+  control(keepId !== appSrc && breakWorld(keepId).afterResume === true, "with the dead interval id left in state, the finished break still reads as in flight — the probe sees it");
 
   /* refreshStudentState: an answer for a session that has ended lands nowhere */
   const runRefresh = async (src, endMidway, payload) => {
@@ -1054,15 +1147,63 @@ console.log("--- 8. a boot-time student restore that the tutor's sign-in overtak
     return { r, ended, state };
   };
   let rr = await runRefresh(appSrc, true, "deleted");
-  check(rr.r === false && rr.ended.length === 0, "an overtaken restore's \"deleted\" answer paints no deletion landing over the tutor (the session that asked is gone)");
+  check(rr.r === "deleted" && rr.ended.length === 0, "an overtaken restore's \"deleted\" answer paints no deletion landing over the tutor (the session that asked is gone), and answers \"deleted\": session over, the caller stops");
   rr = await runRefresh(appSrc, true, { live: [{ status: "completed" }], tombstones: [] });
-  check(rr.r === false && rr.state.pastAttempts[0] === "keep", "...and its records refill no student state under the tutor");
+  check(rr.r === "deleted" && rr.state.pastAttempts[0] === "keep", "...and its records refill no student state under the tutor (still \"session over\", never false — \"carry on\")");
   rr = await runRefresh(appSrc, false, "deleted");
   check(rr.r === "deleted" && rr.ended.length === 1, "(an answer for the live session still ends a deleted student's session — unchanged)");
-  const noRF = appSrc.replace("    const res = await Attempts.loadStudentRecords(code);\n    if(gen !== state.sessionGen) return false;\n", "    const res = await Attempts.loadStudentRecords(code);\n");
+  const RF_FENCE = "    const res = await Attempts.loadStudentRecords(code);\n    if(gen !== state.sessionGen) return \"deleted\";\n";
+  const noRF = appSrc.replace(RF_FENCE, "    const res = await Attempts.loadStudentRecords(code);\n");
   control(noRF !== appSrc, "the refreshStudentState fence is where this suite expects it");
   rr = await runRefresh(noRF, true, "deleted");
   control(rr.ended.length === 1, "without it the overtaken \"deleted\" answer ends the tutor's session — the probe sees it");
+
+  /* ...and through its callers, REAL: Save and Exit, Back to home after a
+     submit, Back to home after a set. The session ends while their read is
+     in flight (the sync queue's "student deleted" refusal landing first —
+     suspend's own queued write is the natural trigger), so the deletion
+     landing is already on screen: none of them may paint home over it. */
+  const handlerOf = (src, opener) => {
+    const at = src.indexOf(opener);
+    if(at === -1) throw new Error("handler not found: " + opener);
+    let i = at + opener.length, depth = 1;
+    const start = i;
+    while(depth > 0 && i < src.length){ if(src[i] === "{") depth++; else if(src[i] === "}") depth--; i++; }
+    return src.slice(start, i - 1);
+  };
+  const CALLERS = {
+    "Save and Exit": src => "return async " + extractFn(src, "saveAndExit"),
+    "Back to home (submitted)": src => "return async ()=>{" + handlerOf(src, 'el("subHomeBtn").addEventListener("click", async ()=>{') + "}",
+    "Back to home (set done)": src => "return async ()=>{" + handlerOf(src, 'el("setDoneHomeBtn").addEventListener("click", async ()=>{') + "}"
+  };
+  const runCaller = async (src, which, endMidway) => {
+    const calls = [];
+    const state = { sessionGen: 1, userName: "AS-VWPRF234", tombstoned: {}, pastAttempts: [], currentTest: { testId: "t" }, reviewMode: null, lastWasProctored: true };
+    const Attempts = { suspend: async () => true, positionBlob: () => ({}),
+      loadStudentRecords: async () => {
+        if(endMidway){ state.sessionGen++; calls.push("ended-elsewhere"); return "deleted"; }
+        return { live: [], tombstones: [] };
+      } };
+    const base = { state, Attempts, endDeletedSession: async () => calls.push("endDeleted"), buildAssignmentIndex: () => ({}), byStartDesc: () => 0 };
+    const rss = new Function(...Object.keys(base), "return async " + extractFn(src, "refreshStudentState"))(...Object.values(base));
+    const noop = () => {};
+    const deps = Object.assign({}, base, { refreshStudentState: rss, renderHome: () => calls.push("renderHome"), showOnly: id => calls.push("show:" + id),
+      clearInterval: noop, closeDirections: noop, closeQnav: noop, hideHlPopup: noop, closeCalc: noop, closeRef: noop, hide: noop,
+      setLineReader: noop, closeMoreMenu: noop, startTimer: noop, renderTest: noop, show: noop });
+    const names = Object.keys(deps);
+    await new Function(...names, CALLERS[which](src))(...names.map(n => deps[n]))();
+    return calls;
+  };
+  const paintsHome = c => c.indexOf("renderHome") !== -1 || c.indexOf("show:screen-home") !== -1;
+  const oldFence = appSrc.replace(RF_FENCE, "    const res = await Attempts.loadStudentRecords(code);\n    if(gen !== state.sessionGen) return false;\n");
+  control(oldFence !== appSrc, "the fence's answer is where this suite expects it");
+  for(const which of Object.keys(CALLERS)){
+    const plain = await runCaller(appSrc, which, false);
+    const over = await runCaller(appSrc, which, true);
+    check(paintsHome(plain) && !paintsHome(over) && over.indexOf("endDeleted") === -1,
+      which + ": a session that ended while its read ran keeps whatever landing ended it — no home painted over a deletion screen (and with nothing ended it still goes home, unchanged)", over.join(">"));
+    control(paintsHome(await runCaller(oldFence, which, true)), which + ": with the fence answering false (\"carry on\") the caller paints home over the landing — the probe sees it");
+  }
 
   /* boot answers a false restore with sign-in only if the session is still its own */
   const boot = extractFn(appSrc, "boot");

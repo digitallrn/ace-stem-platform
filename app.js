@@ -131,9 +131,11 @@
      chrome are reset with it; with nothing attached every step is a no-op.
      Async: callers await it before the dashboard opens. */
   /* A sitting running or about to (re)start on this page — a module clock,
-     the Ready / resume beat, the module-over beat, the break. Reachable at
-     tutor sign-in only when a boot-time crash-resume landed behind the tutor
-     dialog on a slow connection. The tutor does not take the device over it:
+     the Ready / resume beat, the module-over beat, the break (on screen until
+     Resume Testing, which nulls breakInterval; a finished sitting leaves
+     every one of the four off). Reachable at tutor sign-in only when a
+     boot-time crash-resume landed behind the sign-in form or the tutor
+     dialog. The tutor does not take the device over it:
      tearing it down mid-resume would save the record without its checkpoint
      (Attempts.resume consumed it and beginModule has not written the next),
      and the student could never resume. It finishes, or a reload resumes it
@@ -2075,18 +2077,22 @@
      FAILED (distinct from empty), so callers can hold the prior state or halt
      rather than wiping a completed assignment back to startable. */
   /* Returns true (refreshed), false ("unavailable" — the caller keeps prior
-     state and carries on), or the string "deleted": the tutor retired this
-     code while the device was signed in, the session has already been ended
-     (endDeletedSession: sign-in screen + message), and the caller must NOT
-     paint another screen over it. Every caller checks for "deleted" first. */
+     state and carries on), or the string "deleted": the session this call
+     belongs to is OVER and the caller must NOT paint another screen over
+     whatever ended it. Either the tutor retired this code while the device
+     was signed in (endDeletedSession, called here: sign-in screen +
+     message), or the session ended while the read ran — a deletion verdict
+     from the sync queue, the tutor taking the device, a typed sign-in
+     replacing a boot restore — and whoever ended it painted its own
+     landing. Every caller checks for "deleted" first. */
   async function refreshStudentState(code){
-    /* the session this read belongs to: if it ended meanwhile (a tutor took
-       the device, a typed sign-in replaced a boot restore, a sign-out), the
-       answer lands nowhere — no student state refilled under someone else,
-       no deletion landing painted over their screen */
+    /* the session this read belongs to: if it ended meanwhile, the answer
+       lands nowhere — no student state refilled under someone else, no
+       deletion landing painted over their screen, and "deleted" (never
+       false, "carry on") so the caller's own home paint stays off too */
     const gen = state.sessionGen;
     const res = await Attempts.loadStudentRecords(code);
-    if(gen !== state.sessionGen) return false;
+    if(gen !== state.sessionGen) return "deleted";
     if(res === "deleted"){
       await endDeletedSession();
       return "deleted";
@@ -3862,7 +3868,12 @@
     el("brkTimer").textContent = m + ":" + String(s).padStart(2,"0");
   }
   el("brkResumeBtn").addEventListener("click", ()=>{
-    clearInterval(state.breakInterval);
+    /* nulled, not just cleared: breakInterval means "a break is on screen"
+       to sittingInFlight, which would otherwise refuse the tutor's sign-in
+       for the rest of the page after any sitting that took the break (a
+       countdown that ran out leaves its dead id until this press, which is
+       right: the student is still on the break screen) */
+    clearInterval(state.breakInterval); state.breakInterval = null;
     beginModule(state.moduleIndex);
   });
 
@@ -5368,8 +5379,10 @@
        AttemptStore or the sync queue, never listed anywhere;
      - every write-capable control is gated by state.reviewMode exactly as in
        review (answers, flags, cross-outs, SPR typing, highlights, submit,
-       Save and Exit), and the two review keeps — Report a bug and the
-       Calculator — are taken out (updateHeaderTools);
+       Save and Exit); of the two review keeps, Report a bug is hidden and
+       the Calculator is shown as a student sees it but never wired, like
+       Highlights & Notes (updateHeaderTools) — so Desmos never loads and
+       no click changes a preference a later sitting would inherit;
      - no timer runs and the five-minute alert never arms;
      - leaving goes straight back to the dashboard screen (showOnly), never
        Dashboard.open, whose reload pulls and writes the tutor mirror in
