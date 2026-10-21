@@ -26,7 +26,10 @@
    seen-set caveat and every delete-confirmation panel: student, finished
    attempt, and (2026-09-21) the separate in-progress "Delete this sitting
    in progress?" panel, whose wording is asserted both ways (gate asserted,
-   never confirmed — the proof writes no marker of its own).
+   never confirmed — the proof writes no marker of its own). Since
+   2026-10-21 also the tutor test viewer: hostile manifest values in the
+   dashboard Tests list, both Go-to boxes' echoes, and hostile skill /
+   version / SPR key and alternates in the viewer (synthetic forms only).
    NOTE: run this with local mode active (no config.js beside the page), since
    it uses the acestem-admin route, which a remote deployment removes — and
    open the page WITHOUT ?devstorage=1: the proof installs its own
@@ -1646,6 +1649,92 @@
       await wait(200);
     }
     results.push(audit("Dashboard Question Bank tab (index render + hostile filter)", $("dashBody")));
+
+    /* TUTOR TEST VIEWER (2026-10-21). New innerHTML / text sinks: the Tests
+       tab lists manifest values (name, testId, version, pathway) and echoes
+       its Go-to box and an ambiguous match's picks; the viewer prints test
+       data in its strip (question id, skill, version), the form's name in the
+       footer, the SPR key and alternates in the pane, and echoes its own
+       Go-to box. Driven on SYNTHETIC manifest entries + tests registered in
+       memory and removed in a finally: poisoning a real entry's testVersion
+       would move the cache key and the version gate every surface above leans
+       on. */
+    const TV_IDS = ["zzviewerxss1", "zzviewerxss2"];
+    const tvTests = TV_IDS.map(id => {
+      const t = JSON.parse(JSON.stringify(test));
+      t.testId = id; t.testName = PAYLOAD; t.testVersion = ATTR_PAY + PAYLOAD;
+      t.modules.forEach(m => m.questions.forEach(q => { q.skill = PAYLOAD; }));
+      const spr = t.modules.map(m => m.questions.find(q => q.type === "spr")).find(Boolean);
+      if(spr){ spr.correctAnswer = PAYLOAD; spr.altAnswers = [PAYLOAD, ATTR_PAY]; }
+      return t;
+    });
+    const tvEntries = tvTests.map(t => ({ testId: t.testId, testName: PAYLOAD, testVersion: t.testVersion, pathway: PAYLOAD,
+      moduleCount: 4, questionCount: 98, sections: [], legacyIds: [] }));
+    window.__TESTDATA__ = window.__TESTDATA__ || {};
+    try{
+      tvEntries.forEach(e => window.TEST_MANIFEST.push(e));
+      tvTests.forEach(t => { window.__TESTDATA__[t.testId] = t; });
+      document.querySelector('#dashTabs [data-tab="tests"]').click();
+      await wait(300);
+      results.push(audit("Dashboard Tests tab (hostile manifest name, version, pathway in the list)", $("dashBody")));
+      const tvGo = async v => {
+        const box = $("tvTestsGoto");
+        if(!box) return false;
+        box.value = v;
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        $("tvTestsGoBtn").click();
+        await wait(250);
+        return true;
+      };
+      await tvGo(PAYLOAD + " ma1-q1");
+      results.push(audit("Tests tab Go-to echo (hostile test typed)", $("dashBody")));
+      await tvGo("zzviewerxss1 " + ATTR_PAY.replace(/ /g, ""));
+      results.push(audit("Tests tab Go-to echo (hostile question typed)", $("dashBody")));
+      const inp = $("tvTestsGoto");
+      results.push({ surface: "Tests tab Go-to box re-renders its own value inert (attribute context)",
+        pass: !!inp && !inp.hasAttribute("onfocus") && !window.__ATTR_FIRED, note: "value round-trips as text" });
+      await tvGo("zzviewerxss ma1-q1");
+      results.push({ surface: "Tests tab ambiguous match lists its picks (hostile names)",
+        pass: document.querySelectorAll("#dashBody .tv-pick").length === 2, note: "two synthetic forms matched" });
+      results.push(audit("Tests tab ambiguous-match picks (hostile names)", $("dashBody")));
+      const open1 = document.querySelector('#dashBody .tv-pick[data-tv-test="zzviewerxss1"]');
+      if(open1){
+        open1.click();
+        await until(() => !$("screen-test").classList.contains("hidden"), 8000);
+        results.push(audit("Test viewer: strip, footer and pane (hostile skill, version, form name)", $("screen-test")));
+        const sprQ = tvTests[0].modules.map(m => m.questions.find(q => q.type === "spr")).find(Boolean);
+        if(sprQ){
+          $("tvGoto").value = sprQ.id;
+          $("tvGotoBtn").click();
+          await wait(400);
+          const keyEl = document.querySelector("#paneRight .rv-spr-key");
+          results.push({ surface: "Test viewer SPR key + alternates render as text (hostile key, hostile alternates)",
+            pass: !!keyEl && keyEl.textContent.indexOf("PWN") !== -1, note: keyEl ? "key block present" : "no key block" });
+          results.push(audit("Test viewer SPR key + alternates (hostile)", $("screen-test")));
+        }
+        $("tvShowAnswers").click(); await wait(150);
+        results.push(audit("Test viewer with Show answers off", $("screen-test")));
+        $("tvShowAnswers").click(); await wait(150);
+        $("tvGoto").value = PAYLOAD;
+        $("tvGotoBtn").click();
+        await wait(150);
+        results.push({ surface: "Test viewer Go-to echoes what was typed as text",
+          pass: $("tvGotoMsg").textContent.indexOf("PWN") !== -1 && !$("tvGotoMsg").querySelector("*"), note: "textContent sink" });
+        results.push(audit("Test viewer Go-to echo (hostile input)", $("screen-test")));
+        $("rvBackBtn").click();
+        await wait(250);
+        results.push({ surface: "Test viewer back control returns to the dashboard",
+          pass: !$("screen-dashboard").classList.contains("hidden") && $("screen-test").classList.contains("hidden"), note: "" });
+      } else {
+        results.push({ surface: "Test viewer: strip, footer and pane (hostile skill, version, form name)", pass: false, note: "no pick to open" });
+      }
+    } finally {
+      TV_IDS.forEach(id => {
+        const i = window.TEST_MANIFEST.findIndex(e => e.testId === id);
+        if(i !== -1) window.TEST_MANIFEST.splice(i, 1);
+        delete window.__TESTDATA__[id];
+      });
+    }
 
     /* v1.2 addendum tokens: {{bullets}}/{{item}}, {{quote}}, {{credit}}.
        Test data is untrusted on the same terms as a record (contract rule 1),

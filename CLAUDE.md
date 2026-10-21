@@ -118,6 +118,56 @@ writes) and an optional full run C. Async flows (a content fetch, a set
 resolve or resume, a review open) capture `state.sessionGen` and bail if the
 session ended under them — keep that fence on any new await in a start path.
 
+**The tutor test viewer writes NOTHING (2026-10-21).** Dashboard → **Tests**
+lists every manifest form (assigned or not) and opens any of them read-only —
+the replacement for assigning a form to a code and sitting it to look at it,
+which wrote real attempt records (the AS-DAVDTEST junk that had to be
+tombstoned; a tutor's unfinished sitting blocking a form's bump in
+bump_impact.py). It is Review Mode's replay with nobody's work in it:
+`openTestViewer` (app.js) sets `state.reviewMode = {…, viewer:true}` with a
+frozen in-memory stand-in record keyed `viewer:<testId>` (never an `attempt:`
+key; handed to `buildModuleStateFromRecord` and nothing else — never to
+Attempts, AttemptStore or the queue). Every viewer branch in a shared function
+is keyed on `state.reviewMode.viewer === true`, so live sittings and both
+review flows evaluate exactly as before. Rules: content comes through
+`loadTestReadOnly` (memory → cache READ → script-tag GET; **never**
+`loadTest`/`AppTestLoader.load`/`ensureTestLoaded`, which write the offline
+cache — 20-plus forms through it is the c8a2740 quota blowup); a form the
+viewer or the Tests tab's per-module counts loaded is taken back OUT of
+memory when they are done (`restoreMemory`), because Past cards and the Score
+Calculator read what is loaded and a student may sit next on that page;
+`Attempts.detach()` is awaited before any state change (a sitting earlier on
+the page can leave the recorder attached to `state`, and its tab-hide flush
+would rebuild that student's record from the viewer's empty answers); Report a
+bug and the Calculator are removed in the viewer (bug: writes; Desmos is
+unvouched third-party code whose expressions outlive the viewer), with a
+second-layer refusal in the bug send handler; exit is `showOnly
+("screen-dashboard")`, **never** `Dashboard.open` (its reload pulls and writes
+the mirror in remote mode). Tutor-only: the bridge `AppTestViewer.open`
+refuses unless `#screen-dashboard` is the screen showing and, on any
+deployment WITH a server (`AttemptStore.remoteConfigured()` — the live site),
+a real tutor token is held — so `?devstorage=1` + `acestem-admin` on the live
+site lists the forms and opens none (that dashboard has no password; the
+viewer must not be a student-reachable view of every key). Builds with no
+server (single-file, Stage-3 preview, file://) keep the local dashboard as
+the tutor's way in. Its one caller is the Tests tab; no URL, hash or magic
+link reaches it (a source sweep pins the seven pre-existing URL reads). Tutor
+entry (`enterTutorSession`, both routes) forgets a remembered student code,
+drops the student identity and bumps `sessionGen`, so a reload from the
+dashboard or viewer lands on sign-in — never in that student's crash-resumed
+sitting. Nothing persists, so "reload lands on the dashboard" is NOT met: the
+tutor session is memory-only by design and persisting it would be a write.
+Go-to takes `rw1-q7`/`re1-q7`, `m2-q21`/`ma2-q21`, `m1-q08`, `m2-07`; the
+Tests-tab box also takes a test id or its start ("202606 ma2-q21" lists the
+matches, never guesses). Proofs: `tests/test-viewer.test.js` (node, every
+check with a control) and `tests/viewer-proof.js` (browser: walks every
+question of every form, answers on/off, and diffs storage write CALLS,
+localStorage bytes, the queue and every request; local and stubbed-remote;
+red against the mutant builds that re-enable one write); the viewer's
+surfaces are in `tests/injection-proof.js`. Keep the test-bank's Stage-3
+anchor `state.assignments = assigns;` appearing exactly once in app.js
+(build_stage3_preview.py replaces its first occurrence).
+
 ## Read first
 `SCHEMA-v1.2.md` — the data contract. It's authoritative over instinct,
 including for anything below.

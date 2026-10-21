@@ -116,7 +116,9 @@ console.log("--- 3. source hygiene: render paths never read the bank globals ---
    of these has to start mentioning a bank global — and this goes red. */
 const RENDER_FNS = ["renderHome", "renderYourTests", "renderActiveCards",
   "renderPastCards", "assignmentCard", "startTestFlow", "openScoreDetails",
-  "crashResumeCandidate", "canServeVersion", "loadTest"];
+  "crashResumeCandidate", "canServeVersion", "loadTest",
+  // the tutor test viewer (2026-10-21) shows forms only; banks stay out of it
+  "loadTestReadOnly", "openTestViewer"];
 const BANK_GLOBALS = /BANK_MANIFEST|__BANKDATA__|BANK_INDEX|bankById|loadBank/;
 RENDER_FNS.forEach(fn => {
   let src = null;
@@ -128,7 +130,7 @@ RENDER_FNS.forEach(fn => {
 /* dashboard: the test filter and the assignment-form test <select> iterate
    TEST_MANIFEST / testsById; they must not iterate a bank list */
 const dashSrc = read("dashboard.js");
-["renderAll", "viewAssign"].forEach(fn => {
+["renderAll", "viewAssign", "viewTests", "formsMatching"].forEach(fn => {
   let src = null;
   try{ src = extractFn(dashSrc, fn); }catch(e){}
   check(src !== null && !BANK_GLOBALS.test(src),

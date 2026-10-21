@@ -1486,3 +1486,43 @@
   .canon-overlap ul{ margin:4px 0 4px 18px; padding:0; }
   .canon-overlap details{ margin:4px 0; }
   .canon-overlap .canon-items{ max-height:220px; overflow:auto; font-size:12.5px; }
+
+  /* ---- tutor test viewer (2026-10-21) ----
+     The bar sits between the test header and #tBody. Its height is FIXED and
+     nothing in it wraps (ellipsis instead), so the panes get the same box on
+     every question and with Show answers on or off — what a Stage-3 read sees
+     in the pane is laid out at a constant size. Tutor-coloured on purpose:
+     it is not student chrome. */
+  .tv-bar{ flex-shrink:0; height:64px; overflow:hidden; background:#FFF6D6;
+    border-bottom:1px solid #E3C55A; padding:0 24px; font-family:var(--sans); }
+  .tv-row{ display:flex; align-items:center; gap:18px; height:38px; white-space:nowrap; }
+  .tv-mods{ display:flex; gap:4px; flex-shrink:0; }
+  .tv-mod{ border:1.5px solid var(--cb-navy); background:#fff; color:var(--cb-navy);
+    border-radius:14px; padding:3px 12px; font-size:12.5px; font-weight:700; }
+  .tv-mod.on{ background:var(--cb-navy); color:#fff; }
+  .tv-goto{ display:flex; align-items:center; gap:6px; min-width:0; flex:1; }
+  .tv-goto input{ width:170px; flex-shrink:0; padding:4px 8px; border:1.5px solid #9AA0AE;
+    border-radius:6px; font-size:13px; }
+  .tv-btn{ border:1.5px solid var(--cb-navy); background:#fff; color:var(--cb-navy);
+    border-radius:6px; padding:3px 10px; font-size:12.5px; font-weight:700; flex-shrink:0; }
+  .tv-msg{ font-size:12.5px; color:#8f1f27; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .tv-answers{ display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700;
+    flex-shrink:0; cursor:pointer; }
+  .tv-info{ display:flex; align-items:center; gap:16px; height:24px; white-space:nowrap;
+    font-size:12.5px; color:#5b4a00; overflow:hidden; }
+  .tv-id{ font-family:var(--mono, monospace); font-weight:700; flex-shrink:0; }
+  .tv-skill{ overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .tv-ver{ flex-shrink:0; }
+  .tv-nokey{ flex-shrink:0; font-weight:800; color:#8f1f27; }
+
+  /* dashboard Tests tab: every manifest form, each opening the viewer */
+  .tv-tests-goto{ display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .tv-tests-goto label{ font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; }
+  .tv-tests-goto input{ width:260px; padding:7px 10px; border:1.5px solid #9AA0AE;
+    border-radius:8px; font-size:13.5px; }
+  .tv-tests-msg{ margin:0 0 12px; font-size:13.5px; }
+  .tv-picks{ display:flex; gap:8px; flex-wrap:wrap; margin:-4px 0 14px; }
+  .tv-open{ background:none; border:none; padding:0; color:var(--cb-blue); font-weight:700;
+    font-size:13.5px; text-align:left; text-decoration:underline; }
+  .tv-tests .tv-mono{ font-family:var(--mono, monospace); font-size:12.5px; }
+  .tv-tests tbody tr{ cursor:default; }

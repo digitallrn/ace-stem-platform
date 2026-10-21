@@ -112,6 +112,21 @@
       return StudentCode.valid(c || "") ? StudentCode.normalize(c) : null;
     }catch(e){ return null; }
   }
+  /* The tutor takes the device (2026-10-21, with the test viewer). A student
+     session can still be remembered here when the tutor signs in — a restore
+     that failed offline keeps the code — and with it a reload from the
+     dashboard or the test viewer would sign that student back in and
+     crash-resume their sitting on the tutor's screen, recording into their
+     attempt. So the tutor's entry forgets it (only when one is stored), drops
+     the student identity from memory, and retires the session generation so
+     a student load still in flight from boot lands nowhere. Nothing recorded
+     on this device is touched. */
+  function enterTutorSession(){
+    state.sessionGen++;
+    try{ if(localStorage.getItem(SESSION_KEY) !== null) forgetSession(); }catch(e){}
+    state.userName = "Student";
+    state.displayName = null;
+  }
 
   /* ---- magic link ----
      A code in the URL FRAGMENT (…/#AS-XXXXXXXX). Fragments are never sent to
@@ -434,6 +449,7 @@
     } else if(v.toLowerCase() === "acestem-admin"){   // tutor dashboard — never records (spec §4)
       el("nameInput").value = "";
       el("signinError").classList.add("hidden");
+      enterTutorSession();
       if(window.Dashboard) Dashboard.open(showOnly);
       return;
     }
@@ -843,6 +859,7 @@
       await AttemptStore.signInTutor(email, pw);
       el("tutorPassword").value = "";           // never keep the password around
       closeTutorAuth();
+      enterTutorSession();
       if(window.Dashboard) Dashboard.open(showOnly);
     }catch(e){
       el("tutorAuthError").textContent = e.status === 400
@@ -1178,6 +1195,30 @@
   // cache — and canServe for its own version gate, so the two apps cannot
   // disagree about which attempts are openable
   window.AppTestLoader = { load: loadTest, byId: testById, canServe: canServeVersion };
+
+  /* The tutor test viewer's loader (2026-10-21): the CURRENT build only, from
+     memory, then the offline cache, then the network — and it never writes
+     the cache. loadTest writes on every path but a cache hit (even a memory
+     hit re-serialises), and a tutor paging through twenty-odd forms that way
+     is the quota blowup c8a2740 fixed, landing on the device a student's
+     sitting records to. A cache read is a read; a fetched file registers into
+     __TESTDATA__ (memory) exactly as loadTest's network path does. Same
+     version refusal as loadTest: content the manifest does not vouch for is
+     never shown as this form. */
+  async function loadTestReadOnly(entry){
+    const want = entry.testVersion || "unversioned";
+    const inMemory = (window.__TESTDATA__ || {})[entry.testId];
+    if(inMemory && (inMemory.testVersion || "unversioned") === want) return inMemory;
+    const cached = readCachedTest(entry);
+    if(cached) return cached;
+    const fetched = await fetchTestFile(entry.testId);
+    if((fetched.testVersion || "unversioned") !== want){
+      const e = new Error("version mismatch");
+      e.permanent = true;
+      throw e;
+    }
+    return fetched;
+  }
 
   /* ================= QUESTION BANKS (custom practice sets, 2026-08-31) ====
      Banks are NOT tests (SCHEMA-BANKS-v1 §1). They live in their own globals
@@ -1777,7 +1818,9 @@
      student home screen would strand them in the wrong app. */
   function showTestLoadError(entry, retry, origin, err){
     const name = entry ? entry.testName : "this test";
-    const toDashboard = origin === "dashboard";
+    // the test viewer is a dashboard surface too, with no attempt behind it
+    const fromViewer = origin === "viewer";
+    const toDashboard = origin === "dashboard" || fromViewer;
     const permanent = !!(err && err.permanent);
     el("loadErrTitle").textContent = "Couldn't load " + name;
     el("loadErrBody").textContent = (err && err.unavailable)
@@ -1788,6 +1831,8 @@
       // a mismatch re-downloads identically forever; say so instead of
       // blaming the connection and inviting an endless retry
       ? "This test's content doesn't match the version on record, so it can't be opened safely. Retrying won't help — tell your tutor."
+      : fromViewer
+        ? "The test content didn't download, so the viewer can't show this form. Nothing was saved or changed."
       : toDashboard
         ? "The test content didn't download, so the question-by-question view can't be shown. The attempt record itself is fine."
         : "The test content didn't download. Check your connection and try again — nothing you've already done has been lost.";
@@ -2794,6 +2839,7 @@
 
   let lastRenderedQKey = null;   // which question the divider width belongs to
   let figZoomPct = 100;          // figure zoom level, keyed the same way (attachFigureHandlers)
+  let viewerShowAnswers = true;  // tutor test viewer's Show answers: memory only, ON per page load
   function renderQuestionView(){
     /* Any rebuild detaches the nodes the highlight popup points at, so dismiss
        it first — otherwise a swatch click would recolour a span that is no
@@ -2875,6 +2921,14 @@
       review && state.moduleIndex === state.currentTest.modules.length - 1 &&
       state.questionIndex === total - 1);
     if(!review) Attempts.questionShown(q.id);   // no-op on re-renders; never records in review
+    /* The tutor test viewer's bar exists only while the viewer does, and
+       review's back control only in review — derived on every render rather
+       than trusted to an exit path, so neither can survive into a sitting
+       that starts some other way (a deletion verdict, a boot-time resume). */
+    const viewer = review && state.reviewMode.viewer === true;
+    el("tvBar").classList.toggle("hidden", !viewer);
+    el("rvBackBtn").classList.toggle("hidden", !review);
+    if(viewer) renderViewerChrome(q);
   }
 
   /* A stem that OPENS with display math or a table is a lead-in: the real app
@@ -3110,6 +3164,11 @@
   function buildQuestionHtml(q, ms){
     const isSpr = q.type === "spr";
     const review = !!state.reviewMode;
+    /* the tutor test viewer is review with nobody's work in it: no omitted
+       banner and no time (there was no sitting), and with Show answers off
+       no key either — the question exactly as a student meets it */
+    const viewer = review && state.reviewMode.viewer === true;
+    const keyShown = !viewer || viewerShowAnswers;
     const flagged = ms.flags.has(q.id);
     const abcOn = state.elimMode && !isSpr && !review;
 
@@ -3177,7 +3236,7 @@
              their work), but the cross-out buttons don't render — nothing on
              this surface mutates. `sel` styling is replaced by the marks. */
           if(review){
-            const isKey = hasKey(q) && q.correctAnswer === idx;
+            const isKey = keyShown && hasKey(q) && q.correctAnswer === idx;
             const mark = isKey && sel ? '<span class="rv-mark ok">✓ Your answer</span>'
                        : isKey        ? '<span class="rv-mark ok">✓ Correct answer</span>'
                        : sel          ? '<span class="rv-mark you">✕ Your answer</span>'
@@ -3219,16 +3278,16 @@
        reads as omitted in its verdict), and the rationale below the choices
        when the question carries one. Rationale is test data, so fmt() — it
        may hold tokens and math. */
-    const omittedHtml = (review && !isSpr && !ms.answers.hasOwnProperty(q.id))
+    const omittedHtml = (review && !viewer && !isSpr && !ms.answers.hasOwnProperty(q.id))
       ? '<div class="rv-omitted">You omitted this question.</div>' : "";
-    const rationaleHtml = (review && q.rationale)
+    const rationaleHtml = (review && keyShown && q.rationale)
       ? `<div class="rv-rationale"><h3>Rationale</h3><div class="rv-rat-body">${fmt(q.rationale)}</div></div>` : "";
 
     return `
       <div class="q-head">
         <div class="q-num">${state.questionIndex+1}</div>
         <button class="q-flag ${flagged?"on":""}" id="flagBtn"${review ? " disabled" : ""}><span class="bkm"><svg viewBox="0 0 24 24" width="15" height="17" aria-hidden="true"><path d="M5.5 3h13v18l-6.5-4.8L5.5 21z" stroke-width="2" stroke-linejoin="round"/></svg></span> Mark for Review</button>
-        ${review ? reviewTimeHtml(q) : ""}
+        ${review && !viewer ? reviewTimeHtml(q) : ""}
         ${(isSpr || review) ? "" : `<button class="abc-toggle ${abcOn?"on":""}" id="abcToggle" title="Cross out answer choices"><span class="abctxt">ABC</span></button>`}
       </div>
       ${noticeHtml}
@@ -3270,6 +3329,14 @@
      The recorded answer is untrusted record data — escaped; the key comes
      from test data — escaped all the same (it renders as plain text). */
   function sprReviewHtml(q){
+    /* The tutor test viewer has no answer to judge: the key and its accepted
+       alternates when Show answers is on (the same block review prints),
+       nothing at all when it is off, and the neutral no-key banner for an
+       unkeyed item so ON never silently looks like OFF. */
+    if(state.reviewMode.viewer === true){
+      if(!viewerShowAnswers) return "";
+      return hasKey(q) ? sprKeyHtml(q) : `<div class="rv-banner neutral">No key yet for this question.</div>`;
+    }
     const row = state.reviewMode.rowByQid[q.id];
     let cls, verdict;
     if(!row || row.noKey){ cls = "neutral"; verdict = "No key yet for this question."; }
@@ -3277,13 +3344,14 @@
     else if(row.correct){ cls = "ok"; verdict = "Your answer is correct."; }
     else { cls = "bad"; verdict = "Your answer is incorrect."; }
     let key = "";
-    if(row && !row.noKey){
-      key = `<div class="rv-spr-key"><b>Correct answer:</b> ${escapeHtml(String(q.correctAnswer))}` +
-        ((q.altAnswers && q.altAnswers.length)
-          ? ` <span class="rv-spr-alt">(also accepted: ${q.altAnswers.map(a=>escapeHtml(String(a))).join(", ")})</span>` : "") +
-        `</div>`;
-    }
+    if(row && !row.noKey) key = sprKeyHtml(q);
     return `<div class="rv-banner ${cls}">${verdict}</div>${key}`;
+  }
+  function sprKeyHtml(q){
+    return `<div class="rv-spr-key"><b>Correct answer:</b> ${escapeHtml(String(q.correctAnswer))}` +
+      ((q.altAnswers && q.altAnswers.length)
+        ? ` <span class="rv-spr-alt">(also accepted: ${q.altAnswers.map(a=>escapeHtml(String(a))).join(", ")})</span>` : "") +
+      `</div>`;
   }
 
   function attachQuestionHandlers(){
@@ -3506,7 +3574,8 @@
     container.innerHTML = "";
     mod.questions.forEach((q,idx)=>{
       const cell = document.createElement("div");
-      if(state.reviewMode){
+      // the test viewer has no outcomes: its grid is the live one, as a student first sees it
+      if(state.reviewMode && state.reviewMode.viewer !== true){
         /* Review: the navigator is an outcome map — correct / incorrect /
            omitted per question, module-local numbering, flags kept. */
         const row = state.reviewMode.rowByQid[q.id];
@@ -3542,7 +3611,7 @@
 
   function openQnav(){
     el("qnavTitle").textContent = sectionTitle(currentModule()) + " Questions";
-    el("qnavLegend").innerHTML = state.reviewMode ? QNAV_LEGEND_REVIEW : QNAV_LEGEND_LIVE;
+    el("qnavLegend").innerHTML = (state.reviewMode && state.reviewMode.viewer !== true) ? QNAV_LEGEND_REVIEW : QNAV_LEGEND_LIVE;
     // Check Your Work is a live-test destination; review has no such page
     el("gotoReviewWrap").classList.toggle("hidden", !!state.reviewMode);
     buildQnavGrid(el("qnavGrid"), idx=>{
@@ -3828,6 +3897,9 @@
   el("bugCancel").addEventListener("click", closeBugModal);
   el("homeBugBtn").addEventListener("click", openBugModal);
   el("bugSend").addEventListener("click", async ()=>{
+    // the tutor test viewer hides Report a bug; this is the second layer, so a
+    // style regression that re-shows it still cannot write from the viewer
+    if(state.reviewMode && state.reviewMode.viewer === true) return;
     const text = el("bugText").value.trim();
     if(!text){ el("bugText").focus(); return; }
     // gate on the test screen actually being visible, not just currentTest
@@ -3906,6 +3978,16 @@
     // review has nothing to save and no exit-to-home — Back goes to Score
     // Details instead. Line Reader and the bug report stay useful.
     if(review) el("miSaveExit").classList.add("hidden");
+    /* The tutor test viewer writes nothing, so the bug report goes too (it
+       stores a bug: row and queues it). So does the Calculator: Desmos is
+       third-party code running in this origin that nothing here vouches for
+       on writes, and its expressions outlive the viewer into the next sitting
+       on this page. Reference, Directions and Line Reader are read-only. */
+    if(review && state.reviewMode.viewer === true){
+      el("miBugReport").classList.add("hidden");
+      const calcBtn = el("toolCalc");
+      if(calcBtn) calcBtn.remove();
+    }
     el("tBody").classList.toggle("hl-mode", state.hlMode && mod.section !== "Math" && !review);
   }
 
@@ -5140,10 +5222,12 @@
     // timer toggle so nothing depends on that
     el("timerBtn").classList.remove("hidden");
     el("tBody").classList.remove("review-mode");
+    hide("tvBar");                                     // the tutor test viewer's strip
     lastRenderedQKey = null;
   }
   function exitReviewMode(failed){
     if(!state.reviewMode) return;
+    if(state.reviewMode.viewer === true){ exitTestViewer(); return; }
     const scroll = state.reviewMode.sdScroll || 0;
     const setMode = state.reviewMode.setMode === true;
     const setOrigin = state.reviewMode.origin;
@@ -5180,7 +5264,248 @@
      so Ctrl+P from review produced entirely blank pages. Leaving review first
      restores the pre-redesign behaviour: printing mid-review yields the score
      report. beforeprint fires before the snapshot is taken. */
-  window.addEventListener("beforeprint", ()=>{ if(state.reviewMode) exitReviewMode(); });
+  window.addEventListener("beforeprint", ()=>{ if(state.reviewMode && state.reviewMode.viewer !== true) exitReviewMode(); });
+
+  /* ================= TUTOR TEST VIEWER (2026-10-21) =================
+     Dashboard → Tests: any form in the manifest, assigned or not, read
+     through the student renderer itself — Review Mode's read-only replay with
+     nobody's work in it — so what it shows is what a sitting shows. It
+     replaces "assign it to a code, sign in, click through": every such
+     sitting wrote a real attempt record (the AS-DAVDTEST junk that later had
+     to be tombstoned, and a tutor's unfinished sitting that blocked a form's
+     bump exactly as a student's would). So its first rule is that it writes
+     NOTHING:
+     - content comes through loadTestReadOnly (no cache write, ever);
+     - the stand-in record is in memory only: no "attempt:" key, handed to
+       buildModuleStateFromRecord and nothing else — never to Attempts,
+       AttemptStore or the sync queue, never listed anywhere;
+     - every write-capable control is gated by state.reviewMode exactly as in
+       review (answers, flags, cross-outs, SPR typing, highlights, submit,
+       Save and Exit), and the two review keeps — Report a bug and the
+       Calculator — are taken out (updateHeaderTools);
+     - no timer runs and the five-minute alert never arms;
+     - leaving goes straight back to the dashboard screen (showOnly), never
+       Dashboard.open, whose reload pulls and writes the tutor mirror in
+       remote mode. Nothing persists, so a reload lands where a dashboard
+       reload does (sign-in), never in a sitting.
+     Tutor-only: the one entry is the dashboard's Tests tab. No URL, hash or
+     magic link reaches it, and the bridge refuses unless the dashboard is the
+     screen showing and — on a deployment with a server — a tutor is signed
+     in (viewerAuthorised). */
+  function parseQuestionRef(s){
+    /* Both id spellings — the platform's re1-q7 / ma2-q21 and the test-bank's
+       rw1-q7 / m2-q21 — plus the zero-padded and q-less forms its notes use
+       (m1-q08, m2-07). Anything else is not a question id; nothing is guessed. */
+    const m = /^\s*(rw|re|ma|m)([12])-q?0*(\d+)\s*$/i.exec(String(s == null ? "" : s));
+    if(!m) return null;
+    const rw = /^r/i.test(m[1]);
+    const n = parseInt(m[3], 10);
+    return { id: (rw ? "re" : "ma") + m[2] + "-q" + n, tsv: (rw ? "rw" : "m") + m[2] + "-q" + n };
+  }
+  function idSpellings(id){
+    const m = /^(re|ma)([12])-q(\d+)$/.exec(String(id));
+    return m ? [String(id), (m[1] === "re" ? "rw" : "m") + m[2] + "-q" + m[3]] : [String(id), "—"];
+  }
+  function locateQuestion(test, id){
+    for(let mi = 0; mi < test.modules.length; mi++){
+      const qi = test.modules[mi].questions.findIndex(q => q.id === id);
+      if(qi !== -1) return { mi: mi, qi: qi };
+    }
+    return null;
+  }
+
+  /* What a form's content was in memory before the viewer (or the Tests
+     tab's counts) loaded it, so leaving puts memory back as it was: a sitting
+     later on this page — a student after the tutor, on a proctoring laptop —
+     must see exactly what it would have without the viewer (Past cards and
+     the Score Calculator read what is loaded). */
+  function memoryBefore(testId){
+    const box = window.__TESTDATA__ || {};
+    const had = Object.prototype.hasOwnProperty.call(box, testId);
+    return { testId: testId, had: had, prior: had ? box[testId] : undefined };
+  }
+  function restoreMemory(before, loaded){
+    const box = window.__TESTDATA__;
+    if(!box || !loaded || box[before.testId] !== loaded || loaded === before.prior) return;
+    if(before.had) box[before.testId] = before.prior;
+    else delete box[before.testId];
+  }
+
+  async function openTestViewer(testId, ref, onNote){
+    const entry = testById(testId);
+    if(!entry) return false;
+    const target = ref ? parseQuestionRef(ref) : null;
+    if(ref && !target) return false;
+    showOnly("screen-loading");
+    el("loadingMsg") && (el("loadingMsg").textContent = "Loading " + entry.testName + "…");
+    const gen = state.sessionGen;                // see withTestContent
+    const memo = memoryBefore(entry.testId);
+    let test;
+    try{
+      test = await loadTestReadOnly(entry);
+    }catch(e){
+      el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
+      restoreMemory(memo, (window.__TESTDATA__ || {})[entry.testId]);   // a refused build stays out of memory
+      if(gen !== state.sessionGen) return;
+      showTestLoadError(entry, ()=> openTestViewer(testId, ref, onNote), "viewer", e);
+      return false;
+    }
+    el("loadingMsg") && (el("loadingMsg").textContent = LOADING_DEFAULT_MSG);
+    if(gen !== state.sessionGen){ restoreMemory(memo, test); return; }
+    const at = target ? locateQuestion(test, target.id) : { mi: 0, qi: 0 };
+    if(!at){
+      // a form without that question: back to the dashboard, which says so
+      restoreMemory(memo, test);
+      showOnly("screen-dashboard");
+      if(onNote) onNote({ kind: "notfound", id: target.id, tsv: target.tsv, testId: entry.testId, testName: entry.testName });
+      return false;
+    }
+    /* Same detach contract as openReviewMode. A sitting that ran earlier on
+       this page (finished, or backed out of at the Ready screen) can leave
+       the recorder attached to this very `state`; its tab-hide and unload
+       flushes would then rebuild that student's record from the viewer's
+       empty answers. Detach does no I/O when nothing is attached. */
+    await Attempts.detach();
+    if(gen !== state.sessionGen){ restoreMemory(memo, test); return; }
+    const standIn = Object.freeze({ attemptId: "viewer:" + entry.testId, answers: {} });
+    state.reviewMode = { record: standIn, rowByQid: {}, viewer: true, sdScroll: 0, memo: memo };
+    state.currentTest = test;
+    state.moduleState = buildModuleStateFromRecord(test, standIn);
+    state.view = "question";
+    state.elimMode = false;
+    clearInterval(state.timerInterval);
+    state.timerRunning = false;
+    el("timerDisplay").innerHTML = '<span class="timer-review">Viewer</span>';
+    el("timerBtn").classList.add("hidden");
+    hide("fiveMinPopup");
+    el("rvBackBtn").textContent = "‹ Dashboard";
+    show("rvBackBtn");
+    buildViewerModuleTabs(test);
+    el("tvGoto").value = "";
+    el("tvGotoMsg").textContent = "";
+    show("tvBar");
+    state.moduleIndex = at.mi;
+    state.questionIndex = at.qi;
+    try{
+      renderTest();
+      showOnly("screen-test");
+    }catch(e){
+      exitTestViewer();
+      if(onNote) onNote({ kind: "failed", testId: entry.testId, testName: entry.testName });
+      return false;
+    }
+    return true;
+  }
+  function exitTestViewer(){
+    const rm = state.reviewMode;
+    if(rm && rm.memo) restoreMemory(rm.memo, state.currentTest);
+    resetTestChrome();
+    state.reviewMode = null;
+    state.currentTest = null;
+    state.moduleState = {};
+    showOnly("screen-dashboard");
+    // the Tests tab picks up where it left off (its counts pause off-screen)
+    if(window.Dashboard && Dashboard.viewerClosed) Dashboard.viewerClosed();
+  }
+  function buildViewerModuleTabs(test){
+    const box = el("tvMods");
+    box.textContent = "";
+    test.modules.forEach((mod, mi) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tv-mod";
+      b.textContent = (mod.section === "Math" ? "Math" : "RW") + " M" + moduleNumber(mod);
+      b.addEventListener("click", ()=> viewerJump(mi, 0));
+      box.appendChild(b);
+    });
+  }
+  function viewerJump(mi, qi){
+    if(!(state.reviewMode && state.reviewMode.viewer === true)) return;
+    navigate(()=>{
+      // a section change takes the section tools with it, as reviewStep does
+      if(mi !== state.moduleIndex){ closeCalc(); closeRef(); closeDirections(); hide("figOverlay"); }
+      state.moduleIndex = mi;
+      state.questionIndex = qi;
+      state.view = "question";
+      renderTest();
+    });
+  }
+  function renderViewerChrome(q){
+    const test = state.currentTest;
+    Array.from(el("tvMods").children).forEach((b, i) => b.classList.toggle("on", i === state.moduleIndex));
+    el("tvShowAnswers").checked = viewerShowAnswers;
+    const ids = idSpellings(q.id);
+    const skill = (typeof q.skill === "string" && q.skill.trim()) ? q.skill : "untagged";
+    // textContent throughout: ids, skill and version are test data
+    el("tvId").textContent = ids[0] + " · " + ids[1];
+    el("tvSkill").textContent = skill;
+    el("tvSkill").title = skill;
+    el("tvVer").textContent = "version " + (test.testVersion || "—");
+    el("tvNoKey").classList.toggle("hidden", !(viewerShowAnswers && !hasKey(q)));
+    // the footer's name slot names the form, never a student
+    el("tfName").textContent = test.testName || test.testId;
+  }
+  function viewerGoTo(){
+    if(!(state.reviewMode && state.reviewMode.viewer === true)) return;
+    const raw = String(el("tvGoto").value || "");
+    const msg = el("tvGotoMsg");
+    if(!raw.trim()){ msg.textContent = ""; return; }
+    const ref = parseQuestionRef(raw);
+    // the echo is textContent: whatever was typed renders as text
+    if(!ref){ msg.textContent = "“" + raw.trim().slice(0, 40) + "” isn't a question id — try rw1-q7, re1-q7, m2-q21 or ma2-q21"; return; }
+    const at = locateQuestion(state.currentTest, ref.id);
+    if(!at){ msg.textContent = ref.id + " (" + ref.tsv + ") not found in this form"; return; }
+    msg.textContent = "";
+    viewerJump(at.mi, at.qi);
+  }
+  el("tvGotoBtn").addEventListener("click", viewerGoTo);
+  el("tvGoto").addEventListener("keydown", e => { if(e.key === "Enter") viewerGoTo(); });
+  el("tvShowAnswers").addEventListener("change", ()=>{
+    if(!(state.reviewMode && state.reviewMode.viewer === true)) return;
+    viewerShowAnswers = el("tvShowAnswers").checked;
+    renderTest();
+  });
+
+  /* Who may see test content here. A deployment WITH a server (the live
+     site) shows it to a signed-in tutor only — even when ?devstorage=1
+     forces local mode there, where the acestem-admin name opens the
+     dashboard with no password: the viewer must not become a student-
+     reachable view of every key. A build with no server (the single-file
+     preview, the Stage-3 preview, a file:// copy) has no tutor auth to ask
+     for; its local dashboard is the tutor's way in, as for everything else
+     on it. */
+  function viewerAuthorised(){
+    return !AttemptStore.remoteConfigured() || AttemptStore.hasAuthToken();
+  }
+  /* ...and only from the dashboard, while it is the screen showing */
+  function viewerAllowed(){
+    if(el("screen-dashboard").classList.contains("hidden")) return false;
+    return viewerAuthorised();
+  }
+  window.AppTestViewer = {
+    open(testId, ref, onNote){
+      if(!viewerAllowed()) return Promise.resolve(false);
+      return openTestViewer(testId, ref, onNote);
+    },
+    authorised: viewerAuthorised,
+    /* the Tests tab's questions-per-module column: the same read-only load,
+       and memory left as it was found. Null when the dashboard isn't showing
+       (the tutor left, a student may be signing in) — the tab retries then. */
+    counts(testId){
+      if(!viewerAllowed()) return Promise.resolve(null);
+      const entry = testById(testId);
+      if(!entry) return Promise.reject(new Error("unknown test"));
+      const memo = memoryBefore(entry.testId);
+      return loadTestReadOnly(entry).then(t => {
+        restoreMemory(memo, t);
+        return t.modules.map(m => m.questions.length);
+      }, e => {
+        restoreMemory(memo, (window.__TESTDATA__ || {})[entry.testId]);
+        throw e;
+      });
+    },
+    parseRef: parseQuestionRef
+  };
 
   /* ================= INIT ================= */
   // §6: dashboard "Open student view" bridges into the Score Details page,

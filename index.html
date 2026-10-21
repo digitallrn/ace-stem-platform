@@ -244,6 +244,28 @@
     </div>
   </div>
 
+  <!-- tutor test viewer only (dashboard → Tests; app.js openTestViewer): the
+       module switcher, Go-to, Show answers and the question's id / skill /
+       version. Outside the question pane and a fixed height, so the panes lay
+       out the same on every question and with answers on or off. -->
+  <div class="tv-bar hidden" id="tvBar">
+    <div class="tv-row">
+      <div class="tv-mods" id="tvMods"></div>
+      <div class="tv-goto">
+        <input type="text" id="tvGoto" placeholder="Go to: rw1-q7, m2-q21" autocomplete="off" spellcheck="false" maxlength="40">
+        <button type="button" class="tv-btn" id="tvGotoBtn">Go</button>
+        <span class="tv-msg" id="tvGotoMsg"></span>
+      </div>
+      <label class="tv-answers"><input type="checkbox" id="tvShowAnswers" checked> Show answers</label>
+    </div>
+    <div class="tv-info" id="tvInfo">
+      <span class="tv-id" id="tvId"></span>
+      <span class="tv-skill" id="tvSkill"></span>
+      <span class="tv-ver" id="tvVer"></span>
+      <span class="tv-nokey hidden" id="tvNoKey">no key</span>
+    </div>
+  </div>
+
   <!-- five-minute alert (Phase F §6, screenshot 23) -->
   <div class="five-min hidden" id="fiveMinPopup">
     <span>5 minutes left in this part of the test.</span>
@@ -450,6 +472,7 @@
     <button data-tab="items">Item analysis</button>
     <button data-tab="insights">Insights</button>
     <button data-tab="assign">Assignments</button>
+    <button data-tab="tests">Tests</button>
     <button data-tab="bank">Question Bank</button>
     <button data-tab="sets">Practice Sets</button>
     <button data-tab="bugs">Bug reports</button>

@@ -1116,6 +1116,7 @@ window.Dashboard = (function(){
     else if(tab === "bank") body.innerHTML = viewBank();
     else if(tab === "sets") body.innerHTML = viewSets();
     else if(tab === "bugs") body.innerHTML = viewBugs();
+    else if(tab === "tests") body.innerHTML = viewTests();
     else body.innerHTML = viewInsights(rows);
     attachBodyHandlers();
   }
@@ -3495,9 +3496,160 @@ window.Dashboard = (function(){
     render();
   }
 
+  /* ---- Tests tab (2026-10-21) ----
+     Every form in the manifest, assigned or not, each opening app.js's
+     read-only test viewer (AppTestViewer) — the replacement for assigning a
+     form to a code and sitting it just to look at it, which wrote real
+     attempt records. The list is manifest fields only. The per-module counts
+     need the content (the manifest carries per-SECTION counts), and that
+     comes through AppTestViewer.counts, the viewer's own loader, which never
+     writes the offline cache and puts memory back as it found it —
+     ensureTestLoaded writes the cache, so nothing here calls it. The Go-to box takes "<test id or its start> <question>" and never
+     guesses: one form opens, several are listed, none is "not found".
+     Manifest values and anything typed are escaped on the way in. */
+  let testsGoto = "";            // the Go-to box (a module var: render() rebuilds #dashBody)
+  let testsMsg = "";             // its one-line answer
+  let testsPicks = [];           // the forms an ambiguous start matched: [{testId, testName, ref}]
+  const testsQpm = {};           // testId -> "27 · 27 · 22 · 22", or "—" when the content didn't load
+  let testsCountsStarted = false;
+
+  function sortedForms(){
+    // testId order; an entry with no id (a malformed manifest) sorts last
+    return (window.TEST_MANIFEST || []).filter(t => t && typeof t === "object").slice().sort((a, b) => {
+      if(!a.testId || !b.testId) return (a.testId ? 0 : 1) - (b.testId ? 0 : 1);
+      const x = String(a.testId), y = String(b.testId);
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+  }
+  function testsCell(v){
+    return (v === undefined || v === null || String(v).trim() === "") ? "&mdash;" : esc(String(v));
+  }
+  /* a deployment with a server opens tests for a signed-in tutor only
+     (app.js viewerAuthorised): under ?devstorage=1 there, the local
+     acestem-admin dashboard lists the forms but opens none */
+  function testsOpenable(){
+    return !!(window.AppTestViewer && window.AppTestViewer.authorised());
+  }
+  function viewTests(){
+    const canOpen = testsOpenable();
+    if(canOpen) ensureTestsCounts();
+    const rows = sortedForms().map(t => {
+      const id = t.testId ? String(t.testId) : "";
+      const name = testsCell(t.testName);
+      const open = (id && canOpen) ? `<button class="tv-open" data-tv-test="${escAttr(id)}" title="Open in the read-only viewer">${name}</button>` : name;
+      const qpm = (!id || !canOpen) ? "&mdash;" : testsQpm[id] ? esc(testsQpm[id]) : "…";
+      return `<tr><td>${open}</td><td class="tv-mono">${testsCell(t.testId)}</td>` +
+        `<td class="tv-mono">${testsCell(t.testVersion)}</td><td>${testsCell(t.pathway)}</td>` +
+        `<td class="tv-mono" data-tv-qpm="${escAttr(id)}">${qpm}</td></tr>`;
+    }).join("");
+    const picks = testsPicks.length
+      ? `<div class="tv-picks">${testsPicks.map(p =>
+          `<button class="pill ghost tv-pick" data-tv-test="${escAttr(p.testId)}" data-tv-ref="${escAttr(p.ref)}">${testsCell(p.testName)} <span class="tv-mono">${esc(p.testId)}</span></button>`).join("")}</div>`
+      : "";
+    return `
+      <div class="tv-tests-goto">
+        <label>Go to <input type="text" id="tvTestsGoto" value="${escAttr(testsGoto)}" placeholder="202606asiav1 ma2-q21" autocomplete="off" spellcheck="false"></label>
+        <button class="pill ghost" id="tvTestsGoBtn">Go</button>
+        <span class="dash-hint">a test id (or its start), then a question in either spelling: rw1-q7 / re1-q7, m2-q21 / ma2-q21</span>
+      </div>
+      ${canOpen ? "" : `<p class="dash-warn">This site has a server, so tests open only for a tutor signed in with the tutor account. The list is shown; nothing opens from here.</p>`}
+      ${testsMsg ? `<p class="tv-tests-msg">${esc(testsMsg)}</p>` : ""}
+      ${picks}
+      <table class="dtable slim tv-tests">
+        <thead><tr><th>Test</th><th>testId</th><th>Version</th><th>Pathway</th><th>Questions per module</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="dash-empty">No tests in the manifest.</td></tr>`}</tbody>
+      </table>
+      <p class="dash-hint">Read-only: opening a test here records nothing — no attempt, no cache, nothing any student sees.</p>`;
+  }
+  /* counts, one form at a time, each cell updated in place (matched by
+     comparing its data value, never by building a selector from it), so
+     typing in the Go-to box is never interrupted by a re-render. The loop
+     only runs while the dashboard is the screen showing: AppTestViewer.counts
+     answers null otherwise (the viewer is open, or the tutor signed out and a
+     student may be signing in on this page), and the loop stops there and
+     starts again on the tab's next render. */
+  function ensureTestsCounts(){
+    if(testsCountsStarted || !window.AppTestViewer) return;
+    testsCountsStarted = true;
+    (async () => {
+      for(const t of sortedForms()){
+        const id = t.testId ? String(t.testId) : "";
+        if(!id || testsQpm[id]) continue;
+        let n;
+        try{ n = await window.AppTestViewer.counts(id); }catch(e){ n = undefined; }
+        if(n === null){ testsCountsStarted = false; return; }
+        const txt = (Array.isArray(n) && n.length) ? n.join(" · ") : "—";
+        testsQpm[id] = txt;
+        document.querySelectorAll("#dashBody [data-tv-qpm]").forEach(td => {
+          if(td.dataset.tvQpm === id) td.textContent = txt;
+        });
+      }
+    })();
+  }
+  function formsMatching(start){
+    const p = String(start).toLowerCase();
+    const forms = sortedForms().filter(t => t.testId);
+    const exact = forms.filter(t => String(t.testId).toLowerCase() === p ||
+      (t.legacyIds || []).some(x => String(x).toLowerCase() === p));
+    if(exact.length) return exact;
+    return forms.filter(t => String(t.testId).toLowerCase().indexOf(p) === 0);
+  }
+  function openFormViewer(testId, ref){
+    if(!window.AppTestViewer || !testId) return;
+    testsMsg = ""; testsPicks = [];
+    render();
+    window.AppTestViewer.open(testId, ref || "", note => {
+      testsMsg = note.kind === "notfound"
+        ? `Not found: ${note.id} (${note.tsv}) isn't in ${note.testName} (${note.testId}).`
+        : `Couldn't show ${note.testName} (${note.testId}): a question in it failed to render.`;
+      if(tab === "tests") renderKeepingInputs();
+    });
+  }
+  function testsGo(){
+    const inp = $("tvTestsGoto");
+    if(inp) testsGoto = inp.value;
+    const raw = String(testsGoto || "").trim();
+    const V = window.AppTestViewer;
+    testsMsg = ""; testsPicks = [];
+    if(!raw || !V){ renderKeepingInputs(); return; }
+    if(!testsOpenable()){ testsMsg = "Not opened: this site opens tests only for a signed-in tutor."; renderKeepingInputs(); return; }
+    const parts = raw.split(/\s+/);
+    const shown = s => "“" + String(s).slice(0, 60) + "”";
+    if(parts.length > 2){
+      testsMsg = `Couldn't read ${shown(raw)}: type a test id (or its start) and one question, e.g. 202606asiav1 ma2-q21.`;
+    } else if(parts.length === 1 && V.parseRef(parts[0])){
+      testsMsg = `${shown(parts[0])} is a question: put the test first, e.g. 202606asiav1 ${parts[0].slice(0, 20)}.`;
+    } else if(parts[1] && !V.parseRef(parts[1])){
+      testsMsg = `${shown(parts[1])} isn't a question id: try rw1-q7, re1-q7, m2-q21 or ma2-q21.`;
+    } else {
+      const found = formsMatching(parts[0]);
+      if(!found.length) testsMsg = `Not found: no test id starts with ${shown(parts[0])}.`;
+      else if(found.length > 1){
+        testsMsg = `${shown(parts[0])} matches ${found.length} tests: pick one.`;
+        testsPicks = found.map(t => ({ testId: String(t.testId), testName: t.testName, ref: parts[1] || "" }));
+      } else {
+        openFormViewer(String(found[0].testId), parts[1] || "");
+        return;
+      }
+    }
+    renderKeepingInputs();
+  }
+  function attachTestsHandlers(){
+    document.querySelectorAll("#dashBody .tv-open, #dashBody .tv-pick").forEach(btn =>
+      btn.addEventListener("click", () => openFormViewer(btn.dataset.tvTest, btn.dataset.tvRef || "")));
+    const inp = $("tvTestsGoto");
+    if(inp){
+      inp.addEventListener("input", () => { testsGoto = inp.value; });
+      inp.addEventListener("keydown", e => { if(e.key === "Enter") testsGo(); });
+    }
+    const go = $("tvTestsGoBtn");
+    if(go) go.addEventListener("click", testsGo);
+  }
+
   function attachBodyHandlers(){
     if(tab === "sets") attachSetsHandlers();
     if(tab === "bank") attachBankHandlers();
+    if(tab === "tests") attachTestsHandlers();
     document.querySelectorAll("#dashBody [data-att]").forEach(tr =>
       tr.addEventListener("click", () => openDetail(tr.dataset.att)));
     document.querySelectorAll("#dashBody .dash-rel[data-rel]").forEach(btn =>
@@ -3578,6 +3730,9 @@ window.Dashboard = (function(){
     nameFor: nameFor,
     /* for app.js's review surfaces: never open a record the tutor deleted */
     isTombstoned: id => !!tombFor(id),
+    /* app.js's test viewer handed the screen back: the Tests tab re-renders
+       from its own module state (no reload, no pull, no write) */
+    viewerClosed(){ if(tab === "tests") renderKeepingInputs(); },
     open(showOnly){
       showOnlyFn = showOnly;
       wire();

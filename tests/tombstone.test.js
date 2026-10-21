@@ -1225,7 +1225,7 @@ function sqlContract(sql){
         state2, () => {}, () => ({ textContent: "" }), async () => ({ testId: "t1" }), "msg", () => {});
       await w2({ testName: "T1" }, () => calls2++, "home");
       check(calls2 === 1, "control: with the session intact the content reaches onReady");
-      for(const fn of ["startSetFlow", "resumeSetFlow", "openSetReview", "openReviewMode"]){
+      for(const fn of ["startSetFlow", "resumeSetFlow", "openSetReview", "openReviewMode", "openTestViewer"]){
         const src = extractFn(appSrc, fn);
         check(/const gen = state\.sessionGen;/.test(src) && (src.match(/if\(gen !== state\.sessionGen\) return;/g) || []).length >= 1,
           fn + " captures the session generation and bails after its awaits");
