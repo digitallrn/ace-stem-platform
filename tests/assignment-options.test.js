@@ -97,6 +97,9 @@ function load(opts){
   return sandbox;
 }
 const RULES = load().AssignmentRules || { /* pre-change attempts.js: every reader is absent, and each case says so */ };
+/* the scope reader beside it (partial sittings, 2026-11-02): app.js's start
+   path and choice screen read it, so the §4 harnesses hand it in */
+const SCOPE = load().AttemptScope || {};
 /* an object-literal method (`    resume(record, stateRef){`) lifted by brace-matching —
    extract-helper's extractFn only knows `function name(` declarations */
 function extractMethod(src, name){
@@ -297,11 +300,16 @@ await run("3. fn_upsert_attempt: the form auto-release branch, modelled and pinn
   const T = ["completed", "timed-out"];
   function decide(ctx){
     const { stored_released, stored_status, p_key, p_value, assignments, code } = ctx;
+    const others = ctx.others || [];           // every OTHER attempt row the table holds ({owner, key, value})
     let v = stored_released === undefined ? false : stored_released;     // coalesce(r.value->'released','false')
     const keyTest = String(p_key).split(":")[1];
+    /* one release per assignment (partial sittings batch): no other completed
+       or timed-out attempt of this code may already name the assignmentId */
+    const consumed = others.some(o => o.owner === code && /^attempt:/.test(o.key) && o.key !== p_key &&
+      o.value.assignmentId === p_value.assignmentId && T.indexOf(o.value.status) !== -1);
     if(v === false && !/^attempt:pset-/.test(p_key) && (p_value.kind || "") !== "set" &&
        T.indexOf(p_value.status) !== -1 && T.indexOf(stored_status || "") === -1 &&
-       p_value.assignmentId != null && keyTest === p_value.testId){
+       p_value.assignmentId != null && keyTest === p_value.testId && !consumed){
       const a = assignments.find(x => x.owner === code && x.key === "assign:" + code + ":" + p_value.assignmentId &&
         x.value.releaseMode === "auto" && (x.value.kind || "") !== "set" && x.value.testId === keyTest);
       if(a) v = true;
@@ -328,12 +336,22 @@ await run("3. fn_upsert_attempt: the form auto-release branch, modelled and pinn
   check(decide(vary({ p_key: "attempt:pset-1:1700000000:bbbb", p_value: { testId: "pset-1" } })) === false, "a pset-keyed attempt never enters the form branch");
   check(decide(vary({ p_value: { kind: "set" } })) === false, "a set-shaped payload never enters the form branch");
   check(decide(vary({ assignments: [Object.assign({}, autoRow, { value: Object.assign({}, autoRow.value, { kind: "set" }) })] })) === false, "a set-kind assignment row never satisfies the form branch");
+  /* one release per assignment (partial sittings batch, 2026-11-02) */
+  const consumer = status => ({ owner: CODE, key: "attempt:202606asiav1:1600000000:zzzz", value: { assignmentId: "a-auto", status: status } });
+  check(decide(vary({ others: [consumer("completed")] })) === false, "a SECOND completed attempt stamping an already-consumed auto row is NOT released (one release per assignment — the forged-assignmentId case)");
+  check(decide(vary({ others: [consumer("timed-out")] })) === false, "…a timed-out consumer counts the same");
+  check(decide(vary({ others: [consumer("in-progress")] })) === true, "another attempt naming the row that is still IN PROGRESS has not consumed it (a deleted in-progress sitting's re-sit still releases)");
+  check(decide(vary({ others: [Object.assign({}, consumer("completed"), { owner: "AS-JKLMNPQR" })] })) === true, "another student's attempt naming the same id is not this code's consumer");
+  check(decide(vary({ others: [Object.assign({}, consumer("completed"), { key: base.p_key })] })) === true, "the row's OWN earlier write is not another attempt (the transition guard owns that case)");
+  check(decide(vary({ others: [Object.assign({}, consumer("completed"), { value: { assignmentId: "a-man", status: "completed" } })] })) === true, "a completed attempt under a DIFFERENT assignment leaves this one unconsumed");
 
   /* the real file: newest migration defining fn_upsert_attempt, and the branch's guards */
   const defining = fs.readdirSync(MIG_DIR).filter(f => /\.sql$/.test(f)).sort()
     .filter(f => /create or replace function public\.fn_upsert_attempt\(/.test(readLf(path.join(MIG_DIR, f))));
   const newest = defining[defining.length - 1] || "";
-  check(newest === "2026-11-02_assignment_options.sql", "the newest migration defining fn_upsert_attempt is the assignment-options one (ASSIGN_MIG_DIR=<dir without it> reds this)", defining.join(", "));
+  /* 2026-11-02 (partial sittings): the newest restatement is the one-release-
+     per-assignment guard, which restates this branch and adds one condition */
+  check(newest === "2026-11-02_one_release_per_assignment.sql", "the newest migration defining fn_upsert_attempt is the one-release-per-assignment one (ASSIGN_MIG_DIR=<dir without it> reds this)", defining.join(", "));
   const sql = newest ? readLf(path.join(MIG_DIR, newest)) : "";
   const fnStart = sql.indexOf("create or replace function public.fn_upsert_attempt(");
   const fnEnd = sql.indexOf("\n$$;", fnStart);
@@ -353,8 +371,17 @@ await run("3. fn_upsert_attempt: the form auto-release branch, modelled and pinn
     [/a\.value ->> 'releaseMode' = 'auto'/, "requires releaseMode = 'auto' on the ASSIGNMENT row"],
     [/coalesce\(a\.value ->> 'kind', ''\) <> 'set'/, "refuses a set-kind assignment row"],
     [/a\.value ->> 'testId' = split_part\(p_key, ':', 2\)/, "binds the assignment's testId to the KEY's testId"],
-    [/coalesce\(v_released, 'false'::jsonb\) = 'false'::jsonb/, "runs only when the stored flag is false (a tutor's release is preserved)"]
+    [/coalesce\(v_released, 'false'::jsonb\) = 'false'::jsonb/, "runs only when the stored flag is false (a tutor's release is preserved)"],
+    /* one release per assignment (partial sittings batch, 2026-11-02) */
+    [/and not exists \(\s*select 1\s*from public\.records o\s*where o\.owner_code = p_code\s*and o\.key like 'attempt:%'\s*and o\.key <> p_key\s*and o\.value ->> 'assignmentId' = \(p_value ->> 'assignmentId'\)\s*and o\.value ->> 'status' in \('completed', 'timed-out'\)\)/,
+      "requires that no OTHER completed or timed-out attempt of this code names the assignmentId (one release per assignment)"]
   ];
+  /* the previous text lacks that guard — the restatement is what adds it, and
+     this is the check that reds against the 2026-11-02 assignment-options body */
+  const prev = readLf(path.join(MIG_DIR, "2026-11-02_assignment_options.sql"));
+  const prevAt = prev.indexOf("-- Form auto-release"), prevIns = prev.indexOf("insert into public.records", prevAt);
+  const prevBranch = (prevAt >= 0 && prevIns > prevAt) ? prev.slice(prevAt, prevIns) : "";
+  control(prevBranch.length > 0 && !GUARDS[GUARDS.length - 1][0].test(prevBranch), "the 2026-11-02 assignment-options text has NO one-release guard — the check above goes red against it");
   check(branch.length > 0, "the migration's fn_upsert_attempt carries the form auto-release branch before its insert");
   GUARDS.forEach(([re, what]) => check(re.test(branch), "the branch " + what, re.source));
   /* the write still discards the client's flag: both the insert and the conflict update stamp coalesce(v_released) */
@@ -382,8 +409,8 @@ await run("4. startTestFlowLoaded / startAssignment: nothing starts without a va
     const calls = { begin: [], showOnly: [], choice: [], ready: 0 };
     const state = { pendingTiming: pending === undefined ? null : pending, timing: 1, reviewMode: {}, moduleState: null, activeAssignment: null, userName: CODE, sessionGen: 1 };
     const Attempts = { begin: (...a) => calls.begin.push(a) };
-    const fn = new Function("state", "Attempts", "showOnly", "setTimeout", "showReady", "openTimingChoice", "AssignmentRules", src + "\nreturn startTestFlowLoaded;")(
-      state, Attempts, id => calls.showOnly.push(id), () => 0, () => { calls.ready++; }, (t, a) => calls.choice.push([t, a]), RULES);
+    const fn = new Function("state", "Attempts", "showOnly", "setTimeout", "showReady", "openTimingChoice", "AssignmentRules", "AttemptScope", "renderHome", src + "\nreturn startTestFlowLoaded;")(
+      state, Attempts, id => calls.showOnly.push(id), () => 0, () => { calls.ready++; }, (t, a) => calls.choice.push([t, a]), RULES, SCOPE, () => { calls.home = (calls.home || 0) + 1; });
     const test = { testId: "202606asiav1", testName: "2026 June Asia v1", modules: [{ moduleId: "m1", questions: [] }] };
     fn(test, assignment);
     return { calls, state };
@@ -477,8 +504,10 @@ await run("4. startTestFlowLoaded / startAssignment: nothing starts without a va
     const OTC = extractFn(appSrc, "openTimingChoice");
     const mk = () => { const calls = { code: 0, flow: 0, shown: [] };
       const fn = new Function("AssignmentRules", "state", "openStartCode", "startTestFlow", "testById", "el", "escapeHtml", "timingChoiceLabel", "timingChoiceNote", "showOnly",
+        "AttemptScope", "scopeChoiceNote", "fixedTimingLine", "fixedScopeLine",
         OTC + "\nreturn openTimingChoice;")(RULES, {}, () => { calls.code++; }, () => { calls.flow++; }, () => null,
-          () => ({ textContent: "", innerHTML: "", disabled: false, classList: { add(){} } }), s => String(s), t => String(t), () => "", id => calls.shown.push(id));
+          () => ({ textContent: "", innerHTML: "", disabled: false, classList: { add(){}, toggle(){} } }), s => String(s), t => String(t), () => "", id => calls.shown.push(id),
+          SCOPE, () => "", () => "", () => "");
       return { fn, calls }; };
     const a = mk(); a.fn({ testId: "t", testName: "T" }, { assignmentId: "x", category: "test", timing: 1 });
     const b = mk(); b.fn({ testId: "t", testName: "T" }, { assignmentId: "y", category: "practice", timing: 1 });
@@ -557,9 +586,11 @@ await run("6. the record's timing badge: (student-selected) only on the literal 
   check(T.timingBadgeHtml(null) === "" && T.timingBadgeHtml(undefined) === "", "no record -> nothing");
   /* the surfaces: Past card, Score Details hero (which the printed report is), the dashboard rows */
   const rsd = extractFn(appSrc, "renderScoreDetails");
-  check(/const badgeHtml = timingBadgeHtml\(record\)/.test(rsd) && /<span class="sd-badge">' \+ badgeHtml \+ '<\/span>/.test(rsd), "Score Details renders the record's badge html in its hero line");
+  /* since partial sittings (2026-11-02) the badge line joins the scope badge and the timing badge */
+  const BADGE_LINE = /const badgeHtml = \[scopeBadgeHtml\(record\), timingBadgeHtml\(record\)\]\.filter\(Boolean\)\.join\(" · "\)/;
+  check(BADGE_LINE.test(rsd) && /<span class="sd-badge">' \+ badgeHtml \+ '<\/span>/.test(rsd), "Score Details renders the record's badge html (scope and timing) in its hero line");
   const rpc = extractFn(appSrc, "renderPastCards");
-  check(/const badgeHtml = timingBadgeHtml\(record\)/.test(rpc) && /<div class="pcard-badge">\$\{badgeHtml\}<\/div>/.test(rpc), "the Past card renders it too");
+  check(BADGE_LINE.test(rpc) && /<div class="pcard-badge">\$\{badgeHtml\}<\/div>/.test(rpc), "the Past card renders it too");
   const print = stylesCss.slice(stylesCss.indexOf("@media print{"));
   const hidden = (print.match(/\.sd-home, \.sd-hero-actions[^{]*\{ display:none/) || [""])[0];
   check(!/\.sd-hero-sub/.test(hidden) && /\.sd-hero-sub/.test(print), "the printed report keeps the hero line (and so the timing and its mark)");
@@ -605,7 +636,7 @@ await run("7. dashboard: Auto-released without a button; assignment timing text;
   const bare = (dashSrc.match(/timingBadgeHtml\(r\.timing\)/g) || []).length;
   check(bare === 0 && (dashSrc.match(/timingBadgeHtml\(r\)/g) || []).length >= 3, "viewAttempts, the detail pane and the set attempts table hand the record to the badge", String(bare));
   const va = extractFn(dashSrc, "viewAssign");
-  check(/assignTimingText\(a\)/.test(va) && /<th>Timing<\/th><th>Release<\/th>/.test(va) && /Auto-release<\/span>/.test(va), "the Assignments table shows the timing text and a Release column that says Auto-release");
+  check(/assignTimingText\(a\)/.test(va) && /<th>Timing<\/th><th>Scope<\/th><th>Release<\/th>/.test(va) && /Auto-release<\/span>/.test(va), "the Assignments table shows the timing text, a Scope column (partial sittings) and a Release column that says Auto-release");
   check(/const isSet = a\.kind === "set"/.test(va) && /Held — release manually/.test(va) && /Releases on submit/.test(va) && /a\.timeLimitMinutes/.test(va) && /a\.setName \|\| a\.setId/.test(va),
     "a practice-SET row in that table prints the set's own name, limit and release rule — never 'Manual' from releaseMode");
 });
@@ -619,7 +650,11 @@ await run("8. the choice screen and the bulk form: present, disabled until a pic
   const interps = otc.match(/\$\{[^}]*\}/g) || [];
   check(interps.length >= 3 && interps.every(x => /^\$\{escapeHtml\(/.test(x)), "every interpolation in the choice screen's innerHTML goes through escapeHtml", interps.join(" "));
   check(/el\("tcTestName"\)\.textContent = /.test(otc) && /el\("tcContinueBtn"\)\.disabled = true/.test(otc), "the test name is set as text and Continue is re-disabled on every open");
-  check(/el\("tcOptions"\)\.addEventListener\("change", \(\)=>\{\s*el\("tcContinueBtn"\)\.disabled = pickedTimingChoice\(\) === null;/.test(appSrc), "Continue enables only once a radio is on");
+  /* since partial sittings (2026-11-02) both blocks share one rule: Continue is live once every block SHOWN holds a valid pick */
+  check(/el\("tcOptions"\)\.addEventListener\("change", \(\)=>\{ el\("tcContinueBtn"\)\.disabled = !preflightPicksComplete\(\); \}\);/.test(appSrc) &&
+        /el\("tcScopeOptions"\)\.addEventListener\("change", \(\)=>\{ el\("tcContinueBtn"\)\.disabled = !preflightPicksComplete\(\); \}\);/.test(appSrc) &&
+        /if\(pc\.allowed && pickedTimingChoice\(\) === null\) return false;/.test(extractFn(appSrc, "preflightPicksComplete")),
+    "Continue enables only once a radio is on in every block shown (timing and scope through one rule)");
   check(/#screen-timing\{/.test(stylesCss) && /\.tc-opt\{/.test(stylesCss), "the screen has its styles");
   /* the dashboard form */
   const va = extractFn(dashSrc, "viewAssign");

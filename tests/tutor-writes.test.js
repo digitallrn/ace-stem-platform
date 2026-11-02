@@ -319,10 +319,13 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   // active-duplicate refusal and its status chain, the read-back, the cells
   "formTests", "selectTests", "unsatTestIds", "activeAssignmentFor", "syncTimingModeView", "canonJson", "newAssignmentId",
   "assignmentOf", "releaseCell", "timingLabel", "timingBadgeHtml", "assignTimingText", "releaseModeText",
+  // partial sittings (2026-11-02): the scope badge, the Scope column's text, the modules-already-sat line
+  "scopeBadgeHtml", "assignScopeText", "exposureHtml",
   "assignRowStatus", "attemptsForAssignment", "attemptCategoryMatches", "assignCountFor", "deletedMayClose", "assignmentsAtDeletionOf"];
 /* the shared assignment-row reader (attempts.js window.AssignmentRules): the
    dashboard page always has it (attempts.js loads before dashboard.js), so
    the harness takes the REAL one from the same attempts.js source */
+let RULES_SANDBOX = null;
 const RULES = (() => {
   const sb = { localStorage: { getItem: () => null, setItem(){}, removeItem(){}, key(){ return null; }, length: 0 },
     location: { search: "" }, document: { addEventListener(){}, createElement: () => ({}) },
@@ -332,8 +335,12 @@ const RULES = (() => {
   sb.window = sb; sb.addEventListener = () => {};
   vm.createContext(sb); vm.runInContext(attemptsSrc, sb);
   if(!sb.AssignmentRules) throw new Error("attempts.js defines no window.AssignmentRules");
+  RULES_SANDBOX = sb;
   return sb.AssignmentRules;
 })();
+/* AttemptScope (attempts.js, partial sittings 2026-11-02): the page always has
+   it too, and dashboard.js reads it at load (KEPT_CHECKS) and in its cells */
+const SCOPE = RULES_SANDBOX.AttemptScope;
 /* the real manifest: the page always has it, and the test picker, the
    duplicate check (sameTest) and the status line read it through testsById */
 const REAL_MANIFEST = (() => { const c = { window: {} }; vm.createContext(c);
@@ -429,7 +436,7 @@ function build(store, win, doc, opts){
   const URLStub = { createObjectURL: () => "blob:stub", revokeObjectURL(){} };
   const blobs = [];
   function BlobStub(parts){ this.text = (parts || []).join(""); blobs.push(this); }
-  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", "console", "AssignmentRules", `
+  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", "console", "AssignmentRules", "AttemptScope", `
     let recs = [], assigns = [], bugs = [], lastStartCode = null, profiles = {}, source = "storage", lastExport = null;
     let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {}, tab = "sets";
     let dedup = null;                      // canonical grouping is canonical-index.test.js's; here: exact keys only
@@ -494,7 +501,7 @@ function build(store, win, doc, opts){
   `);
   const windowStub = Object.assign({ confirm: () => true, BANK_INDEX: REAL_BANK_INDEX, TEST_MANIFEST: REAL_MANIFEST, location: { protocol: kind.protocol } }, win || {});
   /* the bare confirm() the dashboard calls answers as win.confirm does (yes by default) */
-  const d = factory(store.AS, $, StudentCode, (...a) => windowStub.confirm(...a), windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub, consoleStub, RULES);
+  const d = factory(store.AS, $, StudentCode, (...a) => windowStub.confirm(...a), windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub, consoleStub, RULES, SCOPE);
   d.warns = warns;
   d.els = els; d.$ = $;
   Object.defineProperty(d, "lastBlob", { get(){ return blobs[blobs.length - 1] || null; } });
@@ -2782,6 +2789,50 @@ const noSync = t => !/sync/i.test(t);
     check(s.server.size === 0 && !s.mirror.has("student:" + C1), "nothing written — not even the typed name's profile row");
     check(/^Not assigned — AS-ABCDEFGH already has an active assignment of 2026 June Asia v1 \(pending\)/.test(d.$("afMsg").textContent) && d.state().loads.render === 0 && d.state().loads.assigns === 0 && d.$("afName").value === "Erin K" && d.els.afTest.options[0].selected === true,
       "the refusal is in the form's own message line and the form is kept (no render, no reload)", d.$("afMsg").textContent);
+  });
+
+  /* =================== 14. partial sittings (2026-11-02): scopePolicy + rowVersion on every row =================== */
+  console.log("--- 14. partial sittings: the Part-of-the-test control writes scopePolicy and rowVersion on every row, read back; student-choice ticks; none ticked refused ---");
+  await run(async () => {
+    const s = makeStore({}); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1, T2]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    d.$("afScopeMode").value = "fixed"; d.$("afScope").value = "math";
+    await d.fns.createAssignment();
+    const t = status(d);
+    const rows = assignRows(s, C1);
+    check(rows.length === 2 && rows.every(r => JSON.stringify(r.scopePolicy) === JSON.stringify({ mode: "fixed", modules: ["ma1", "ma2"] }) && r.rowVersion === 2),
+      "a fixed Math part lands as scopePolicy {fixed, [ma1, ma2]} with rowVersion 2 on EVERY row of the plan", JSON.stringify(rows[0]));
+    check(/2 of 2 assignment rows written, 2 verified by reading each back\./.test(t) && noSync(t), "…read back and verified through the server (canonJson survives jsonb's reorder of the new keys)", t);
+    check(rows.every(r => RULES.scopePolicyOf(r).mode === "fixed" && RULES.scopePolicyOf(r).modules.join() === "ma1,ma2" && !RULES.rowTooNew(r)),
+      "…and the student app's readers read the row back as the two Math slots, at a version this client understands");
+  });
+  await run(async () => {
+    /* defaults: fixed FULL, with the version — a row this client begins */
+    const s = makeStore({}); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1]); d.$("afCat").value = "test"; d.$("afTiming").value = "1";
+    await d.fns.createAssignment();
+    const row = assignRows(s, C1)[0];
+    check(!!row && JSON.stringify(row.scopePolicy) === JSON.stringify({ mode: "fixed", modules: ["re1", "re2", "ma1", "ma2"] }) && row.rowVersion === 2 && RULES.scopePolicyOf(row).mode === "fixed" && !RULES.rowTooNew(row),
+      "defaults: fixed FULL and rowVersion 2 (the control's default is today's behaviour)", JSON.stringify(row));
+  });
+  await run(async () => {
+    /* student-choice: the ticked presets in the closed list's order; none ticked is refused before any write */
+    const s = makeStore({}); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    d.$("afScopeMode").value = "student-choice";
+    SCOPE.PRESET_NAMES.forEach(n => { d.$("afScopeAllow_" + n).checked = (n === "math" || n === "full" || n === "re2"); });
+    await d.fns.createAssignment();
+    const row = assignRows(s, C1)[0];
+    check(!!row && JSON.stringify(row.scopePolicy) === JSON.stringify({ mode: "student-choice", allowed: ["full", "math", "re2"] }) && row.rowVersion === 2,
+      "student-choice: scopePolicy carries exactly the ticked presets, in the closed list's order", JSON.stringify(row && row.scopePolicy));
+    check(JSON.stringify(RULES.scopePolicyOf(row)) === JSON.stringify({ mode: "student-choice", allowed: ["full", "math", "re2"] }), "…and the student app's reader reads it back as written");
+    const s2 = makeStore({}); const d2 = build(s2);
+    d2.els.afCodes = { selectedOptions: [{ value: C1 }] }; d2.els.afTest = selTests([T1]); d2.$("afCat").value = "practice"; d2.$("afTiming").value = "1";
+    d2.$("afScopeMode").value = "student-choice";
+    SCOPE.PRESET_NAMES.forEach(n => { d2.$("afScopeAllow_" + n).checked = false; });
+    await d2.fns.createAssignment();
+    check(s2.server.size === 0 && d2.$("afMsg").textContent === "Tick at least one part of the test for the student to choose from.", "no part ticked: refused with a message, nothing written", d2.$("afMsg").textContent);
+    everyMessage.push(d2.$("afMsg").textContent);
   });
 
   /* =================== 11. sweeps =================== */

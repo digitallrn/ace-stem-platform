@@ -48,6 +48,22 @@ limited, hence the checkpoint schedule in §3 rather than a write per click.
                                     // assignment let the student choose the timing and they did;
                                     // omitted otherwise. Top-level on purpose — `conditions` is a
                                     // string enum, not a bag. Stamped at begin, never changed.
+  "scope": {                        // OPTIONAL (2026-11-02, partial sittings): present only when the
+    "modules": ["ma1", "ma2"],      //   sitting is a PART of the form, or the student chose the part
+    "selectedByStudent": false      //   themselves ("Full test" chosen is then itself the information).
+  },                                //   Absent ⇒ a full sitting, so every older record reads unchanged.
+                                    //   `modules` are SLOTS — re1 re2 ma1 ma2, the question-id prefixes,
+                                    //   resolved to a module by section and ordinal, never the per-form
+                                    //   moduleId — one of the seven presets (full, re1+re2, ma1+ma2, any
+                                    //   one), in form order. The sitting runs on the form FILTERED to
+                                    //   them (attempts.js AttemptScope.testFor), so `modules` and
+                                    //   `answers` below hold ONLY the scoped modules: an out-of-scope
+                                    //   module is ABSENT from answers (never sat); an in-scope module the
+                                    //   student has not reached is BLANK (never-answered), as always.
+                                    //   Read back only through window.AttemptScope: a malformed scope
+                                    //   reads as full, `selectedByStudent` only as the literal true.
+                                    //   Stamped at begin, never changed; resume, crash-resume, Score
+                                    //   Details and Review Mode read it, never the assignment.
 
   "startedAt": "2026-07-23T18:02:11.000Z",
   "lastSavedAt": "2026-07-23T19:44:52.000Z",
@@ -362,6 +378,43 @@ Rules that prevent this:
 
 ## 10. Notes / decisions
 
+- **Partial sittings (2026-11-02).** An assignment row may carry
+  `scopePolicy: {mode:"fixed", modules:[slots]} | {mode:"student-choice",
+  allowed:[preset names]}` (absent ⇒ fixed full) and `rowVersion` (absent ⇒ 1;
+  the dashboard stamps 2 on every row it writes with a scopePolicy; a client
+  refuses to BEGIN a row above the version it understands with a visible
+  "Reload this page" line — never a full sitting under a rule it cannot
+  read). Both read only through `window.AssignmentRules`. The record's
+  `scope` (§2) is stamped at begin from the row's fixed preset or the
+  student's pick on the pre-flight screen, where it sits beside the timing
+  choice and is required. The recorder runs on a COPY of the form filtered
+  to the scope, as a practice set runs on its synthetic one-module test, so
+  the record holds only the scoped modules by construction; module order is
+  the form's own; a single section has no break and a single module no
+  second module; checkpointing and accommodations are per module as ever.
+  Scoring: full unchanged; one section ⇒ that section's EXACT scaled score
+  from the same per-module table (base + M1 + M2 is one section's own sum),
+  total null shown "—", labelled "Section only"; one module ⇒ raw count and
+  skills only, labelled "Single module"; never a total estimated from a part.
+  The Score Details hero — which the printed report is — carries the label,
+  with "(student-selected)" when `scope.selectedByStudent` is true. The
+  dashboard shows a scope badge on every attempt row, student card and
+  detail line, a Scope column on the Assignments table, and, on the assign
+  form, which slots each chosen student has already sat on each test
+  (`AttemptScope.openedSlots`: any answer under the slot with a visit, plus
+  a finished record's declared scope). A partial sitting completes its
+  assignment; the active-assignment refusal stands; "Select all not yet sat"
+  counts a test sat in any part. Server: a new migration
+  (`2026-11-02_one_release_per_assignment.sql`) keeps the stamped-assignmentId
+  binding and adds ONE guard — an assignment releases at most one completed
+  or timed-out attempt, the first; any later attempt stamped with that id
+  stays unreleased (the forged-assignmentId-to-a-consumed-auto-row case).
+  `scope` is never read server-side. The archive schema name is unchanged and
+  the export is the records as stored. Stated limit: a tab loaded before this
+  deploy knows no `rowVersion` and would sit a scoped row as a full test.
+  Proofs: `tests/partial-sittings.test.js` (every check with a control),
+  `tests/tutor-writes.test.js` §14, the scope-gate cases in
+  `tests/build-site-drift.test.js`; the deploy gate is `build-site.js`.
 - **Assignment options (2026-11-02).** An assignment row may carry
   `releaseMode: "manual" | "auto"` and `timingPolicy: {mode:"fixed", timing} |
   {mode:"student-choice", allowed:[…]}`; both are additive (absent ⇒ manual /

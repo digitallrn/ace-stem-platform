@@ -104,6 +104,20 @@ const TEST_MANIFEST = loadScript("testdata/manifest.js").window.TEST_MANIFEST;
 const BANK_MANIFEST = loadScript("testdata/bank-manifest.js").window.BANK_MANIFEST;
 const escapeHtml = loadScript("render.js").escapeHtml;       // the real one: escapes & < > " '
 if(typeof escapeHtml !== "function") throw new Error("render.js did not define escapeHtml");
+/* AttemptScope (attempts.js, partial sittings 2026-11-02): the page always has
+   it (attempts.js loads before dashboard.js); the modules-already-sat line in
+   the assign block and KEPT_CHECKS read it. The REAL one, from attempts.js. */
+const AttemptScope = (() => {
+  const sb = { localStorage: { getItem: () => null, setItem(){}, removeItem(){}, key(){ return null; }, length: 0 },
+    location: { search: "" }, document: { addEventListener(){}, createElement: () => ({}) },
+    navigator: { userAgent: "node", onLine: true }, screen: { width: 1, height: 1 },
+    setInterval: () => 0, clearInterval(){}, setTimeout: () => 0, clearTimeout(){},
+    fetch: () => Promise.reject(new Error("network blocked in test")) };
+  sb.window = sb; sb.addEventListener = () => {};
+  vm.createContext(sb); vm.runInContext(fs.readFileSync("attempts.js", "utf8"), sb);
+  if(!sb.AttemptScope) throw new Error("attempts.js defines no window.AttemptScope");
+  return sb.AttemptScope;
+})();
 const nameOf = id => (TEST_MANIFEST.find(t => t.testId === id) || {}).testName;
 const questionIdsCache = {};
 function questionIds(testId){
@@ -133,6 +147,8 @@ const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled"
   // bulk assign (2026-11-02): the overlap block follows the multi-select, and
   // renderKeepingInputs re-syncs the timing-mode view after a restore
   "formTests", "selectTests", "syncTimingModeView",
+  // partial sittings (2026-11-02): the modules-already-sat line beside the overlap block, and the row verdict it reads
+  "exposureHtml", "sameTest", "assignRowStatus", "attemptsForAssignment", "assignCountFor", "attemptCategoryMatches", "deletedMayClose", "assignmentsAtDeletionOf", "orphanStubs",
   // tombstones (2026-09-18): the seen set and the code pickers read these
   "tombFor", "isDeletedStudent", "isTombstoned", "deletedAttemptsOf",
   // retired bank items + the builder view itself (2026-09-30)
@@ -194,8 +210,9 @@ function build(opts){
   if(opts.inlined) windowStub.DEDUP_INDEX = opts.inlined;
   const setTimeoutStub = (fn, ms) => { timers.push({ fn, ms, cleared: false }); return timers.length; };
   const clearTimeoutStub = id => { if(timers[id - 1]) timers[id - 1].cleared = true; };
-  const factory = new Function("window", "document", "$", "escapeHtml", "StudentCode", "setTimeout", "clearTimeout", "wipe", "BANK_INDEX", `
+  const factory = new Function("window", "document", "$", "escapeHtml", "StudentCode", "setTimeout", "clearTimeout", "wipe", "BANK_INDEX", "AttemptScope", `
     let recs = [], profiles = {}, builder = null, tab = ${JSON.stringify(opts.tab || "sets")}, tombs = {}, sets = [];
+    let assigns = [];                      // the Assignments list, read by the modules-already-sat line (2026-11-02)
     let openAttemptId = null;
     const loadingTests = {};
     const loads = { render: 0 };
@@ -227,7 +244,8 @@ function build(opts){
     if(el.options) el.options.forEach(o => { o.selected = false; }); else el.selectedOptions = [];
   });
   const d = factory(windowStub, documentStub, $, escapeHtml, StudentCode, setTimeoutStub, clearTimeoutStub, wipe,
-    windowStub.BANK_INDEX);   // a browser page reads window globals bare too (dashboard.js says BANK_INDEX.entries)
+    windowStub.BANK_INDEX,    // a browser page reads window globals bare too (dashboard.js says BANK_INDEX.entries)
+    AttemptScope);
   d.els = els; d.$ = $; d.scripts = scripts; d.timers = timers; d.window = windowStub;
   return d;
 }
@@ -269,6 +287,15 @@ run("proof", () => {
   check(d.state().dedupState === "ready" && d.scripts.length === 0,
     "an inlined window.DEDUP_INDEX is adopted synchronously — no fetch");
   check(d.fns.attemptRefs(formRec("202506asiav2")).length === 98, "a completed form record exposes the 98 questions its answers map holds");
+  /* partial sittings (2026-11-02): a Math-only record's answers hold only
+     its Math questions, so nothing of Reading and Writing can read as seen */
+  {
+    const mathOnly = {};
+    Object.keys(answersFor("202506asiav2")).filter(q => /^ma/.test(q)).forEach(q => { mathOnly[q] = { given: null, correct: null }; });
+    const pr = formRec("202506asiav2", "completed", { answers: mathOnly, scope: { modules: ["ma1", "ma2"], selectedByStudent: false } });
+    const refs = d.fns.attemptRefs(pr);
+    check(refs.length === 44 && refs.every(r => /:ma[12]-/.test(r)), "a completed Math-only record (partial sittings) exposes only its 44 Math refs — nothing of Reading and Writing counts as seen", refs.length + " refs");
+  }
   const o = d.fns.overlapFor(CODE, "202506asiav4");
   check(!!o && o.total === 98 && o.attempts === 1 && o.caveat === "", "the offered form has 98 indexed items; one completed attempt counted; nothing unindexed",
     o && JSON.stringify({ total: o.total, attempts: o.attempts, caveat: o.caveat }));

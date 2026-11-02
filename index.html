@@ -161,10 +161,20 @@
     </button>
   </div>
   <div class="sc-body tc-body">
-    <h1>Choose Your Timing</h1>
-    <p class="sc-sub">Your tutor has let you choose how much time you'll have on <b id="tcTestName"></b>.</p>
-    <p class="sc-sub">Pick one to continue. It applies to every module and can't be changed once the test begins.</p>
-    <div class="tc-options" id="tcOptions" role="radiogroup" aria-label="Timing options"></div>
+    <h1 id="tcTitle">Before You Start</h1>
+    <p class="sc-sub">Your tutor has left a choice to you on <b id="tcTestName"></b>.</p>
+    <p class="sc-sub">Pick to continue. A pick applies to the whole sitting and can't be changed once the test begins.</p>
+    <!-- one block per choice the tutor left open (partial sittings, 2026-11-02);
+         app.js hides the block whose value is fixed and states that value in tcFixedNote -->
+    <div id="tcTimingBlock">
+      <h2 class="tc-block-title">How much time?</h2>
+      <div class="tc-options" id="tcOptions" role="radiogroup" aria-label="Timing options"></div>
+    </div>
+    <div id="tcScopeBlock">
+      <h2 class="tc-block-title">Which part of the test?</h2>
+      <div class="tc-options" id="tcScopeOptions" role="radiogroup" aria-label="Part of the test"></div>
+    </div>
+    <p class="sc-sub tc-fixed hidden" id="tcFixedNote"></p>
     <div class="sc-error hidden" id="tcError"></div>
     <button class="pill yellow sc-start" id="tcContinueBtn" disabled>Continue</button>
   </div>

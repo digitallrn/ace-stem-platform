@@ -217,6 +217,75 @@ hidden (it writes). Keep the test-bank's Stage-3
 anchor `state.assignments = assigns;` appearing exactly once in app.js
 (build_stage3_preview.py replaces its first occurrence).
 
+**Partial sittings (2026-11-02): a scope on the assignment and the record.**
+An assignment row may carry `scopePolicy: {mode:"fixed", modules:[…]} |
+{mode:"student-choice", allowed:[preset names]}` (absent ⇒ fixed full) and
+`rowVersion` (absent ⇒ 1; the dashboard stamps 2 on every row it writes; a
+client refuses to BEGIN a row above `AssignmentRules.ROW_VERSION` with the
+card's "Reload this page to start this assignment" line — never a full
+sitting under a rule it cannot read; it cannot protect a tab loaded before
+the field existed). The record gains ONE optional top-level field, `scope:
+{modules, selectedByStudent}` (ATTEMPTS-SPEC §2), stamped at begin and never
+touched; absent ⇒ full, so a tutor-fixed full sitting is byte-identical to
+before (`tests/partial-sittings-golden.json` pins that against 21b6855's
+recorder). **The vocabulary is four SLOTS, `re1 re2 ma1 ma2` — the
+question-id prefixes, NOT `modules[].moduleId`** (that is a per-form string
+like `2026-june-asia-v2-math1`); a slot is resolved to a module by SECTION
+and ORDINAL within the section, and `build-site.js` fails the deploy on a
+form whose modules do not map onto the four in order with every question id
+under its slot (`AttemptScope.formProblems`, lifted from attempts.js; the
+self-check and the plants are in `tests/build-site-drift.test.js`). The
+seven presets — full, rw, math, re1, re2, ma1, ma2 — are the only scopes;
+anything else reads as full. **Everything reads through
+`window.AttemptScope`** (attempts.js, beside `AssignmentRules`): `scopeOf`
+(untrusted input; `selectedByStudent` counts only as the literal true),
+`testFor` — THE SEAM: the form with `modules` filtered to the record's
+scope, the very object for a full scope — `label` / `scoreLabel` (closed
+tables), `openedSlots`. The sitting RUNS on the scoped copy (`startTestFlow
+Loaded`), so the recorder has no scope branch: `modules[]`, `answers`,
+`score`, both blobs hold only the scoped modules; an out-of-scope module is
+ABSENT from `answers` (never sat), an in-scope unreached one BLANK
+(never-answered), as always — never conflate the two. `testFor` is called in
+exactly four places in app.js (start, `resumeTestFlowLoaded` BEFORE the
+clamp — a Math-only checkpoint at index 1 is the second Math module, never
+RW Module 2 — `openScoreDetailsLoaded` before `buildScoreRows`, and
+`storedModuleRaw`); hand it the WHOLE form, never an already-scoped copy (a
+copy loses its section ordinals). `crashResumeCandidate` range-checks
+against the scope; `scPrefillSource` skips partial records. Scoring: full
+unchanged; a section ⇒ that section's EXACT scaled score from the same
+per-module table (`scaledScores(…, scope)`: `{rw|math, total:null}`),
+"Section only", the total "—"; a module ⇒ null, raw count only, "Single
+module"; never a total from a part. The hero carries the words (the printed
+report is that DOM) and the scope badge beside the timing badge, with
+"(student-selected)" on the literal true; the Past card, the Attempts row,
+the Students card (RW "—" for a Math-only record, via `countPair`), the
+detail line and the Assignments table's Scope column the same. The
+pre-flight screen (`openTimingChoice`, `#screen-timing`) now has a block per
+student choice — timing, part of the test — and states the fixed one;
+Continue needs a pick in every block shown; `state.pendingScope` has
+`pendingTiming`'s exact lifecycle (cleared at the same sites). The assign
+form's Part-of-the-test control defaults to fixed full; `createAssignment`
+writes `scopePolicy` + `rowVersion` on every row; the overlap block gains
+"has sat <form>: RW Module 1 (completed …)" per chosen student
+(`exposureHtml`). Server: `supabase/migrations/2026-11-02_one_release_per_
+assignment.sql` restates `fn_upsert_attempt` and adds ONE guard to the form
+auto-release branch — no OTHER completed or timed-out attempt of this code
+may already name the assignmentId (deleted records included, since their
+rows stay) — so an assignment releases at most one sitting and a forged
+assignmentId naming a consumed auto row grants nothing; the stamped-id
+binding was already there. `scope` is never read server-side. Deploy order:
+apply the migration FIRST, then push (either is safe; it is restrictive
+only). Limits: archive-then-delete removes the consuming record, after which
+the guard cannot see it; the set branch is unchanged. Proofs:
+`tests/partial-sittings.test.js` (readers, every shipped form and archived
+build, the recorder for real with the golden, the start path, crash-resume,
+the hero/print DOM and review bounds, the Past card, the dashboard, the SPR
+audit over a partial export, source pins — every check with a control),
+`tests/tutor-writes.test.js` §14, `tests/build-site-drift.test.js`'s scope
+cases, `tests/assignment-options.test.js` §3's forged-id case (red against
+the 2026-11-02 assignment-options text); the viewer and injection proofs
+carry the new surfaces.
+
 **Assignment options (2026-11-02): auto score release, the student's timing
 choice, bulk assign.** Two ADDITIVE fields on the assignment row —
 `releaseMode: "manual" | "auto"` (absent ⇒ manual, today's behaviour) and

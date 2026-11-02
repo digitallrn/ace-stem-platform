@@ -267,6 +267,49 @@ try{
       "an ARCHIVED build's relabelled figure still builds, with a WARNING naming " + f, why(r));
   });
 
+  /* THE SCOPE GATE (partial sittings, 2026-11-02): a form whose modules do
+     not map onto re1, re2, ma1, ma2 by section and ordinal — or whose
+     question ids sit under the wrong slot prefix — is a red build naming the
+     form; the same plant in an archived build is a WARNING naming the file;
+     a broken extraction of the rule from attempts.js is said to be that. The
+     clean tree reports the gate ran over every form. */
+  run("scope-clean", () => {
+    const r = build();
+    const g = /scope slots — (\d+) current forms and (\d+) archived builds checked against re1\/re2\/ma1\/ma2 by section and order; every current form maps/.exec(r.out);
+    check(r.status === 0 && !!g && +g[1] === TESTS.length && +g[2] >= 1, "the unmodified tree: the scope gate ran over every current form and every archived build (" + (g ? g[1] + " / " + g[2] : "no gate line") + ")", r.out.slice(-400));
+  });
+  run("scope-section-order", () => {
+    /* the first module relabelled Math: Math, RW, Math, Math maps onto no slot list */
+    const t = TESTS[0];
+    const r = planted(t.testId + ".js", s => s.replace(/"section":\s*"Reading and Writing"/, '"section": "Math"'));
+    check(r.status === 1 && /do not map onto the scope slots/.test(r.out) && r.out.indexOf("testdata/" + t.testId + ".js") !== -1 && /do not map onto re1, re2, ma1, ma2 by section and order/.test(r.out),
+      "a form whose modules are out of section order FAILS the build, naming " + t.testId, why(r));
+  });
+  run("scope-prefix", () => {
+    /* a Reading and Writing Module 1 question id relabelled under ma1 */
+    const t = TESTS[0];
+    const r = planted(t.testId + ".js", s => s.replace(/"id":\s*"re1-q1"/, '"id": "ma1-q1"'));
+    check(r.status === 1 && r.out.indexOf("testdata/" + t.testId + ".js") !== -1 && /\(re1\): 1 question id\(s\) not under re1-/.test(r.out),
+      "a question id under the wrong slot prefix FAILS the build, naming the form, the module's slot and the id", why(r));
+  });
+  run("scope-archived", () => {
+    const f = fs.readdirSync(path.join(tmp, "testdata", "archive")).find(x => x.indexOf("@") !== -1);
+    const r = planted(path.join("archive", f), s => s.replace(/"section":\s*"Reading and Writing"/, '"section": "Math"'));
+    check(r.status === 0 && /archived builds that do not map onto the scope slots/.test(r.warn) && r.warn.indexOf(f) !== -1,
+      "an ARCHIVED build out of section order still builds, with a WARNING naming " + f, why(r));
+  });
+  run("scope-extraction", () => {
+    const r = plantedAt("attempts.js", s => s.replace("window.AttemptScope = (function(){", "window.AttemptScopeRenamed = (function(){"));
+    check(r.status === 1 && /Could not take the scope rule from attempts\.js/.test(r.out) && !/do not map onto the scope slots/.test(r.out),
+      "a renamed AttemptScope fails the build as an EXTRACTION problem, not as refused test data", why(r));
+  });
+  run("scope-rule-broken", () => {
+    /* a rule that accepts everything fails the self-check before any form is judged */
+    const r = plantedAt("attempts.js", s => s.replace("  function formProblems(test){\n    const slots = slotsOf(test);", "  function formProblems(test){\n    return [];\n    const slots = slotsOf(test);"));
+    check(r.status === 1 && /scope rule taken from attempts\.js is not working here/.test(r.out) && /accepts modules out of section order/.test(r.out),
+      "a formProblems that accepts everything fails the self-check naming what it accepted", why(r));
+  });
+
   run("bank-version", () => {
     const b = BANKS[BANKS.length - 1];
     const r = planted("bank-manifest.js", s => s.replace(

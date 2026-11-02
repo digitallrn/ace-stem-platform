@@ -294,6 +294,83 @@ archiveFiles.forEach(f => {
   console.log("  figures by type: current and bank (" + types(tally.live) + "); archived (" + types(tally.archived) + ")");
 }
 
+/* Every FORM the deploy ships must map onto the four scope slots (partial
+   sittings, 2026-11-02; attempts.js AttemptScope). A scope names slots —
+   re1 re2 ma1 ma2 — and a slot is resolved to a module by SECTION and
+   ORDINAL within the section, cross-checked against the module's question-id
+   prefix. That rule is an assumption about every form unless something
+   checks it, so this does: a current form whose modules are not exactly
+   Reading and Writing ×2 then Math ×2, in that order, or whose question ids
+   sit under the wrong prefix, is a red build naming the form. The judge is
+   AttemptScope.formProblems taken from attempts.js itself (lifted by text,
+   as the image guard is from app.js), so the build checks exactly what the
+   app runs; an archived build is byte-pinned and cannot be re-exported, so a
+   problem there is a WARNING naming it (a scoped sitting on that build would
+   resume or review against the wrong module). */
+{
+  const vm = require("vm");
+  let scopeApi;
+  try{
+    const src = fs.readFileSync("attempts.js", "utf8");
+    const start = src.indexOf("window.AttemptScope = (function(){");
+    if(start === -1) throw new Error("window.AttemptScope not found in attempts.js");
+    /* the IIFE ends at the first `})();` at depth zero after its opening */
+    let i = start + "window.AttemptScope = (function(){".length, depth = 1;
+    while(depth > 0 && i < src.length){
+      if(src[i] === "{") depth++;
+      else if(src[i] === "}") depth--;
+      i++;
+    }
+    const close = src.indexOf(")();", i);
+    if(close === -1) throw new Error("the AttemptScope IIFE has no closing `)();`");
+    const block = src.slice(start, close + 4);
+    const w = {};
+    new Function("window", block)(w);
+    scopeApi = w.AttemptScope;
+    if(!scopeApi || typeof scopeApi.formProblems !== "function") throw new Error("AttemptScope.formProblems is not a function");
+  }catch(e){
+    die(["Could not take the scope rule from attempts.js (" + e.message + ").",
+         "build-site.js checks every shipped form with attempts.js's own AttemptScope.formProblems."]);
+  }
+  /* SELF-CHECK: the rule as lifted must accept a known-good form and refuse a
+     known-bad one, or a broken extraction would read as "every form is fine" */
+  {
+    const mk = (secs, ids) => ({ modules: secs.map((s, i) => ({ moduleId: "m" + i, section: s,
+      questions: [{ id: ids[i] + "-q1" }, { id: ids[i] + "-q2" }] })) });
+    const good = mk(["Reading and Writing", "Reading and Writing", "Math", "Math"], ["re1", "re2", "ma1", "ma2"]);
+    const swapped = mk(["Reading and Writing", "Math", "Reading and Writing", "Math"], ["re1", "ma1", "re2", "ma2"]);
+    const mislabelled = mk(["Reading and Writing", "Reading and Writing", "Math", "Math"], ["re1", "re1", "ma1", "ma2"]);
+    const wrong = [];
+    if(scopeApi.formProblems(good).length) wrong.push("refuses a well-formed four-module form");
+    if(!scopeApi.formProblems(swapped).length) wrong.push("accepts modules out of section order");
+    if(!scopeApi.formProblems(mislabelled).length) wrong.push("accepts question ids under the wrong slot prefix");
+    if(wrong.length) die(["The scope rule taken from attempts.js is not working here: it " + wrong.join("; it ") + ".",
+      "This is build-site.js's extraction, not the test data: AttemptScope in attempts.js must stay a self-contained IIFE."]);
+  }
+  const judge = (rel, id) => {
+    const c = { window: { __TESTDATA__: {} } };
+    vm.createContext(c);
+    vm.runInContext(fs.readFileSync(rel, "utf8"), c, { filename: rel });
+    const data = c.window.__TESTDATA__[id];
+    if(!data) return [rel + " does not register " + id];
+    return scopeApi.formProblems(data).map(p => rel.replace(/\\/g, "/") + ": " + p);
+  };
+  const fatalScope = [].concat(...manifestIds.map(id => judge(path.join(TESTDATA_DIR, id + ".js"), id)));
+  const archivedScope = [].concat(...archiveFiles.map(f => judge(path.join(ARCHIVE_DIR, f), f.split("@")[0])));
+  if(fatalScope.length){
+    die(["Forms whose modules do not map onto the scope slots re1, re2, ma1, ma2 — a partial sitting would run or review the wrong module:"]
+      .concat(fatalScope.slice(0, 20).map(b => "  " + b), fatalScope.length > 20 ? ["  … and " + (fatalScope.length - 20) + " more"] : [],
+        ["A form carries exactly two Reading and Writing modules then two Math modules, each question id under its",
+         "module's slot prefix (attempts.js AttemptScope.formProblems). Fix the form in the test-bank repo and re-export."]));
+  }
+  if(archivedScope.length){
+    console.warn("build-site.js: WARNING — archived builds that do not map onto the scope slots (a scoped sitting on them would resume or review the wrong module): " +
+      archivedScope.slice(0, 10).join("; ") + (archivedScope.length > 10 ? "; … and " + (archivedScope.length - 10) + " more" : ""));
+  }
+  console.log("build-site.js: scope slots — " + manifestIds.length + " current forms and " + archiveFiles.length +
+    " archived builds checked against re1/re2/ma1/ma2 by section and order; every current form maps");
+}
+
 /* The canonical-id index records the build of every form and bank it was
    generated against. Drift against the manifests is NOT fatal — the
    dashboard names it in its own notice and degrades to "not indexed" /

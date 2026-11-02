@@ -193,8 +193,10 @@ window.Dashboard = (function(){
      from the restored codes. */
   const KEPT_VALUES = ["afFree", "afName", "afCat", "afTiming", "afOpens", "afExpires", "afResetCode",
                        "afRelease", "afTimingMode",
+                       "afScopeMode", "afScope",                 // partial sittings (2026-11-02)
                        "saSet", "saFree", "saLimit", "saExpires"];
-  const KEPT_CHECKS = ["saHold", "afAllow1", "afAllow15", "afAllow2", "afAllowU"];
+  const KEPT_CHECKS = ["saHold", "afAllow1", "afAllow15", "afAllow2", "afAllowU"]
+    .concat(AttemptScope.PRESET_NAMES.map(n => "afScopeAllow_" + n));
   const KEPT_MULTI = ["afCodes", "afTest", "saCodes"];     // afTest is a multi-select since 2026-11-02 (bulk assign)
   function renderKeepingInputs(){
     const vals = {}, checks = {}, multi = {};
@@ -333,9 +335,11 @@ window.Dashboard = (function(){
   /* The refs an attempt exposed — always from the RECORD, so the list is the
      build the student actually sat. A FORM sitting: every question its
      answers map holds (attempts.js writes an entry for every question of
-     every opened module, and a completed or timed-out sitting opened every
-     module), qualified with its own testId — canonRef() resolves a legacy
-     id at lookup time. A SET sitting: its frozen snapshot (setQuestions[]
+     every module the sitting RAN ON — the whole form, or, since partial
+     sittings (2026-11-02), only the scoped modules: an out-of-scope module
+     is absent from the map and so never counts as seen), qualified with its
+     own testId — canonRef() resolves a legacy id at lookup time. A SET
+     sitting: its frozen snapshot (setQuestions[]
      .ref), falling back to the answer keys. Record-derived strings are used
      only as lookup keys and escaped wherever they are shown; a ref the
      index does not know is COUNTED as unindexed and reported, never
@@ -584,9 +588,54 @@ window.Dashboard = (function(){
     seenMemo = new Map();
     try{
       if(!tests.length) box.innerHTML = assignOverlapHtml(codes, "");
-      else if(!codes.length || dedupState !== "ready") box.innerHTML = assignOverlapHtml(codes, tests[0], tests.length);
-      else box.innerHTML = dedupNoticeHtml() + tests.map(id => assignOverlapHtml(codes, id, 0, true)).join("");
+      else if(!codes.length) box.innerHTML = assignOverlapHtml(codes, tests[0], tests.length);
+      /* the modules-already-sat line needs no index, so it shows even while
+         the canonical-id index is loading or missing */
+      else if(dedupState !== "ready") box.innerHTML = tests.map(id => exposureHtml(codes, id)).join("") + assignOverlapHtml(codes, tests[0], tests.length);
+      else box.innerHTML = dedupNoticeHtml() + tests.map(id => exposureHtml(codes, id) + assignOverlapHtml(codes, id, 0, true)).join("");
     }finally{ seenMemo = null; }
+  }
+  /* Which MODULES of this form each chosen student has already sat (partial
+     sittings, 2026-11-02): from their live form records of the canonical
+     test — AttemptScope.openedSlots reads every record the same way (the
+     modules opened, plus a finished record's declared scope) — each slot with
+     the newest sitting's status and date. Deleted records and sets never
+     count; an assignment row Completed by hint alone (its record archived
+     away) reads "sat — modules unknown". Information only, beside the
+     canonical-id overlap: nothing is excluded automatically. */
+  function exposureHtml(codes, testId){
+    const t = manifestEntry(String(testId == null ? "" : testId));
+    if(!t) return "";
+    return codes.map(code => {
+      const bySlot = Object.create(null);          // slot -> [attemptLabel]
+      recs.forEach(r => {
+        if(!r || !r.student || r.student.key !== code || r.kind === "set" || isTombstoned(r)) return;
+        if(!sameTest(r.testId, t.testId)) return;
+        if(["completed", "timed-out", "in-progress"].indexOf(r.status) === -1) return;
+        const lab = attemptLabel(r);
+        AttemptScope.openedSlots(r).forEach(s => { (bySlot[s] = bySlot[s] || []).push(lab); });
+      });
+      /* the ROW's own verdict — the one "Select all not yet sat" and the
+         Assignments table read (assignRowStatus): a form row of this test
+         that reads Completed or In progress while no LIVE record above
+         contributed a slot — its record archived away (the completedAttemptId
+         hint) or deleted (present-but-marked: the row stays Completed, the
+         slots are not shown). Said as such, so this line never disagrees
+         with the button beside it. */
+      const e = assigns.find(x => x.code === code);
+      const rowSat = !!(e && Array.isArray(e.list) && e.list.some(a => a && typeof a === "object" && a.kind !== "set" &&
+        sameTest(a.testId, t.testId) && ["completed", "in-progress"].indexOf(assignRowStatus(code, a)) !== -1));
+      const slots = AttemptScope.SLOTS.filter(s => bySlot[s]);
+      let body;
+      if(!slots.length) body = rowSat ? "sat — modules unknown (no live record of it in storage: archived away, or deleted)" : "none of its modules yet";
+      else {
+        body = slots.map(s => {
+          const latest = bySlot[s].slice().sort((a, b) => String(b.when || "").localeCompare(String(a.when || "")))[0];
+          return esc(AttemptScope.slotLabel(s, true)) + ' <span class="dash-hint">(' + esc(latest.status) + " " + esc(latest.whenText) + ")</span>";
+        }).join(", ");
+      }
+      return `<div class="canon-overlap exposure">${studentCell(code)} has sat ${esc(t.testName)}: ${body}.</div>`;
+    }).join("");
   }
 
   /* ---- the builder's ONE rule for what it already holds ----
@@ -799,6 +848,24 @@ window.Dashboard = (function(){
   }
   function releaseModeText(a){
     return AssignmentRules.releaseModeOf(a) === "auto" ? "Auto-release" : "Manual";
+  }
+  /* A RECORD's scope badge (partial sittings, 2026-11-02), the timing badge's
+     twin: AttemptScope's closed-table label — "" for a full sitting unless the
+     student chose it — and the "(student-selected)" mark on the literal true.
+     A crafted scope reads as full and carries no text of its own. */
+  function scopeBadgeHtml(r){
+    const sc = AttemptScope.scopeOf(r);
+    const lbl = AttemptScope.label(sc, sc.selected);
+    if(!lbl) return "";
+    return ` <span class="dstatus tm">${esc(lbl)}${sc.selected ? ' <span class="sd-sel" title="' + escAttr(AttemptScope.SELECTED_TITLE) + '">(student-selected)</span>' : ""}</span>`;
+  }
+  /* An ASSIGNMENT row's part of the test, as the Assignments table shows it:
+     the fixed preset, or the presets a student-choice row offers. */
+  function assignScopeText(a){
+    const p = AssignmentRules.scopePolicyOf(a);
+    if(p.mode === "student-choice") return "Student chooses: " + p.allowed.map(n => AttemptScope.presetLabel(n)).join(", ");
+    const sc = AttemptScope.fromModules(p.modules) || AttemptScope.fromPreset("full");
+    return AttemptScope.presetLabel(sc.preset);
   }
   /* The assignment row a record was sat under, from the page's own list —
      null when the record names none or the row is gone. The record's
@@ -1256,7 +1323,7 @@ window.Dashboard = (function(){
       sorted.map((r, i) => `
         <tr data-att="${escAttr(r.attemptId)}"${isTombstoned(r) ? ' class="tomb"' : ""}>
           <td>${studentCell(r.student && r.student.code)}</td>
-          <td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</td>
+          <td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : scopeBadgeHtml(r)}</td>
           <td>${fmtDate(r.startedAt)}</td>
           <td><b>${scoreStr(r)}</b></td>
           <td>${statusBadge(r)}</td>
@@ -1329,7 +1396,7 @@ window.Dashboard = (function(){
           const bs = (r.score && r.score.bySection) || {};
           const rw = bs["Reading and Writing"], ma = bs["Math"];
           return `<tr data-att="${escAttr(r.attemptId)}"${isTombstoned(r) ? ' class="tomb"' : ""}>
-            <td>${fmtDate(r.startedAt)}</td><td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : ""}</td>
+            <td>${fmtDate(r.startedAt)}</td><td>${esc(r.testName || r.testId)}${r.kind === "set" ? ' <span class="dstatus tm">set</span>' : scopeBadgeHtml(r)}</td>
             <td><b>${scoreStr(r)}</b></td>
             <td>${countPair(rw)}</td>
             <td>${countPair(ma)}</td>
@@ -1635,7 +1702,7 @@ window.Dashboard = (function(){
     }));
     const rowsHtml = rows.map(r => {
       if(r.legacy){
-        return `<tr><td>${studentCell(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>Standard</td><td>Manual</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
+        return `<tr><td>${studentCell(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>Standard</td><td>Full test</td><td>Manual</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
       }
       const a = r.a;
       const st = assignRowStatus(r.code, a);
@@ -1650,6 +1717,8 @@ window.Dashboard = (function(){
       const timingCell = isSet
         ? (a.timeLimitMinutes ? esc(String(a.timeLimitMinutes)) + " min" : "Untimed")
         : esc(assignTimingText(a));
+      // a set has no part-of-the-form; a form row shows its scopePolicy (partial sittings, 2026-11-02)
+      const scopeCell = isSet ? "—" : esc(assignScopeText(a));
       const releaseCellHtml = isSet
         ? (a.holdRelease === true ? "Held — release manually" : "Releases on submit")
         : (auto ? '<span class="dstatus ok" title="Scores are released the moment the student submits — no Release button to press">Auto-release</span>' : esc(releaseModeText(a)));
@@ -1658,6 +1727,7 @@ window.Dashboard = (function(){
         <td>${nameCell}</td>
         <td>${esc(a.category || "?")}</td>
         <td>${timingCell}</td>
+        <td>${scopeCell}</td>
         <td>${releaseCellHtml}</td>
         <td>${a.startCode ? "<b>" + esc(String(a.startCode)) + "</b>" : "—"}</td>
         <td>${fmtDay(a.windowOpens)}</td>
@@ -1686,7 +1756,7 @@ window.Dashboard = (function(){
               <select id="afTest" class="af-multi" multiple size="${Math.min(Math.max(manifestTests.length, 4), 14)}">${manifestTests.map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select>
               <span class="af-selrow">
                 <button type="button" class="dash-rel" id="afSelAll" title="Select every test in the library">Select all</button>
-                <button type="button" class="dash-rel" id="afSelUnsat" title="Select every test that none of the chosen students has a finished or in-progress attempt of in storage (archived-away sittings count only through their assignment's completed mark)">Select all not yet sat</button>
+                <button type="button" class="dash-rel" id="afSelUnsat" title="Select every test that none of the chosen students has a finished or in-progress attempt of in storage — in any part of the test (a Math-only sitting counts as sat; the block below the options says which modules); archived-away sittings count only through their assignment's completed mark">Select all not yet sat</button>
                 <span class="dash-hint" id="afSelMsg"></span>
               </span></label>
             <label>Category
@@ -1714,6 +1784,19 @@ window.Dashboard = (function(){
                 <label><input type="checkbox" id="afAllow2" checked> 2×</label>
                 <label><input type="checkbox" id="afAllowU" checked> Untimed</label>
               </span></div>
+            <label>Part of the test
+              <select id="afScopeMode" title="Fixed: the sitting covers the part set here. Student chooses: the student picks one of the ticked parts before the start code. A part is scored on its own — a section gets its scaled section score and no total, a single module a raw count only.">
+                <option value="fixed">Fixed — one part, set here</option>
+                <option value="student-choice">Student chooses — from the parts ticked</option>
+              </select></label>
+            <label id="afScopeFixedWrap">Fixed part
+              <select id="afScope">${AttemptScope.PRESET_NAMES.map(n =>
+                `<option value="${escAttr(n)}">${esc(AttemptScope.presetLabel(n))}</option>`).join("")}</select></label>
+            <div class="af-field hidden" id="afScopeChoiceWrap">Parts the student may choose from
+              <span class="af-allowed">${AttemptScope.PRESET_NAMES.map(n =>
+                /* n is a preset NAME from AttemptScope's closed list (full, rw, math, re1…): a plain identifier, so it is the id itself */
+                `<label><input type="checkbox" id="afScopeAllow_${n}"${(n === "full" || n === "rw" || n === "math") ? " checked" : ""}> ${esc(AttemptScope.presetLabel(n))}</label>`).join("")}
+              </span></div>
             <label>Window opens (optional)
               <input type="date" id="afOpens"></label>
             <label>Expires (end of day)
@@ -1729,7 +1812,7 @@ window.Dashboard = (function(){
           ${lastStartCode ? `<div class="af-code">Start code — read this aloud<div class="af-code-big">${esc(lastStartCode)}</div></div>` : ""}
         </div>
         ${rows.length ? `<table class="dtable"><thead><tr>
-            <th>Student</th><th>Test</th><th>Category</th><th>Timing</th><th>Release</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
+            <th>Student</th><th>Test</th><th>Category</th><th>Timing</th><th>Scope</th><th>Release</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
           </tr></thead><tbody>${rowsHtml}</tbody></table>
           <p class="dash-hint">Assignments with an attempt (in-progress or completed) can't be deleted.</p>`
           : '<p class="dash-empty">No assignments yet. A student with no assignments sees an empty home screen — everything has to be assigned.</p>'}
@@ -1878,11 +1961,20 @@ window.Dashboard = (function(){
      the mode) */
   function syncTimingModeView(){
     const mode = $("afTimingMode");
-    if(!mode) return;
-    const choice = mode.value === "student-choice";
-    const fw = $("afTimingFixedWrap"), cw = $("afTimingChoiceWrap");
-    if(fw && fw.classList) fw.classList.toggle("hidden", choice);
-    if(cw && cw.classList) cw.classList.toggle("hidden", !choice);
+    if(mode){
+      const choice = mode.value === "student-choice";
+      const fw = $("afTimingFixedWrap"), cw = $("afTimingChoiceWrap");
+      if(fw && fw.classList) fw.classList.toggle("hidden", choice);
+      if(cw && cw.classList) cw.classList.toggle("hidden", !choice);
+    }
+    /* the Part-of-the-test control (partial sittings, 2026-11-02), same shape */
+    const smode = $("afScopeMode");
+    if(smode){
+      const schoice = smode.value === "student-choice";
+      const sf = $("afScopeFixedWrap"), sc = $("afScopeChoiceWrap");
+      if(sf && sf.classList) sf.classList.toggle("hidden", schoice);
+      if(sc && sc.classList) sc.classList.toggle("hidden", !schoice);
+    }
   }
   /* One serialisation for "the same row": object keys SORTED. Postgres jsonb
      hands a row back with its keys in canonical order (shorter first, then
@@ -2203,6 +2295,22 @@ window.Dashboard = (function(){
     } else {
       timingPolicy = { mode: "fixed", timing: timing };
     }
+    /* scopePolicy (partial sittings, 2026-11-02) — additive; absent reads as
+       fixed full. The fixed select and the choice boxes hold PRESET NAMES
+       from AttemptScope's closed list; the row carries the fixed preset's
+       module list (what the record will stamp) or the ticked names. */
+    const scopeModeEl = $("afScopeMode");
+    const scopeChoice = !!(scopeModeEl && scopeModeEl.value === "student-choice");
+    let scopePolicy;
+    if(scopeChoice){
+      const allowedScopes = AttemptScope.PRESET_NAMES.filter(n => { const cb = $("afScopeAllow_" + n); return !!(cb && cb.checked); });
+      if(!allowedScopes.length){ $("afMsg").textContent = "Tick at least one part of the test for the student to choose from."; return; }
+      scopePolicy = { mode: "student-choice", allowed: allowedScopes };
+    } else {
+      const scopeEl = $("afScope");
+      const preset = AttemptScope.fromPreset(scopeEl ? scopeEl.value : "full") || AttemptScope.fromPreset("full");
+      scopePolicy = { mode: "fixed", modules: preset.modules.slice() };
+    }
     const startCode = category === "test"
       ? String(Math.floor(100000 + Math.random() * 900000)) : null;
     const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
@@ -2256,6 +2364,11 @@ window.Dashboard = (function(){
         timing: studentChoice ? null : timing,        // the Phase G field; null when the student picks (readers default to standard)
         timingPolicy: timingPolicy,
         releaseMode: releaseMode,
+        /* partial sittings (2026-11-02): the part of the form, and the row
+           schema version a client must understand to BEGIN this row — an
+           older client shows "reload this page" instead of a full sitting */
+        scopePolicy: scopePolicy,
+        rowVersion: AssignmentRules.ROW_VERSION,
         windowOpens: opens, expiresAt: expires,
         assignedAt: new Date().toISOString(),
         completedAttemptId: null
@@ -3559,7 +3672,7 @@ window.Dashboard = (function(){
     const canDelete = isDeletableAttempt(r);
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
-      <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
+      <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${isSet ? "" : scopeBadgeHtml(r)}${timingBadgeHtml(r)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
         ${num(r.score && r.score.noKey) ? " · " + num(r.score.noKey) + " keyless" : ""} · version ${esc(r.testVersion||"?")}</p>
       ${tombstoneNoteHtml(r)}
       ${canOpen ? '<p><button class="dash-rel" id="dashStudentView">Open student view →</button></p>' : ""}
@@ -3976,6 +4089,8 @@ window.Dashboard = (function(){
         " has a finished or in-progress attempt of them in storage" + (ids.length === total ? " (nothing sat yet)." : ".");
     });
     if(tmode) tmode.addEventListener("change", syncTimingModeView);
+    const smode = $("afScopeMode");                 // partial sittings (2026-11-02): same switch for the part control
+    if(smode) smode.addEventListener("change", syncTimingModeView);
     syncTimingModeView();
     const gb = $("afGenBtn");
     if(gb) gb.addEventListener("click", appendGeneratedCode);

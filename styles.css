@@ -414,6 +414,11 @@
   .tc-opt-text{ display:flex; flex-direction:column; gap:3px; }
   .tc-opt-main{ font-size:17px; font-weight:700; }
   .tc-opt-sub{ font-size:14px; color:var(--ink-soft); line-height:1.4; }
+  /* two choice blocks on one screen (partial sittings, 2026-11-02): a small
+     heading per block; the tutor-fixed value of a hidden block as one line */
+  .tc-block-title{ font-size:18px; font-weight:800; margin:26px 0 0; }
+  .tc-block-title + .tc-options{ margin-top:12px; }
+  .tc-fixed{ margin-top:18px; font-weight:600; }
 
   /* five-minute alert (screenshot 23): dark card below the header timer */
   .five-min{

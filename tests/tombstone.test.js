@@ -165,7 +165,7 @@ function appWorld(state, windowExtra){
 /* ---------- dashboard.js functions with plain module state ---------- */
 const DASH_FNS = ["tombFor", "isDeletedStudent", "isTombstoned", "orphanStubs", "deleteGateOk", "statusBadge", "nameFor",
   "studentCell", "codeOptionLabel", "isFinishedAttempt", "isDeletableAttempt", "fmtDate", "num", "cnt", "countPair",
-  "scoreStr", "scorePct", "timingLabel", "timingBadgeHtml", "releaseCell", "assignmentOf", "viewAttempts", "sortVal",
+  "scoreStr", "scorePct", "timingLabel", "timingBadgeHtml", "scopeBadgeHtml", "releaseCell", "assignmentOf", "viewAttempts", "sortVal",
   "sameTest", "assignCountFor", "attemptCategoryMatches", "attemptsForAssignment", "assignRowStatus",
   "assignmentsAtDeletionOf", "deletedMayClose", "assignmentsAtDeletion", "localTombstone",
   "completedAttemptsOf", "deletedAttemptsOf", "seenCaveat", "knownCodeSet", "generateUnusedCode"];
@@ -183,14 +183,17 @@ function dashWorld(seed, genSeq){
   };
   const els = {};
   const $ = id => els[id] || (els[id] = { value: "", textContent: "" });
-  const factory = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date", "AssignmentRules",
+  const factory = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date", "AssignmentRules", "AttemptScope",
     "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, sortKey = 'startedAt', sortDir = -1;\n" + body);
   const S = Object.assign({ tombs: {}, recs: [], assigns: [], profiles: {}, source: "storage" }, seed || {});
-  return factory(S, esc, escAttr, StudentCode, $, Date, RULES);
+  return factory(S, esc, escAttr, StudentCode, $, Date, RULES, SCOPE);
 }
 /* the shared assignment-row reader the dashboard page always has
-   (attempts.js window.AssignmentRules, loaded before dashboard.js) */
-const RULES = loadAttempts({}).sandbox.AssignmentRules;
+   (attempts.js window.AssignmentRules, loaded before dashboard.js), and the
+   scope reader beside it (window.AttemptScope, partial sittings 2026-11-02) */
+const ATTEMPTS_SANDBOX = loadAttempts({}).sandbox;
+const RULES = ATTEMPTS_SANDBOX.AssignmentRules;
+const SCOPE = ATTEMPTS_SANDBOX.AttemptScope;
 
 /* ---------- the SQL contract, as a checker that returns its failures ---------- */
 /* The contract reads CODE, not prose: comments are stripped first, so a gate,
@@ -331,7 +334,9 @@ function sqlContract(sql){
        so a restatement that dropped a gate reds this suite instead of
        shipping. 2026-11-02_assignment_options.sql restates fn_upsert_attempt
        to add the form auto-release branch. */
-    const RESTATED = { "2026-11-02_assignment_options.sql": ["fn_upsert_attempt"] };
+    const RESTATED = { "2026-11-02_assignment_options.sql": ["fn_upsert_attempt"],
+                       /* partial sittings: the one-release-per-assignment guard (2026-11-02) */
+                       "2026-11-02_one_release_per_assignment.sql": ["fn_upsert_attempt"] };
     const later = covered.map(fn => [fn, newestDefining(fn)])
       .filter(([fn, f]) => f !== "2026-09-18_tombstones.sql" && (RESTATED[f] || []).indexOf(fn) === -1);
     check(later.length === 0, "every function the contract covers is LAST defined by the tombstone migration or a sanctioned restatement (a later restatement must carry the gates and be added to RESTATED)", later.map(x => x.join(" -> ")).join(", "));
@@ -1498,14 +1503,14 @@ function sqlContract(sql){
       fire(ev, arg){ (this.handlers[ev] || []).forEach(fn => fn(arg || {})); }, click(){ this.fire("click"); } }; return e; };
     const $ = id => els[id] || (els[id] = mkEl());
     const NAMES = ["tombFor", "isDeletedStudent", "isTombstoned", "orphanStubs", "deleteGateOk", "statusBadge", "nameFor", "studentCell", "codeOptionLabel",
-      "isFinishedAttempt", "isInProgressAttempt", "isDeletableAttempt", "fmtDate", "num", "cnt", "countPair", "scoreStr", "timingLabel", "timingBadgeHtml", "viewStudents",
+      "isFinishedAttempt", "isInProgressAttempt", "isDeletableAttempt", "fmtDate", "num", "cnt", "countPair", "scoreStr", "timingLabel", "timingBadgeHtml", "scopeBadgeHtml", "viewStudents",
       "renderConfirmPanel", "confirmDeleteAttempt", "confirmDeleteStudent"];
     const body = "const testsById = {};\n" + NAMES.map(n => extractFn(dashSrc, n)).join("\n\n") +
       "\nconst calls = [];\nasync function deleteAttempt(r){ calls.push(['attempt', r.attemptId]); return { ok: true }; }\nasync function deleteStudent(c){ calls.push(['student', c]); return { ok: true }; }" +
       "\nreturn { viewStudents, confirmDeleteAttempt, confirmDeleteStudent, isDeletableAttempt, isInProgressAttempt, calls, get openAttemptId(){ return openAttemptId; }, setOpen(id){ openAttemptId = id; }, set(o){ Object.assign(S, o); tombs = S.tombs; recs = S.recs; assigns = S.assigns; profiles = S.profiles; source = S.source; } };";
     const S = { tombs: {}, recs: [], assigns: [], profiles: {}, source: "storage" };
-    const d = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date", "AssignmentRules",
-      "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, openAttemptId = null;\n" + body)(S, esc, escAttr, StudentCode, $, Date, RULES);
+    const d = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date", "AssignmentRules", "AttemptScope",
+      "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, openAttemptId = null;\n" + body)(S, esc, escAttr, StudentCode, $, Date, RULES, SCOPE);
     const A = "attempt:t1:100:aaaa", B = "attempt:t1:200:bbbb", O = "attempt:t1:300:cccc";
     $("dashFilterTest").value = ""; $("dashFilterStudent").value = "";
     d.set({ recs: [rec(A), rec(B, { assignmentId: "a2" }), rec("attempt:t1:900:zzzz", { student: { code: OTHER, key: OTHER } })],

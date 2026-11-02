@@ -142,6 +142,9 @@
          through the Past card, Score Details, the print DOM and every
          dashboard row — beside the Phase G badge */
       timingSelectedByStudent: true,
+      /* partial sittings (2026-11-02): a hostile scope reads as FULL through
+         AttemptScope (no label, no filter, nothing of it reaches markup) */
+      scope: { modules: PAYLOAD, selectedByStudent: PAYLOAD },
       conditions: "proctored", startedAt: "2026-07-30T14:00:00.000Z",
       lastSavedAt: "2026-07-30T15:00:00.000Z", submittedAt: "2026-07-30T15:00:00.000Z",
       status: "completed", released: true, modules: [], answers,
@@ -320,6 +323,17 @@
        same records table every other value comes from, so it gets the same
        treatment as any record-derived text. */
     localStorage.setItem("as:student:AS-XSSTEST2", JSON.stringify({ displayName: PAYLOAD }));
+    /* Partial sittings (2026-11-02): a MATH-ONLY record with the same hostile
+       fields, built from the form filtered to its scope (so its answers hold
+       only Math, as the recorder writes it) and planted OLDER, so the first
+       Past card stays the full record's. Its scope is a real one with the
+       student-selected flag — the labels and the mark come from closed
+       tables; the hostile scope above reads as full. */
+    const partialTest = window.AttemptScope ? AttemptScope.testFor(test, { scope: { modules: ["ma1", "ma2"] } }) : test;
+    const partialRec = poisonedRecord(partialTest, { attemptId: "attempt:" + test.testId + ":1700000000:xss2",
+      startedAt: "2026-07-29T14:00:00.000Z", lastSavedAt: "2026-07-29T15:00:00.000Z", submittedAt: "2026-07-29T15:00:00.000Z",
+      scope: { modules: ["ma1", "ma2"], selectedByStudent: true } }).rec;
+    localStorage.setItem("as:" + partialRec.attemptId, JSON.stringify(partialRec));
     /* a second hostile profile with NO attempts — renders through the
        Students tab's zero-attempts card (profile-only union entry) */
     localStorage.setItem("as:student:AS-PRFLXSS2", JSON.stringify({ displayName: PAYLOAD }));
@@ -345,6 +359,8 @@
       assignmentId: "a-tc", testId: TC_ID, category: "practice", timing: null,
       releaseMode: PAYLOAD,
       timingPolicy: { mode: "student-choice", allowed: [PAYLOAD, 1.5, ATTR_PAY, "untimed"] },
+      /* partial sittings (2026-11-02): hostile entries in the allowed presets, a hostile version */
+      scopePolicy: { mode: "student-choice", allowed: [PAYLOAD, "math", ATTR_PAY] }, rowVersion: PAYLOAD,
       windowOpens: null, expiresAt: null, assignedAt: "2026-11-02T00:00:00.000Z", completedAttemptId: null }));
 
     $("nameInput").value = "AS-XSSTEST2";
@@ -369,6 +385,13 @@
         pass: !tcScreen.classList.contains("hidden") && opts.join(",") === "1.5,untimed" && $("tcContinueBtn").disabled === true &&
               $("tcTestName").textContent === PAYLOAD && !tcScreen.querySelector("img") && !window.__XSS_FIRED,
         note: "options: " + opts.join(",") + "; continue disabled: " + $("tcContinueBtn").disabled });
+      /* partial sittings (2026-11-02): the Part-of-the-test block beside it,
+         from the closed preset list only; a hostile rowVersion reads as 1 */
+      const sopts = [...document.querySelectorAll("#tcScopeOptions input")].map(i => i.value);
+      results.push({ surface: "Part-of-the-test options are only the allowed closed-list presets; both blocks shown; Continue still disabled",
+        pass: sopts.join(",") === "math" && !$("tcScopeBlock").classList.contains("hidden") && !$("tcTimingBlock").classList.contains("hidden") &&
+              $("tcContinueBtn").disabled === true && !window.__XSS_FIRED,
+        note: "scope options: " + sopts.join(",") });
       $("tcHomeBtn").click();
       await wait(100);
     } else {
@@ -398,6 +421,40 @@
     /* print output renders this same DOM; the print stylesheet only toggles
        visibility and adds one static ::before, so no new interpolation */
     results.push(audit("Print output (same DOM as Score Details)", root));
+
+    /* Partial sittings (2026-11-02): the Math-only record's own Score Details
+       through the same card -> page path — the hero prints "—" for the total
+       and "Section only", the student-selected mark, two strips, no 400–1600;
+       the print DOM is that hero — then back to the full record's page so
+       the Review Mode drives below find its chips. */
+    $("sdHomeBtn").click();
+    await wait(250);
+    const hasMathBadge = c => { const b = c.querySelector(".pcard-badge"); return !!b && b.textContent.indexOf("Math only") !== -1; };
+    const partialCard = [...document.querySelectorAll("#practiceCards .pcard, #testCards .pcard")].find(hasMathBadge);
+    if(partialCard && partialCard.querySelector(".pcard-link")){
+      results.push(audit("Past card of a Math-only record (hostile testName; scope badge + mark)", partialCard));
+      partialCard.querySelector(".pcard-link").click();
+      await wait(450);
+      const heroText = (root.querySelector(".sd-hero") ? root.querySelector(".sd-hero").textContent : "").replace(/\s+/g, " ");
+      results.push(audit("Score Details hero of a Math-only record (Section only, total —)", root));
+      results.push({ surface: "Math-only Score Details prints no total: '—', 'Section only', the student-selected mark, two strips, no 400–1600",
+        pass: /TOTAL SCORE —/.test(heroText) && heroText.indexOf("Section only") !== -1 && heroText.indexOf("(student-selected)") !== -1 &&
+              root.textContent.indexOf("400–1600") === -1 && root.querySelectorAll(".sd-strip").length === 2 &&
+              !root.querySelector('.sd-tab[data-filter="rw"]') && !window.__XSS_FIRED,
+        note: "strips: " + root.querySelectorAll(".sd-strip").length + "; hero: " + heroText.slice(0, 140) });
+      results.push(audit("Print output of a Math-only record (same DOM)", root));
+      $("sdHomeBtn").click();
+      await wait(250);
+      const fullLink = [...document.querySelectorAll("#practiceCards .pcard, #testCards .pcard")]
+        .filter(c => !hasMathBadge(c)).map(c => c.querySelector(".pcard-link")).find(Boolean);
+      if(!fullLink) throw new Error("the full record's Past card is gone after the Math-only drive");
+      fullLink.click();
+      await wait(450);
+      $("sdShowCorrect").click();
+      [...root.querySelectorAll(".sd-view-btn")].find(b => b.textContent === "All").click();
+    } else {
+      results.push({ surface: "Past card of a Math-only record (hostile testName; scope badge + mark)", pass: false, note: "no Math-only Past card rendered" });
+    }
 
     /* ---- Review Mode (2026-08-02): the one review surface — a read-only
        replay of the record in the real test UI. Three drives through the

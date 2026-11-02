@@ -585,6 +585,197 @@ window.StudentCode = (function(){
   };
 })();
 
+/* ================= partial sittings (2026-11-02, scope) =================
+   ONE reading of WHICH PART of a form a record sat, shared by app.js (the
+   sitting engine and every score surface), dashboard.js (rows, cards, the
+   assign form) and build-site.js (the deploy gate), so no consumer can
+   disagree with another on what a scope means.
+
+   The vocabulary is four SLOTS — re1 re2 ma1 ma2 — the prefixes the
+   converter gives question ids (ma1-q7). They are NOT module ids: a form's
+   modules[].moduleId is a per-form string (2026-june-asia-v2-math1), so a
+   slot is resolved to a module by SECTION and ORDINAL within the section —
+   the first Reading and Writing module is re1, the second Math module is
+   ma2 — and build-site.js refuses any form whose modules do not map onto
+   the four slots in that order with every question id under its slot's
+   prefix (formProblems). The seven PRESETS are the only scopes that exist:
+   full, rw (re1+re2), math (ma1+ma2), and each single slot.
+
+   The record's OPTIONAL top-level field, stamped by Attempts.begin and never
+   touched again:
+       "scope": { "modules": ["ma1","ma2"], "selectedByStudent": false }
+   Absent ⇒ a full sitting, so every record written before this existed reads
+   unchanged. A partial sitting runs the recorder on a COPY of the form whose
+   `modules` are filtered to the scope (testFor) — exactly as a practice set
+   runs on its synthetic one-module test — so modules[], answers, score and
+   the blobs hold only the scoped modules by construction: an out-of-scope
+   module is ABSENT from answers (never sat), an in-scope one the student
+   has not reached yet is BLANK (never-answered), as it always was.
+
+   Every reader is total over untrusted input (ATTEMPTS-SPEC §7): a scope that
+   is not a distinct, in-order subset equal to a preset reads as FULL — a
+   crafted scope can only mislabel its owner's own record, since the answers
+   decide every count — and `selectedByStudent` counts only as the literal
+   true. Labels come from closed tables and are escaped like any other
+   record-derived text where they render. */
+window.AttemptScope = (function(){
+  "use strict";
+  const SLOTS = ["re1", "re2", "ma1", "ma2"];
+  const SECTION_OF = { re: "Reading and Writing", ma: "Math" };
+  const PREFIX_OF = { "Reading and Writing": "re", "Math": "ma" };
+  const PRESETS = {
+    full: ["re1", "re2", "ma1", "ma2"],
+    rw:   ["re1", "re2"],
+    math: ["ma1", "ma2"],
+    re1: ["re1"], re2: ["re2"], ma1: ["ma1"], ma2: ["ma2"]
+  };
+  const PRESET_NAMES = Object.keys(PRESETS);
+  /* what each slot is called where a student or the tutor reads it */
+  const SLOT_LONG = { re1: "Reading and Writing · Module 1", re2: "Reading and Writing · Module 2",
+                      ma1: "Math · Module 1", ma2: "Math · Module 2" };
+  const SLOT_SHORT = { re1: "RW Module 1", re2: "RW Module 2", ma1: "Math Module 1", ma2: "Math Module 2" };
+  const PRESET_LABEL = { full: "Full test", rw: "Reading and Writing", math: "Math",
+                         re1: SLOT_LONG.re1, re2: SLOT_LONG.re2, ma1: SLOT_LONG.ma1, ma2: SLOT_LONG.ma2 };
+  const SELECTED_TITLE = "Part of the test chosen by the student when this sitting began, from the options the tutor allowed";
+
+  function presetOf(mods){
+    for(const name of PRESET_NAMES){
+      const p = PRESETS[name];
+      if(p.length === mods.length && p.every((s, i) => mods[i] === s)) return name;
+    }
+    return null;
+  }
+  /* EXACT reading of a modules list: distinct known slots, in form order,
+     equal to one of the presets. Anything else is null — never "the slots
+     we could make sense of". */
+  function exactModules(list){
+    if(!Array.isArray(list)) return null;
+    const canon = SLOTS.filter(s => list.indexOf(s) !== -1);
+    if(canon.length !== list.length) return null;             // junk or a duplicate
+    if(canon.some((s, i) => list[i] !== s)) return null;      // out of form order
+    return presetOf(canon) ? canon : null;
+  }
+  function describe(mods){
+    const preset = presetOf(mods);
+    const kind = preset === "full" ? "full" : (mods.length === 2 ? "section" : "module");
+    return { kind: kind, preset: preset, modules: mods.slice(),
+             section: kind === "full" ? null : SECTION_OF[mods[0].slice(0, 2)] };
+  }
+  function fromPreset(name){ return PRESETS.hasOwnProperty(name) ? describe(PRESETS[name]) : null; }
+  function fromModules(list){ const m = exactModules(list); return m ? describe(m) : null; }
+  /* the scope a RECORD declares: {kind, preset, modules, section, selected,
+     declared}. Absent or malformed ⇒ full, undeclared. */
+  function scopeOf(record){
+    const s = (record && typeof record === "object") ? record.scope : undefined;
+    const mods = (s && typeof s === "object") ? exactModules(s.modules) : null;
+    if(!mods) return Object.assign(describe(PRESETS.full), { selected: false, declared: false });
+    return Object.assign(describe(mods), { selected: s.selectedByStudent === true, declared: true });
+  }
+  /* a SCOPE object (what describe() returns), as opposed to a RECORD: it
+     carries a preset name from the closed list and no record identity. A
+     practice-set record has a string `kind` ("set") AND a `modules` array,
+     so a duck-type on those two alone read every set record as a scope and
+     testFor emptied the set's synthetic test (review 2026-11-02, finding 1). */
+  const isScope = v => !!(v && typeof v === "object" && typeof v.preset === "string" && PRESETS.hasOwnProperty(v.preset) &&
+    Array.isArray(v.modules) && !("attemptId" in v) && !("answers" in v) && !("student" in v));
+
+  /* the slot of every module of a test, by section ordinal, in the test's
+     own module order; null when the modules do not map onto distinct known
+     slots in form order (a form that is not a Bluebook form, or no form). */
+  function slotsOf(test){
+    const mods = (test && Array.isArray(test.modules)) ? test.modules : null;
+    if(!mods) return null;
+    const seen = { re: 0, ma: 0 };
+    const out = [];
+    for(const m of mods){
+      const p = m && PREFIX_OF[m.section];
+      if(!p) return null;
+      seen[p]++;
+      out.push(p + seen[p]);
+    }
+    const canon = SLOTS.filter(s => out.indexOf(s) !== -1);
+    if(canon.length !== out.length || canon.some((s, i) => out[i] !== s)) return null;
+    return out;
+  }
+  /* The build gate's question: why this FORM cannot be scoped. Empty for a
+     form that carries exactly re1, re2, ma1, ma2 in order with every
+     question id under its module's slot prefix. */
+  function formProblems(test){
+    const slots = slotsOf(test);
+    if(!slots) return ["modules do not map onto re1, re2, ma1, ma2 by section and order (sections: " +
+      ((test && test.modules) || []).map(m => m && m.section).join(", ") + ")"];
+    const probs = [];
+    if(slots.join(",") !== SLOTS.join(",")) probs.push("a form must carry exactly the four slots in order; found " + slots.join(", "));
+    (test.modules || []).forEach((m, i) => {
+      const bad = (m.questions || []).filter(q => !q || typeof q.id !== "string" || q.id.indexOf(slots[i] + "-") !== 0);
+      if(bad.length) probs.push(String(m.moduleId) + " (" + slots[i] + "): " + bad.length + " question id(s) not under " + slots[i] + "- (" +
+        bad.slice(0, 3).map(q => q && q.id).join(", ") + ")");
+    });
+    return probs;
+  }
+  /* THE SEAM: the test a record (or scope) is read against. Full ⇒ the very
+     object handed in, so every form, set and pre-scope record goes through
+     untouched; otherwise a shallow copy whose `modules` hold only the scoped
+     ones, in the form's own order — same testId, testName, testVersion,
+     scoring. Every consumer that pairs a loaded form with a record goes
+     through here, so buildModuleStateFromRecord never sees an out-of-scope
+     module and can never read "absent" as "omitted". */
+  function testFor(test, scopeOrRecord){
+    const sc = isScope(scopeOrRecord) ? scopeOrRecord : scopeOf(scopeOrRecord);
+    if(sc.kind === "full" || !test || !Array.isArray(test.modules)) return test;
+    const slots = slotsOf(test);
+    if(!slots) return test;
+    const copy = Object.assign({}, test);
+    copy.modules = test.modules.filter((m, i) => sc.modules.indexOf(slots[i]) !== -1);
+    return copy;
+  }
+  /* the slot a question id belongs to (its prefix), or null */
+  function slotOfQuestionId(qid){
+    const m = /^(re1|re2|ma1|ma2)-/.exec(String(qid == null ? "" : qid));
+    return m ? m[1] : null;
+  }
+  /* The slots a record's student actually OPENED: any answer entry under the
+     slot's prefix with a visit (every opened module opens on its question 1,
+     so this is true of old and new records alike, any status, without the
+     form's content); plus a completed or timed-out record's declared scope
+     (every scoped module of a finished sitting was opened). In form order. */
+  function openedSlots(record){
+    const out = {};
+    const a = record && record.answers;
+    if(a && typeof a === "object" && !Array.isArray(a)){
+      Object.keys(a).forEach(qid => {
+        const e = a[qid];
+        const slot = slotOfQuestionId(qid);
+        if(slot && e && typeof e === "object" && typeof e.visitCount === "number" && e.visitCount > 0) out[slot] = true;
+      });
+    }
+    if(record && (record.status === "completed" || record.status === "timed-out")){
+      const sc = scopeOf(record);
+      if(sc.declared) sc.modules.forEach(s => { out[s] = true; });
+    }
+    return SLOTS.filter(s => out[s]);
+  }
+  /* the badge text a record earns: "" for a full sitting (unless `always`),
+     "<section> only", or "Single module · <slot>" */
+  function label(scopeOrRecord, always){
+    const sc = isScope(scopeOrRecord) ? scopeOrRecord : scopeOf(scopeOrRecord);
+    if(sc.kind === "full") return always ? PRESET_LABEL.full : "";
+    if(sc.kind === "section") return sc.section + " only";
+    return "Single module · " + SLOT_SHORT[sc.modules[0]];
+  }
+  /* the two words the brief fixes for the score surfaces (the hero, the
+     Past card, the printed report): "" for a full sitting */
+  function scoreLabel(scopeOrRecord){
+    const sc = isScope(scopeOrRecord) ? scopeOrRecord : scopeOf(scopeOrRecord);
+    return sc.kind === "section" ? "Section only" : sc.kind === "module" ? "Single module" : "";
+  }
+  function presetLabel(name){ return PRESET_LABEL.hasOwnProperty(name) ? PRESET_LABEL[name] : ""; }
+  function slotLabel(slot, short){ const t = short ? SLOT_SHORT : SLOT_LONG; return t.hasOwnProperty(slot) ? t[slot] : ""; }
+  return { SLOTS: SLOTS.slice(), PRESET_NAMES: PRESET_NAMES.slice(), SELECTED_TITLE,
+           exactModules, presetOf, fromPreset, fromModules, scopeOf, slotsOf, formProblems, testFor,
+           slotOfQuestionId, openedSlots, label, scoreLabel, presetLabel, slotLabel };
+})();
+
 /* ================= assignment options (2026-11-02) =================
    ONE reading of the two optional assignment-row fields, shared by app.js
    (the student's start path) and dashboard.js (the form and its cards), so
@@ -605,12 +796,30 @@ window.StudentCode = (function(){
                    and an empty or malformed list falls back to FIXED at the
                    row's own timing — never to "the student may pick anything".
 
+     scopePolicy   {mode:"fixed", modules:[…]} | {mode:"student-choice",
+                   allowed:[preset names]} (partial sittings, 2026-11-02).
+                   Absent ⇒ fixed FULL (today's behaviour). `modules` is read
+                   through AttemptScope.exactModules (a preset, in form order,
+                   or nothing); `allowed` lists PRESET NAMES through the closed
+                   list AttemptScope.PRESET_NAMES. A malformed fixed list, or a
+                   student-choice list with nothing valid in it, falls back to
+                   FIXED FULL — never to a free pick.
+     rowVersion    the row's schema version (partial sittings, 2026-11-02).
+                   Absent ⇒ 1. The dashboard stamps 2 on every row it writes
+                   with a scopePolicy. A client refuses to BEGIN a row whose
+                   version is above the one it understands (ROW_VERSION, here)
+                   with a visible "reload this page" line — never a sitting
+                   under a rule it cannot read. A tab loaded before this field
+                   existed knows nothing of it, which is the stated limit.
+
    Total functions over untrusted input: a row is tutor-written, but it reaches
    the student through a cache, and a reader that throws would take the home
    screen down with it. */
 window.AssignmentRules = (function(){
   "use strict";
   const TIMING_CHOICES = [1, 1.5, 2, "untimed"];
+  /* the highest assignment-row schema version this client understands */
+  const ROW_VERSION = 2;
   /* EXACT readings only: the numbers 1, 1.5, 2, their decimal spellings as a
      <select>/<input> hands them over, and "untimed". Nothing is parsed —
      parseFloat would read `1.5 anything` (or an attribute-context payload
@@ -662,8 +871,31 @@ window.AssignmentRules = (function(){
       ? p.timing : row.timing;
     return { mode: "fixed", timing: normTiming(fixed) };
   }
+  /* which part of the form the row assigns (partial sittings): fixed at a
+     preset's modules, or the student's choice among preset NAMES */
+  function scopePolicyOf(a){
+    const S = window.AttemptScope;
+    const row = (a && typeof a === "object") ? a : {};
+    const p = row.scopePolicy;
+    if(p && typeof p === "object" && p.mode === "student-choice"){
+      const wanted = Array.isArray(p.allowed) ? p.allowed.filter(x => typeof x === "string") : [];
+      const allowed = S.PRESET_NAMES.filter(n => wanted.indexOf(n) !== -1);
+      if(allowed.length) return { mode: "student-choice", allowed: allowed };
+      /* malformed: nothing to choose from — fixed full */
+    }
+    const fixed = (p && typeof p === "object" && p.mode === "fixed") ? S.fromModules(p.modules) : null;
+    return { mode: "fixed", modules: (fixed || S.fromPreset("full")).modules };
+  }
+  /* the row's schema version: a finite number ≥ 1, else 1 */
+  function rowVersionOf(a){
+    const v = (a && typeof a === "object") ? a.rowVersion : undefined;
+    return (typeof v === "number" && isFinite(v) && v >= 1) ? Math.floor(v) : 1;
+  }
+  /* a row written under a rule this client cannot read: never begin it */
+  function rowTooNew(a){ return rowVersionOf(a) > ROW_VERSION; }
+  const RELOAD_LINE = "Reload this page to start this assignment";
   return { TIMING_CHOICES: TIMING_CHOICES.slice(), exactTiming, normTiming, timingLabel, choiceLabel, SELECTED_TITLE,
-           releaseModeOf, timingPolicyOf };
+           releaseModeOf, timingPolicyOf, scopePolicyOf, ROW_VERSION, rowVersionOf, rowTooNew, RELOAD_LINE };
 })();
 
 /* ================= attempt recorder ================= */
@@ -1102,6 +1334,21 @@ window.Attempts = (function(){
            again — resume, crash-resume and Review Mode read rec.timing and
            this flag off the record, never the assignment. */
         if(opts && opts.timingSelectedByStudent === true) rec.timingSelectedByStudent = true;
+        /* Partial sitting (2026-11-02): the OPTIONAL top-level `scope`,
+           {modules, selectedByStudent}. Stamped only when the sitting is a
+           PART of the form, or when the student chose the part themselves
+           (then "Full test" chosen is itself the information) — so a
+           tutor-fixed full sitting, every sitting there has ever been, stays
+           byte-for-byte what it was. The `test` this recorder runs on is the
+           form filtered to the same scope (AttemptScope.testFor, app.js), so
+           modules[], answers and score carry only the scoped modules without
+           any scope branch below. Read back only through AttemptScope. */
+        if(opts && opts.scope && window.AttemptScope){
+          const sc = AttemptScope.fromModules(opts.scope.modules);
+          if(sc && (sc.kind !== "full" || opts.scope.selectedByStudent === true)){
+            rec.scope = { modules: sc.modules.slice(), selectedByStudent: opts.scope.selectedByStudent === true };
+          }
+        }
         dirty = true;
         save();
         startTicker();
@@ -1501,6 +1748,12 @@ window.Attempts = (function(){
     /* the live record's status, so a caller can tell a sitting that is still
        running from one that has already been submitted */
     currentStatus(){ return rec ? (rec.status || null) : null; },
+    /* the live record's `scope` field (partial sittings), a small clone or
+       null — the Ready screen reads it without cloning the whole record */
+    currentScope(){
+      try{ return (rec && rec.scope && typeof rec.scope === "object") ? JSON.parse(JSON.stringify(rec.scope)) : null; }
+      catch(e){ return null; }
+    },
 
     /* Deep clone of the live record, or null. Set-completion needs the
        finished record to offer immediate review even when the storage write

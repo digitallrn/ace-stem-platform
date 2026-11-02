@@ -46,6 +46,7 @@
     pendingStart: null,          // {test, assignment} while the Start Code screen is up
     pendingChoice: null,         // {test, assignment, allowed} while the timing-choice screen is up (2026-11-02)
     pendingTiming: null,         // {assignmentId, timing} the student picked there; consumed at begin
+    pendingScope: null,          // {assignmentId, scope: preset name} picked there (partial sittings, 2026-11-02); same lifecycle
     displayName: null,           // from the student:<CODE> profile row; null = show the code
     timing: 1,                   // Phase G §1: 1 | 1.5 | 2 | "untimed"
     untimed: false,              // current module runs count-up with no auto-submit
@@ -162,6 +163,7 @@
     state.pendingStart = null;
     state.pendingChoice = null;          // a choice screen or a pick from the student's session dies with it
     state.pendingTiming = null;
+    state.pendingScope = null;
     state.activeAssignment = null;
     state.userName = "Student";
     state.displayName = null;
@@ -549,6 +551,7 @@
     state.pendingStart = null;
     state.pendingChoice = null;
     state.pendingTiming = null;
+    state.pendingScope = null;
     state.reviewMode = null;
     forgetSession();
     state.userName = "Student";
@@ -592,6 +595,7 @@
     state.pendingStart = null;
     state.pendingChoice = null;
     state.pendingTiming = null;
+    state.pendingScope = null;
     /* PAINT FIRST. resetTestChrome only closes overlays: until a showOnly
        runs, the student is still looking at a live test screen whose
        currentTest is now null, and a Next/Back/navigator click would throw.
@@ -787,7 +791,10 @@
          (does that module have questions?) is the loader's job, and a content
          failure there surfaces as the retry screen rather than a blank test. */
       const test = testById(testId);
-      if(!test || cp.moduleIndex >= testModuleCount(test)) continue;
+      /* …and against the RECORD's own scope (partial sittings, 2026-11-02): a
+         Math-only sitting has two modules whatever the form has, so an index
+         past that is a corrupt blob to refuse, not a position to clamp */
+      if(!test || cp.moduleIndex >= Math.min(testModuleCount(test), AttemptScope.scopeOf(rec).modules.length)) continue;
       // a questionIndex past the end is clamped by beginModule, but a
       // non-numeric one means the blob is not trustworthy at all
       if(cp.questionIndex !== undefined &&
@@ -818,6 +825,7 @@
     state.pendingStart = null;
     state.pendingChoice = null;
     state.pendingTiming = null;
+    state.pendingScope = null;
     el("nameInput").value = "";
     el("signinError").classList.add("hidden");
     showOnly("screen-signin");
@@ -2208,18 +2216,23 @@
        assignment. */
     if(st === "completed") return null;
     const isTest = a.category === "test";
+    /* a row written under a schema this page cannot read (partial sittings,
+       2026-11-02 — AssignmentRules.rowTooNew): never a sitting under a rule
+       we do not know. The card says to reload instead of offering Start;
+       Resume is untouched, since a sitting in progress reads its own record. */
+    const tooNew = st === "ready" && AssignmentRules.rowTooNew(a);
     // counts come from the manifest — the questions are not loaded yet
-    const totalQ = testQuestionCount(test);
     const card = document.createElement("div");
-    card.className = "pcard" + ((st === "ready" || st === "resume") ? " clickable" : "");
+    card.className = "pcard" + (((st === "ready" && !tooNew) || st === "resume") ? " clickable" : "");
     const status =
       st === "completed" ? '<span class="pc-ico">✓</span> Completed' :
       st === "resume"    ? '<span class="pc-ico">🕐</span> In Progress' :
       st === "notyet"    ? 'Opens ' + fmtCardDate(a.windowOpens) :
       st === "expired"   ? 'Expired' :
-      `${testModuleCount(test)} modules · ${totalQ} questions` + (isTest ? ' · proctored' : '');
+      escapeHtml(assignmentExtentText(test, a)) + (isTest ? ' · proctored' : '');
     const action =
       st === "resume"  ? '<button class="pill ghost">Resume</button>' :
+      tooNew           ? '<span class="pc-pending">' + escapeHtml(AssignmentRules.RELOAD_LINE) + '</span>' :
       st === "ready"   ? '<button class="pill ghost">Start</button>' :
       st === "expired" ? '<span class="pc-pending">This assignment has expired — ask your tutor</span>' : "";
     card.innerHTML = `
@@ -2234,10 +2247,27 @@
       // resume into the same sitting
       const idx = (state.assignAttempts && state.assignAttempts[a.assignmentId]) || {};
       card.addEventListener("click", ()=> resumeTestFlow(test, idx.resumable));
-    } else if(st === "ready"){
+    } else if(st === "ready" && !tooNew){
       card.addEventListener("click", ()=> startAssignment(test, a));
     }
     return card;
+  }
+  /* The card's extent line, from the MANIFEST (the questions are not loaded):
+     a full sitting reads as it always has; a fixed section takes its count
+     from manifest.sections[]; a fixed single module can name itself but not
+     its question count (the manifest carries per-section counts only); a
+     student-choice row says the choice is theirs. Partial sittings, 2026-11-02. */
+  function assignmentExtentText(test, a){
+    const sp = AssignmentRules.scopePolicyOf(a);
+    if(sp.mode === "student-choice") return "Full test or a part — you choose";
+    const sc = AttemptScope.fromModules(sp.modules) || AttemptScope.fromPreset("full");
+    if(sc.kind === "full") return `${testModuleCount(test)} modules · ${testQuestionCount(test)} questions`;
+    if(sc.kind === "section"){
+      const sec = (test.sections || []).find(s => s && s.section === sc.section);
+      const n = (sec && typeof sec.questionCount === "number") ? sec.questionCount : null;
+      return sc.section + " · 2 modules" + (n !== null ? ` · ${n} questions` : "");
+    }
+    return AttemptScope.slotLabel(sc.modules[0], true) + " · 1 module";
   }
 
   /* re-evaluate the assignment at click time — the home screen isn't
@@ -2250,10 +2280,15 @@
       renderHome();                               // repaint the now-expired/opened/completed state
       return;
     }
-    /* a student-choice timing policy (2026-11-02) puts the choice screen first,
-       for both categories; the pick it leaves is what startTestFlowLoaded
-       stamps at begin. Fixed rows go straight on as they always have. */
-    if(AssignmentRules.timingPolicyOf(a).mode === "student-choice"){ openTimingChoice(test, a); return; }
+    /* a row this page cannot read (partial sittings, 2026-11-02): the card
+       carries the reload line and nothing starts — a repaint, never a sitting */
+    if(AssignmentRules.rowTooNew(a)){ renderHome(); return; }
+    /* a student-choice timing policy (2026-11-02) — or a student-choice SCOPE
+       policy (partial sittings) — puts the choice screen first, for both
+       categories; the picks it leaves are what startTestFlowLoaded stamps at
+       begin. Fixed rows go straight on as they always have. */
+    if(AssignmentRules.timingPolicyOf(a).mode === "student-choice" ||
+       AssignmentRules.scopePolicyOf(a).mode === "student-choice"){ openTimingChoice(test, a); return; }
     if(a.category === "test") openStartCode(test, a);   // ceremony gates proctored sittings (§4)
     else startTestFlow(test, a);
   }
@@ -2329,7 +2364,10 @@
     const out = { rw: [0, 0], math: [0, 0] };
     const seen = { rw: 0, math: 0 };
     let ok = true;
-    test.modules.forEach(mod => {
+    /* only the modules the record SAT (partial sittings, 2026-11-02): an
+       out-of-scope module has no byModule entry by construction, and reading
+       its absence as "corrupt" here hid every partial card's number */
+    AttemptScope.testFor(test, record).modules.forEach(mod => {
       const key = SEC_KEY[mod.section];
       if(!key) return;
       const entry = byModule[mod.moduleId];
@@ -2424,19 +2462,30 @@
       let scoreLine = "";
       const c = num(record.score && record.score.correct);
       const g = num(record.score && record.score.graded);
+      /* the record's scope (partial sittings, 2026-11-02) decides the number
+         this card may show: a full sitting its total; a section-only sitting
+         that section's scaled score, total "—" and the "Section only" word;
+         a single module its raw count and "Single module" — never a total
+         estimated from a part of the test */
+      const scope = AttemptScope.scopeOf(record);
       const scaled = (canView && loadedTest) ? scaledScores(loadedTest,
         num(record.score && record.score.bySection &&
             record.score.bySection["Reading and Writing"] &&
             record.score.bySection["Reading and Writing"].correct),
         num(record.score && record.score.bySection && record.score.bySection["Math"] &&
             record.score.bySection["Math"].correct),
-        storedModuleRaw(loadedTest, record)) : null;
-      if(canView && scaled){
+        storedModuleRaw(loadedTest, record), scope) : null;
+      if(canView && scaled && scope.kind === "full"){
         scoreLine = `<div class="pcard-total">${scaled.total}${scaled.estimated ? EST : ""}<span class="pcard-total-range">400–1600</span></div>`;
+      } else if(canView && scaled && scope.kind === "section"){
+        const n = scope.section === "Math" ? scaled.math : scaled.rw;
+        scoreLine = `<div class="pcard-total">${n}${scaled.estimated ? EST : ""}<span class="pcard-total-range">${escapeHtml(scope.section)} 200–800 · ${escapeHtml(AttemptScope.scoreLabel(scope))} · total —</span></div>`;
       } else if(canView && c !== null && g !== null){
-        scoreLine = `<div class="pcard-total">${c}<span class="pcard-total-of">/ ${g} correct</span></div>`;
+        const word = AttemptScope.scoreLabel(scope);
+        scoreLine = `<div class="pcard-total">${c}<span class="pcard-total-of">/ ${g} correct${word ? " · " + escapeHtml(word) : ""}</span></div>`;
       }
-      const badgeHtml = timingBadgeHtml(record);       // escaped inside; "" for plain standard timing
+      // both escaped inside; "" for a full sitting at plain standard timing
+      const badgeHtml = [scopeBadgeHtml(record), timingBadgeHtml(record)].filter(Boolean).join(" · ");
       const card = document.createElement("div");
       card.className = "pcard";
       card.innerHTML = `
@@ -2494,20 +2543,58 @@
        second layer behind the Continue button's own check, and the one place
        a sitting reads the assignment's policy: from begin on, the record's
        own timing is what resume, crash-resume and Review Mode read. */
+    /* FIRST: a row this page cannot read never begins, and none of its rules
+       are interpreted — the second layer behind the card's reload line
+       (AssignmentRules.rowTooNew; the card and startAssignment refuse first) */
+    if(assignment && AssignmentRules.rowTooNew(assignment)){
+      state.pendingTiming = null;
+      state.pendingScope = null;
+      renderHome();
+      showOnly("screen-home");
+      return;
+    }
     const policy = AssignmentRules.timingPolicyOf(assignment);
     let timing = policy.timing, studentPicked = false;
     if(policy.mode === "student-choice"){
       const pt = state.pendingTiming;
       if(!assignment || !pt || pt.assignmentId !== assignment.assignmentId || policy.allowed.indexOf(pt.timing) === -1){
         state.pendingTiming = null;
+        state.pendingScope = null;
         openTimingChoice(test, assignment);
         return;
       }
       timing = pt.timing;
       studentPicked = true;
     }
+    /* The PART of the form (partial sittings, 2026-11-02), by the same
+       discipline: a fixed row's preset, or the student's pick for THIS
+       assignment within its allowed presets — else the choice screen, never
+       a default. Resolved here once; from begin on the record's own `scope`
+       is what resume, crash-resume, Score Details and Review Mode read. */
+    const scopePolicy = AssignmentRules.scopePolicyOf(assignment);
+    let scope, scopePicked = false;
+    if(scopePolicy.mode === "student-choice"){
+      const ps = state.pendingScope;
+      if(!assignment || !ps || ps.assignmentId !== assignment.assignmentId || scopePolicy.allowed.indexOf(ps.scope) === -1){
+        state.pendingTiming = null;
+        state.pendingScope = null;
+        openTimingChoice(test, assignment);
+        return;
+      }
+      scope = AttemptScope.fromPreset(ps.scope);
+      scopePicked = true;
+    } else {
+      scope = AttemptScope.fromModules(scopePolicy.modules) || AttemptScope.fromPreset("full");
+    }
     state.pendingTiming = null;                                // consumed: one pick starts one sitting
+    state.pendingScope = null;
     state.reviewMode = null;     // a live sitting must never inherit review's read-only gates
+    /* The sitting runs on the form FILTERED to its scope — the very object the
+       recorder is handed — so modules[], answers and score hold only the
+       scoped modules by construction (AttemptScope.testFor: the whole form
+       itself for a full scope). An out-of-scope module is then ABSENT from
+       the record, never a blank one. */
+    test = AttemptScope.testFor(test, scope);
     state.currentTest = test;
     state.activeAssignment = assignment || null;
     state.timing = timing;
@@ -2518,22 +2605,31 @@
     });
     const conditions = (assignment && assignment.category === "test")
       ? "proctored" : "self-administered";
+    /* the options object exists only when there is something to say (a
+       student pick, or a part of the form), so a fixed full sitting passes
+       exactly what it always did */
+    const beginOpts = {};
+    if(studentPicked) beginOpts.timingSelectedByStudent = true;
+    if(scope.kind !== "full" || scopePicked) beginOpts.scope = { modules: scope.modules.slice(), selectedByStudent: scopePicked };
     Attempts.begin(test, state.userName, conditions, state,    // spec §3: record on test start
       assignment ? assignment.assignmentId : null, state.timing, undefined,
-      studentPicked ? { timingSelectedByStudent: true } : undefined);
+      Object.keys(beginOpts).length ? beginOpts : undefined);
     showOnly("screen-loading");
     state.readyTimer = setTimeout(()=>{ state.readyTimer = null; showReady(true); }, 2200);
   }
 
-  /* ================= TIMING CHOICE (assignment options, 2026-11-02) =========
-     An assignment whose timingPolicy is student-choice shows this screen
-     BEFORE the start code (proctored) or the loading beat (practice). Nothing
-     starts until one of the ALLOWED options is picked: Continue is disabled
-     until a radio is on, the handler re-checks the value against the allowed
-     set, and startTestFlowLoaded refuses to begin without a valid pick for
-     this very assignment. The pick lives in state.pendingTiming only until
-     begin stamps it into the record. The option labels are constants and the
-     test name is test data — both escaped like any other render surface. */
+  /* ================= PRE-FLIGHT CHOICES (assignment options, 2026-11-02; partial sittings) =========
+     An assignment whose timingPolicy OR scopePolicy is student-choice shows
+     this screen BEFORE the start code (proctored) or the loading beat
+     (practice), with one block per choice the tutor left open; the value
+     they fixed for the other is STATED, not asked. Nothing starts until every
+     block shown has one of its ALLOWED options picked: Continue is disabled
+     until then, the handler re-checks each value against its allowed set,
+     and startTestFlowLoaded refuses to begin without a valid pick for this
+     very assignment. The picks live in state.pendingTiming / state.pendingScope
+     only until begin stamps them into the record. Option labels come from
+     closed tables and the test name is test data — all escaped like any other
+     render surface. */
   function timingChoiceLabel(t){ return AssignmentRules.choiceLabel(t); }   // the tutor's form uses the same table
   function timingChoiceNote(t){
     if(t === "untimed") return "No countdown — each module ends when you submit it.";
@@ -2541,25 +2637,53 @@
     if(t === 2) return "Every module clock runs twice its standard length.";
     return "Every module runs on its standard clock, as on test day.";
   }
+  function scopeChoiceNote(name){
+    if(name === "full") return "All four modules, with the break between sections. Scored 400–1600.";
+    if(name === "rw") return "Both Reading and Writing modules, no Math. A Reading and Writing score, no total.";
+    if(name === "math") return "Both Math modules, no Reading and Writing. A Math score, no total.";
+    return "That one module only. A raw count of correct answers, no scaled score.";
+  }
+  /* the value the tutor fixed, said beside the choice they left open */
+  function fixedTimingLine(policy){ return "Timing: " + AssignmentRules.choiceLabel(policy.timing) + " — set by your tutor."; }
+  function fixedScopeLine(sp){
+    const sc = AttemptScope.fromModules(sp.modules) || AttemptScope.fromPreset("full");
+    return "Part of the test: " + AttemptScope.presetLabel(sc.preset) + " — set by your tutor.";
+  }
   function openTimingChoice(test, assignment){
     const policy = AssignmentRules.timingPolicyOf(assignment);
-    if(policy.mode !== "student-choice"){
+    const scopePolicy = AssignmentRules.scopePolicyOf(assignment);
+    const askTiming = policy.mode === "student-choice", askScope = scopePolicy.mode === "student-choice";
+    if(!askTiming && !askScope){
       /* nothing to choose: the fixed route, start code included — never a
          way around the ceremony for a proctored row (both callers check the
-         mode first, so this is the defensive branch, and it must be right) */
+         modes first, so this is the defensive branch, and it must be right) */
       if(assignment && assignment.category === "test") openStartCode(test, assignment);
       else startTestFlow(test, assignment);
       return;
     }
     state.pendingTiming = null;
-    state.pendingChoice = { test: testById(test.testId) || test, assignment, allowed: policy.allowed };
+    state.pendingScope = null;
+    state.pendingChoice = { test: testById(test.testId) || test, assignment,
+      allowed: askTiming ? policy.allowed : null, allowedScopes: askScope ? scopePolicy.allowed : null };
     el("tcTestName").textContent = String(test.testName || "this test");
-    el("tcOptions").innerHTML = policy.allowed.map(t => `
+    el("tcTitle").textContent = (askTiming && askScope) ? "Before You Start" : askTiming ? "Choose Your Timing" : "Choose Your Part of the Test";
+    el("tcTimingBlock").classList.toggle("hidden", !askTiming);
+    el("tcOptions").innerHTML = askTiming ? policy.allowed.map(t => `
       <label class="tc-opt">
         <input type="radio" name="tcTiming" value="${escapeHtml(String(t))}">
         <span class="tc-opt-text"><span class="tc-opt-main">${escapeHtml(timingChoiceLabel(t))}</span>
           <span class="tc-opt-sub">${escapeHtml(timingChoiceNote(t))}</span></span>
-      </label>`).join("");
+      </label>`).join("") : "";
+    el("tcScopeBlock").classList.toggle("hidden", !askScope);
+    el("tcScopeOptions").innerHTML = askScope ? scopePolicy.allowed.map(name => `
+      <label class="tc-opt">
+        <input type="radio" name="tcScope" value="${escapeHtml(name)}">
+        <span class="tc-opt-text"><span class="tc-opt-main">${escapeHtml(AttemptScope.presetLabel(name))}</span>
+          <span class="tc-opt-sub">${escapeHtml(scopeChoiceNote(name))}</span></span>
+      </label>`).join("") : "";
+    const fixedLine = (askTiming && askScope) ? "" : askTiming ? fixedScopeLine(scopePolicy) : fixedTimingLine(policy);
+    el("tcFixedNote").textContent = fixedLine;
+    el("tcFixedNote").classList.toggle("hidden", !fixedLine);
     el("tcContinueBtn").disabled = true;
     el("tcError").classList.add("hidden");
     showOnly("screen-timing");
@@ -2570,15 +2694,30 @@
     const on = document.querySelector('#tcOptions input[name="tcTiming"]:checked');
     return on ? AssignmentRules.exactTiming(on.value) : null;
   }
-  el("tcOptions").addEventListener("change", ()=>{
-    el("tcContinueBtn").disabled = pickedTimingChoice() === null;
-  });
+  /* the checked scope radio as an EXACT preset name, or null — junk is
+     "nothing picked", never a pick of Full */
+  function pickedScopeChoice(){
+    const on = document.querySelector('#tcScopeOptions input[name="tcScope"]:checked');
+    const v = on ? String(on.value) : null;
+    return (v !== null && AttemptScope.PRESET_NAMES.indexOf(v) !== -1) ? v : null;
+  }
+  /* Continue is live once every block SHOWN holds a valid pick */
+  function preflightPicksComplete(){
+    const pc = state.pendingChoice;
+    if(!pc) return false;
+    if(pc.allowed && pickedTimingChoice() === null) return false;
+    if(pc.allowedScopes && pickedScopeChoice() === null) return false;
+    return true;
+  }
+  el("tcOptions").addEventListener("change", ()=>{ el("tcContinueBtn").disabled = !preflightPicksComplete(); });
+  el("tcScopeOptions").addEventListener("change", ()=>{ el("tcContinueBtn").disabled = !preflightPicksComplete(); });
   el("tcHomeBtn").addEventListener("click", ()=>{
     state.pendingChoice = null;
     state.pendingTiming = null;
+    state.pendingScope = null;
     showOnly("screen-home");
   });
-  /* Continue: validate the pick, then RE-RUN the gate the card ran — the
+  /* Continue: validate every pick, then RE-RUN the gate the card ran — the
      student can sit on this screen past the assignment's expiry (or until
      the same assignment became resumable elsewhere), and for a practice row
      this is the last check before the sitting begins (the proctored route
@@ -2587,20 +2726,28 @@
   function continueTimingChoice(){
     const pc = state.pendingChoice;
     if(!pc) return;
-    const picked = pickedTimingChoice();
-    if(picked === null || pc.allowed.indexOf(picked) === -1){
+    const picked = pc.allowed ? pickedTimingChoice() : undefined;
+    if(pc.allowed && (picked === null || pc.allowed.indexOf(picked) === -1)){
       el("tcError").textContent = "Pick one of the timing options to continue.";
+      el("tcError").classList.remove("hidden");
+      return;
+    }
+    const pickedScope = pc.allowedScopes ? pickedScopeChoice() : undefined;
+    if(pc.allowedScopes && (pickedScope === null || pc.allowedScopes.indexOf(pickedScope) === -1)){
+      el("tcError").textContent = "Pick which part of the test to take to continue.";
       el("tcError").classList.remove("hidden");
       return;
     }
     if(assignmentState(pc.assignment) !== "ready"){
       state.pendingChoice = null;
       state.pendingTiming = null;
+      state.pendingScope = null;
       renderHome();                               // repaint the now-expired/resumable/completed state
       showOnly("screen-home");
       return;
     }
-    state.pendingTiming = { assignmentId: pc.assignment.assignmentId, timing: picked };
+    state.pendingTiming = pc.allowed ? { assignmentId: pc.assignment.assignmentId, timing: picked } : null;
+    state.pendingScope = pc.allowedScopes ? { assignmentId: pc.assignment.assignmentId, scope: pickedScope } : null;
     state.pendingChoice = null;
     if(pc.assignment.category === "test") openStartCode(pc.test, pc.assignment);   // the code still gates a proctored sitting
     else startTestFlow(pc.test, pc.assignment);
@@ -2640,6 +2787,7 @@
   el("scHomeBtn").addEventListener("click", ()=>{
     state.pendingStart = null;
     state.pendingTiming = null;                  // a pick made for this sitting dies with it
+    state.pendingScope = null;
     showOnly("screen-home");
   });
   el("scStartBtn").addEventListener("click", ()=>{
@@ -2716,6 +2864,14 @@
   function resumeTestFlowLoaded(test, record){
     const resume = record.resume || record.checkpoint || {};
     if(!test || !test.modules || !test.modules.length) return false;
+    /* The RECORD's own scope decides which modules this sitting has (partial
+       sittings, 2026-11-02): the pinned build arrives whole, and a Math-only
+       checkpoint's moduleIndex 1 means the second MATH module — read against
+       the full form it would reopen RW Module 2. The assignment is never
+       consulted for it. A set record reads as full and its synthetic test
+       passes through untouched. */
+    test = AttemptScope.testFor(test, record);
+    if(!test.modules.length) return false;
     state.reviewMode = null;     // a live sitting must never inherit review's read-only gates
     state.currentTest = test;
     state.moduleState = buildModuleStateFromRecord(test, record);
@@ -2751,7 +2907,15 @@
     const card = el("readyCard");
     if(isFirst){
       el("readyTitle").textContent = "Practice Test";
-      card.innerHTML = `
+      /* a PART of the form (partial sittings, 2026-11-02): say which, with the
+         module and question counts the loaded content gives exactly. The
+         record the recorder just opened is the one source for the scope. */
+      const scope = AttemptScope.scopeOf({ scope: Attempts.currentScope() });
+      const mods = (state.currentTest && state.currentTest.modules) || [];
+      const nQ = mods.reduce((n, m) => n + ((m && m.questions) ? m.questions.length : 0), 0);
+      const scopeItem = scope.kind === "full" ? "" :
+        `<div class="ready-item"><div class="ricon">🧩</div><div><h3>Part of the test: ${escapeHtml(AttemptScope.presetLabel(scope.preset))}</h3><p>This sitting covers ${mods.length} module${mods.length === 1 ? "" : "s"} · ${nQ} questions${scope.kind === "section" ? ", with no break — the other section is not part of it. You'll get a " + escapeHtml(scope.section) + " score and no total." : ". You'll get a count of correct answers, not a scaled score."}</p></div></div>`;
+      card.innerHTML = scopeItem + `
         <div class="ready-item"><div class="ricon">🕐</div><div><h3>Timing</h3><p>Practice tests are timed, and the timer auto-advances you when it runs out. Need to stop early? Use <b>Save and Exit</b> in the More (⋮) menu — your place is saved and you can resume from the home screen.</p></div></div>
         <div class="ready-item"><div class="ricon">📝</div><div><h3>Scores</h3><p>When you finish, your answers go to your tutor. Once they release your scores, the full question-by-question review appears under <b>Past</b> on your home screen.</p></div></div>
         <div class="ready-item"><div class="ricon">🧰</div><div><h3>Tools</h3><p>Mark questions for review, cross out answer choices, and highlight passage text — just like on test day.</p></div></div>
@@ -2808,6 +2972,17 @@
   function timingBadgeHtml(record){
     const b = timingBadgeFor(record);
     return b ? escapeHtml(b.text) + (b.selected ? " " + SELECTED_MARK : "") : "";
+  }
+  /* The scope badge a RECORD earns (partial sittings, 2026-11-02), the timing
+     badge's twin: the closed-table label — "" for a full sitting unless the
+     student chose it, when "Full test" is itself the information — and the
+     "(student-selected)" mark on the literal true. Escaped here; a crafted
+     scope reads as full and carries no text of its own. */
+  const SCOPE_SELECTED_MARK = '<span class="sd-sel" title="' + escapeHtml(AttemptScope.SELECTED_TITLE) + '">(student-selected)</span>';
+  function scopeBadgeHtml(record){
+    const sc = AttemptScope.scopeOf(record);
+    const lbl = AttemptScope.label(sc, sc.selected);
+    return lbl ? escapeHtml(lbl) + (sc.selected ? " " + SCOPE_SELECTED_MARK : "") : "";
   }
 
   function beginModule(idx, resume){
@@ -5063,25 +5238,40 @@
        <sec>M1[raw correct in module 1] + <sec>M2[raw correct in module 2].
        Needs the per-module raws from buildScoreRows; without them (or with a
        malformed table) this returns null and the raw fallback shows. */
-  function scaledScores(test, rawRw, rawMath, moduleRaw){
+  /* `scope` (partial sittings, 2026-11-02; AttemptScope.scopeOf) decides WHICH
+     numbers exist: a full sitting both sections and the total, exactly as
+     before; a section-only sitting that section's scaled score — EXACT from
+     the same per-module table (base + M1 + M2 is one section's own sum) —
+     with the other section null and `total: null`; a single module has no
+     conversion at all (M1 and M2 are distinct terms of a sum), so null.
+     Never a total estimated from a part of the test. */
+  function scaledScores(test, rawRw, rawMath, moduleRaw, scope){
     const sc = test.scoring;
     if(!sc) return null;
+    const kind = (scope && typeof scope.kind === "string") ? scope.kind : "full";
+    if(kind === "module") return null;
+    const wantRw = kind === "full" || scope.section === "Reading and Writing";
+    const wantMath = kind === "full" || scope.section === "Math";
     const pick = (arr, raw) => Array.isArray(arr) && typeof raw === "number"
       ? arr[Math.max(0, Math.min(raw, arr.length - 1))] : undefined;
-    let rw, math;
+    let rw = null, math = null;
     if(sc.model === "per-module"){
       if(!moduleRaw || typeof sc.base !== "number") return null;
-      const rw1 = pick(sc.rwM1,   moduleRaw.rw[0]),   rw2 = pick(sc.rwM2,   moduleRaw.rw[1]);
-      const ma1 = pick(sc.mathM1, moduleRaw.math[0]), ma2 = pick(sc.mathM2, moduleRaw.math[1]);
-      if([rw1, rw2, ma1, ma2].some(v => typeof v !== "number")) return null;
-      rw = sc.base + rw1 + rw2;
-      math = sc.base + ma1 + ma2;
+      if(wantRw){
+        const rw1 = pick(sc.rwM1, moduleRaw.rw[0]), rw2 = pick(sc.rwM2, moduleRaw.rw[1]);
+        if(typeof rw1 !== "number" || typeof rw2 !== "number") return null;
+        rw = sc.base + rw1 + rw2;
+      }
+      if(wantMath){
+        const ma1 = pick(sc.mathM1, moduleRaw.math[0]), ma2 = pick(sc.mathM2, moduleRaw.math[1]);
+        if(typeof ma1 !== "number" || typeof ma2 !== "number") return null;
+        math = sc.base + ma1 + ma2;
+      }
     } else {
-      rw = pick(sc.rw, rawRw);
-      math = pick(sc.math, rawMath);
+      if(wantRw){ rw = pick(sc.rw, rawRw); if(typeof rw !== "number") return null; }
+      if(wantMath){ math = pick(sc.math, rawMath); if(typeof math !== "number") return null; }
     }
-    if(typeof rw !== "number" || typeof math !== "number") return null;
-    return { rw, math, total: rw + math,
+    return { rw, math, total: (wantRw && wantMath) ? rw + math : null,
       estimated: !!sc.estimated || sc.scoringSource === "estimated" };
   }
   const EST = '<sup class="sd-est" title="Estimated — approximate conversion">Est.</sup>';
@@ -5209,8 +5399,16 @@
       record && record.testVersion);
   }
   function openScoreDetailsLoaded(test, record, origin){
+    /* The record's scope decides which modules this report has (partial
+       sittings, 2026-11-02): the form is filtered to it HERE, before anything
+       pairs it with the record, so buildModuleStateFromRecord never sees an
+       out-of-scope module and no absent answer can read as "omitted". The
+       filtered test is what sdCtx keeps — the strips, Review Mode, the
+       questions table and the calculator button all read it from there. */
+    test = AttemptScope.testFor(test, record);
+    const scope = AttemptScope.scopeOf(record);
     const built = buildScoreRows(test, record);
-    sdCtx = { test, record, rows: built.rows, tally: built.tally, domains: built.domains,
+    sdCtx = { test, record, scope, rows: built.rows, tally: built.tally, domains: built.domains,
       moduleRaw: built.moduleRaw,
       filter: "all", page: 0, pageSize: 10, showCorrect: false, origin: origin || "home" };
     renderScoreDetails();
@@ -5229,15 +5427,24 @@
 
   function renderScoreDetails(){
     const { test, record, tally, domains, moduleRaw } = sdCtx;
+    const scope = sdCtx.scope || AttemptScope.scopeOf(record);
     const rawRw = tally["Reading and Writing"].correct;
     const rawMath = tally["Math"].correct;
-    const scaled = scaledScores(test, rawRw, rawMath, moduleRaw);
-    const badgeHtml = timingBadgeHtml(record);        // escaped inside; carries the student-selected mark
+    const scaled = scaledScores(test, rawRw, rawMath, moduleRaw, scope);
+    // both escaped inside; the scope badge carries its own student-selected mark, the timing badge its own
+    const badgeHtml = [scopeBadgeHtml(record), timingBadgeHtml(record)].filter(Boolean).join(" · ");
     const dateStr = fmtCardDate(record.startedAt);
 
-    // hero
+    /* hero. A partial sitting (partial sittings, 2026-11-02) prints no total:
+       a section-only record shows that section's exact scaled score under
+       "Section only" with "—" where the total stands; a single-module record
+       shows its raw count under "Single module" and no scaled number at all.
+       The printed report is this same DOM, so it carries the same words. */
+    const SECTIONS = ["Reading and Writing", "Math"];
+    const inScope = sec => scope.kind === "full" || scope.section === sec;
+    const scopeWord = AttemptScope.scoreLabel(scope);
     let hero;
-    if(scaled){
+    if(scaled && scope.kind === "full"){
       const est = scaled.estimated ? EST : "";
       hero = `
         <div class="sd-hero-total">
@@ -5249,16 +5456,30 @@
           <div><div class="sd-sec-lbl">Reading and Writing</div><div class="sd-sec-range">200–800</div><div class="sd-sec-num">${scaled.rw}${est}</div></div>
           <div><div class="sd-sec-lbl">Math</div><div class="sd-sec-range">200–800</div><div class="sd-sec-num">${scaled.math}${est}</div></div>
         </div>`;
+    } else if(scaled && scope.kind === "section"){
+      const est = scaled.estimated ? EST : "";
+      const n = scope.section === "Math" ? scaled.math : scaled.rw;
+      hero = `
+        <div class="sd-hero-total">
+          <div class="sd-hero-lbl">TOTAL SCORE</div>
+          <div class="sd-hero-num">—</div>
+          <div class="sd-hero-range">${escapeHtml(scopeWord)} — no total for a partial sitting</div>
+        </div>
+        <div class="sd-hero-sections">
+          <div><div class="sd-sec-lbl">${escapeHtml(scope.section)}</div><div class="sd-sec-range">200–800</div><div class="sd-sec-num">${n}${est}</div></div>
+        </div>`;
     } else {
+      const secs = SECTIONS.filter(inScope);
+      const correctAll = secs.reduce((n, s) => n + tally[s].correct, 0);
+      const gradedAll = secs.reduce((n, s) => n + tally[s].graded, 0);
       hero = `
         <div class="sd-hero-total">
           <div class="sd-hero-lbl">CORRECT</div>
-          <div class="sd-hero-num">${rawRw + rawMath}<span class="sd-hero-of">/ ${tally["Reading and Writing"].graded + tally["Math"].graded}</span></div>
-          <div class="sd-hero-range">scaled scores not available for this test</div>
+          <div class="sd-hero-num">${correctAll}<span class="sd-hero-of">/ ${gradedAll}</span></div>
+          <div class="sd-hero-range">${scopeWord ? escapeHtml(scopeWord) + " — no scaled score" : "scaled scores not available for this test"}</div>
         </div>
         <div class="sd-hero-sections">
-          <div><div class="sd-sec-lbl">Reading and Writing</div><div class="sd-sec-num">${rawRw}<span class="sd-hero-of">/ ${tally["Reading and Writing"].graded}</span></div></div>
-          <div><div class="sd-sec-lbl">Math</div><div class="sd-sec-num">${rawMath}<span class="sd-hero-of">/ ${tally["Math"].graded}</span></div></div>
+          ${secs.map(s => `<div><div class="sd-sec-lbl">${escapeHtml(s)}</div><div class="sd-sec-num">${tally[s].correct}<span class="sd-hero-of">/ ${tally[s].graded}</span></div></div>`).join("\n          ")}
         </div>`;
     }
 
@@ -5386,6 +5607,10 @@
     const shown = filtered.slice(start, size ? start + size : total);
 
     const tab = (key, label) => `<button class="sd-tab ${filter===key?"on":""}" data-filter="${key}">${label}</button>`;
+    /* a section the sitting did not include has no tab (partial sittings):
+       an empty tab would say "No questions" for the wrong reason */
+    const scope = sdCtx.scope || AttemptScope.scopeOf(sdCtx.record);
+    const hasTab = sec => scope.kind === "full" || scope.section === sec;
     const body = shown.map(r => {
       const yours = answerLetter(r.q, r.given);
       const stateCls = r.noKey ? "nokey" : (r.given === null ? "omit" : (r.correct ? "ok" : "bad"));
@@ -5404,7 +5629,7 @@
 
     el("sdQuestions").innerHTML = `
       <h2>Questions Overview</h2>
-      <div class="sd-tabs">${tab("all","All")}${tab("rw","Reading and Writing")}${tab("math","Math")}</div>
+      <div class="sd-tabs">${tab("all","All")}${hasTab("Reading and Writing") ? tab("rw","Reading and Writing") : ""}${hasTab("Math") ? tab("math","Math") : ""}</div>
       <div class="sd-table-controls">
         <label class="sd-toggle"><input type="checkbox" id="sdShowCorrect" ${showCorrect?"checked":""}> Show Correct Answers</label>
         <div class="sd-view">View
@@ -5885,6 +6110,10 @@
       if(isSetKeyed(r)) return false;
       if(r.released !== true) return false;
       if(r.status !== "completed" && r.status !== "timed-out") return false;
+      /* a PARTIAL sitting (partial sittings, 2026-11-02) is no prefill: the
+         calculator is a what-if over the whole form, and a Math-only record
+         would prefill Reading and Writing at 0 and mark "your result" there */
+      if(AttemptScope.scopeOf(r).kind !== "full") return false;
       const t = testById(r.testId);
       if(!t) return false;
       return (t.testVersion || "unversioned") === r.testVersion;
