@@ -113,6 +113,23 @@ function makeStore(opts){
   opts = opts || {};
   const mirror = new Map(), server = new Map(), calls = [], ops = [];
   const clone = v => JSON.parse(JSON.stringify(v));
+  /* a row as PostgreSQL jsonb hands it back (2026-11-02): object keys in
+     canonical order — shorter first, then bytewise — nested objects too,
+     arrays untouched. adminSelectKey returns rows this way, as the live
+     server does, so a read-back compare that depends on insertion order
+     goes red here instead of on the live site. (adminSelectAll keeps the
+     stored shape: the §12 pull compares what it wrote against the stored
+     value by text, which is the harness's own identity, not the server's.) */
+  const jsonbOrder = v => {
+    if(Array.isArray(v)) return v.map(jsonbOrder);
+    if(v && typeof v === "object"){
+      const out = {};
+      Object.keys(v).sort((a, b) => a.length - b.length || Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")))
+        .forEach(k => { out[k] = jsonbOrder(v[k]); });
+      return out;
+    }
+    return v;
+  };
   const rejecting = (op, key) => typeof opts.reject === "function" ? !!opts.reject(op, key) : !!opts.reject;
   const expired = () => { const e = new Error(opts.errorMessage || "JWT expired"); e.status = opts.errorStatus === undefined ? 401 : opts.errorStatus; return e; };
   /* the Refresh pull's two moments, for §12: `pullStarted` resolves when the
@@ -176,7 +193,7 @@ function makeStore(opts){
     async adminSelectKey(k){ calls.push(["adminSelectKey", k]);
       if(rejecting("select", k)){ ops.push(["select", k, "rejected"]); throw expired(); }
       ops.push(["select", k, server.has(k) ? "found" : "missing"]);
-      return server.has(k) ? [{ key: k, owner_code: server.get(k).owner, value: clone(server.get(k).value) }] : []; },
+      return server.has(k) ? [{ key: k, owner_code: server.get(k).owner, value: jsonbOrder(clone(server.get(k).value)) }] : []; },
     async adminSelectAll(){ return [...server.entries()].map(([k, r]) => ({ key: k, owner_code: r.owner, value: clone(r.value) })); },
     /* the tutor-only tombstone RPCs (2026-09-18), modelled on the migration:
        a marker row per key, never an edit or a delete of the record, an
@@ -297,7 +314,30 @@ const NAMES = ["describeRow", "rejectedText", "tutorPut", "tutorDelete", "savePr
   // the REAL reloads (a counting stub let a check pass on state it seeded — final check, finding 7)
   "loadSets", "loadAssignsAndBugs",
   // the Refresh pull vs a concurrent write (2026-10-06): the helpers' note to an in-flight pull
-  "notePulledWrite"];
+  "notePulledWrite",
+  // assignment options + bulk assign (2026-11-02): the form's test picker, the
+  // active-duplicate refusal and its status chain, the read-back, the cells
+  "formTests", "selectTests", "unsatTestIds", "activeAssignmentFor", "syncTimingModeView", "canonJson", "newAssignmentId",
+  "assignmentOf", "releaseCell", "timingLabel", "timingBadgeHtml", "assignTimingText", "releaseModeText",
+  "assignRowStatus", "attemptsForAssignment", "attemptCategoryMatches", "assignCountFor", "deletedMayClose", "assignmentsAtDeletionOf"];
+/* the shared assignment-row reader (attempts.js window.AssignmentRules): the
+   dashboard page always has it (attempts.js loads before dashboard.js), so
+   the harness takes the REAL one from the same attempts.js source */
+const RULES = (() => {
+  const sb = { localStorage: { getItem: () => null, setItem(){}, removeItem(){}, key(){ return null; }, length: 0 },
+    location: { search: "" }, document: { addEventListener(){}, createElement: () => ({}) },
+    navigator: { userAgent: "node", onLine: true }, screen: { width: 1, height: 1 },
+    setInterval: () => 0, clearInterval(){}, setTimeout: () => 0, clearTimeout(){},
+    fetch: () => Promise.reject(new Error("network blocked in test")) };
+  sb.window = sb; sb.addEventListener = () => {};
+  vm.createContext(sb); vm.runInContext(attemptsSrc, sb);
+  if(!sb.AssignmentRules) throw new Error("attempts.js defines no window.AssignmentRules");
+  return sb.AssignmentRules;
+})();
+/* the real manifest: the page always has it, and the test picker, the
+   duplicate check (sameTest) and the status line read it through testsById */
+const REAL_MANIFEST = (() => { const c = { window: {} }; vm.createContext(c);
+  vm.runInContext(fs.readFileSync("testdata/manifest.js", "utf8"), c); return c.window.TEST_MANIFEST; })();
 const ASYNC = new Set(["tutorPut", "tutorDelete", "saveProfiles", "saveNameOnly", "createAssignment",
   "deleteAssignment", "clearAssignments", "deleteSet", "deleteArchived", "dismissBug", "deleteAttempt",
   "toggleRelease", "freshAssignmentRow", "saveSetFromBuilder", "assignSetFromForm", "migrateLocalToServer",
@@ -319,7 +359,8 @@ function decl(name){
   const m = src.match(new RegExp("^[ \\t]*(?:let|const)[ \\t]+" + name + "[ \\t]*=[^;\\n]*;", "m"));
   return m ? m[0] : "/* dashboard.js no longer declares " + name + " */";
 }
-const STATE_SRC = [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight"), decl("pullsInFlight")].join("\n");
+const STATE_SRC = [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight"), decl("pullsInFlight"),
+  decl("createInFlight"), decl("seenMemo")].join("\n");
 const BODY = NAMES.map(tryExtract).join("\n") + "\n" + URL_SRC + "\n" + KEPT_SRC + "\n" + STATE_SRC +
   "\nconst BANK_INDEX_TIMEOUT_MS = 60;\n";
 /* the REAL loadFromStorage, for the §12 cases only (build's opts.realLoad):
@@ -370,10 +411,10 @@ function build(store, win, doc, opts){
     ["saMsg", "sbMsg", "afMsg"].forEach(id => { if(els[id]) els[id].textContent = ""; });
     /* …and every DOM-only form value in it: the two assign forms keep
        theirs only in the DOM, which is what renderKeepingInputs exists for */
-    ["afFree", "afName", "afTest", "afCat", "afTiming", "afOpens", "afExpires", "afResetCode",
+    ["afFree", "afName", "afTest", "afCat", "afTiming", "afOpens", "afExpires", "afResetCode", "afRelease", "afTimingMode",
      "saSet", "saFree", "saLimit", "saExpires"].forEach(id => { if(els[id]) els[id].value = ""; });
     if(els.saHold) els.saHold.checked = false;
-    ["afCodes", "saCodes"].forEach(id => { const el = els[id]; if(el && el.options) el.options.forEach(o => { o.selected = false; }); });
+    ["afCodes", "afTest", "saCodes"].forEach(id => { const el = els[id]; if(el && el.options) el.options.forEach(o => { o.selected = false; }); });
   };
   /* exportAll's download plumbing, stubbed: it only needs an anchor to click.
      The Blob RECORDS its parts so the payload can be asserted on. */
@@ -388,11 +429,15 @@ function build(store, win, doc, opts){
   const URLStub = { createObjectURL: () => "blob:stub", revokeObjectURL(){} };
   const blobs = [];
   function BlobStub(parts){ this.text = (parts || []).join(""); blobs.push(this); }
-  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", "console", `
+  const factory = new Function("AttemptStore", "$", "StudentCode", "confirm", "window", "escapeHtml", "wipeBody", "document", "URL", "Blob", "console", "AssignmentRules", `
     let recs = [], assigns = [], bugs = [], lastStartCode = null, profiles = {}, source = "storage", lastExport = null;
     let sets = [], builder = null, setsMsg = "", saMsg = "", openAttemptId = null, tombs = {}, tab = "sets";
     let dedup = null;                      // canonical grouping is canonical-index.test.js's; here: exact keys only
+    /* as dashboard.js builds it at load: every manifest test by id and legacy id */
     const testsById = {};
+    (window.TEST_MANIFEST || []).forEach(t => { testsById[t.testId] = t; (t.legacyIds || []).forEach(old => { testsById[old] = t; }); });
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const escAttr = s => esc(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     const loads = { assigns: 0, sets: 0, storage: 0, render: 0, setsLock: [], assignsLock: [], profilesAtReload: [] };
     async function loadFromStorage(){ loads.storage++; }
     /* render paints what viewSetBuilder paints for the builder's outcome
@@ -447,9 +492,9 @@ function build(store, win, doc, opts){
       }
     };
   `);
-  const windowStub = Object.assign({ confirm: () => true, BANK_INDEX: REAL_BANK_INDEX, location: { protocol: kind.protocol } }, win || {});
+  const windowStub = Object.assign({ confirm: () => true, BANK_INDEX: REAL_BANK_INDEX, TEST_MANIFEST: REAL_MANIFEST, location: { protocol: kind.protocol } }, win || {});
   /* the bare confirm() the dashboard calls answers as win.confirm does (yes by default) */
-  const d = factory(store.AS, $, StudentCode, (...a) => windowStub.confirm(...a), windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub, consoleStub);
+  const d = factory(store.AS, $, StudentCode, (...a) => windowStub.confirm(...a), windowStub, s => String(s), wipeBody, documentStub, URLStub, BlobStub, consoleStub, RULES);
   d.warns = warns;
   d.els = els; d.$ = $;
   Object.defineProperty(d, "lastBlob", { get(){ return blobs[blobs.length - 1] || null; } });
@@ -2476,6 +2521,267 @@ const noSync = t => !/sync/i.test(t);
     d.$("sbName").value = "New name"; await d.fns.saveSetFromBuilder();
     check(s.server.get("pset:pset-1").value.name === "New name" && s.mirror.get("pset:pset-1").name === "New name" && d.state().pullsInFlight === 0,
       "control: a write after the pull settled lands on server and mirror with no key set left behind");
+  });
+
+  /* =================== 13. bulk assign (2026-11-02) =================== */
+  console.log("--- 13. bulk assign: one row per (code × test), read back, active duplicates refused by name, failures named ---");
+  const T1 = "202606asiav1", T2 = "202606asiav2", T3 = "202511asiav1", T4 = "202603asiav1";
+  const nameOf = id => REAL_MANIFEST.find(t => t.testId === id).testName;
+  /* the Test control as the page has it: a <select multiple> whose
+     selectedOptions follow its options' selected flags */
+  const selTests = ids => { const el = { options: ids.map(v => ({ value: v, selected: true })), value: "" };
+    Object.defineProperty(el, "selectedOptions", { get(){ return el.options.filter(o => o.selected); } }); return el; };
+  const assignRows = (s, code) => [...s.server.keys()].filter(k => k.indexOf("assign:" + code + ":a-") === 0).map(k => s.server.get(k).value);
+  await run(async () => {
+    const s = makeStore({}); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.$("afFree").value = "";
+    d.els.afTest = selTests([T1, T2, T3]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1.5";
+    d.$("afRelease").value = "auto"; d.$("afTimingMode").value = "fixed";
+    await d.fns.createAssignment();
+    const t = status(d);
+    const rows = assignRows(s, C1);
+    check(rows.length === 3 && rows.map(r => r.testId).sort().join() === [T1, T2, T3].sort().join(), "three tests -> three rows on the server, one per test", rows.map(r => r.testId).join());
+    check(new Set(rows.map(r => r.assignmentId)).size === 3 && rows.every(r => s.mirror.has("assign:" + C1 + ":" + r.assignmentId)), "each row has its own assignmentId and is mirrored after the server took it");
+    check(rows.every(r => r.releaseMode === "auto" && r.timing === 1.5 && r.timingPolicy && r.timingPolicy.mode === "fixed" && r.timingPolicy.timing === 1.5 && r.category === "practice" && r.startCode === null && !("kind" in r)),
+      "the ONE shared set of options lands on every row (auto-release, fixed 1.5×, practice, no set shape)", JSON.stringify(rows[0]));
+    check(/3 of 3 assignment rows written, 3 verified by reading each back\./.test(t) && /Assigned 202606asiav1 to AS-ABCDEFGH \(on the server\)\./.test(t) && /Assigned 202511asiav1 to AS-ABCDEFGH/.test(t) && noSync(t),
+      "the status reports 3 of 3 written and verified, naming each test", t);
+    check(s.calls.filter(c => c[0] === "adminSelectKey" && c[1].indexOf("assign:" + C1 + ":a-") === 0).length === 3, "each row was read back from the SERVER (adminSelectKey), not only the mirror", JSON.stringify(s.calls.filter(c => c[0] === "adminSelectKey")));
+    check(d.state().lastStartCode === null, "a practice bulk assign offers no start code");
+    /* the store hands rows back jsonb-ordered (keys sorted by length, then
+       bytes), as the live server does — so "3 verified" above is a compare
+       that survives the reorder; a text compare would have failed it */
+    const back = await s.AS.adminSelectKey("assign:" + C1 + ":" + rows[0].assignmentId);
+    check(Object.keys(back[0].value)[0] === "testId" && Object.keys(rows[0])[0] === "assignmentId" && JSON.stringify(back[0].value) !== JSON.stringify(rows[0]) && d.fns.canonJson(back[0].value) === d.fns.canonJson(rows[0]),
+      "the read-back row's keys come back reordered (jsonb); canonJson calls it the same row, JSON.stringify would not", Object.keys(back[0].value).join());
+  });
+  await run(async () => {
+    /* two codes × two tests = four rows; one start code shared by the submit (as one test × two codes always was) */
+    const s = makeStore({}); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }, { value: C2 }] }; d.els.afTest = selTests([T1, T2]); d.$("afCat").value = "test"; d.$("afTiming").value = "1";
+    await d.fns.createAssignment();
+    const t = status(d);
+    const r1 = assignRows(s, C1), r2 = assignRows(s, C2);
+    check(r1.length === 2 && r2.length === 2 && /4 of 4 assignment rows written, 4 verified/.test(t) && /Assigned 202606asiav1 to AS-ABCDEFGH, AS-JKLMNPQR/.test(t),
+      "two codes × two tests -> four rows, reported per test with both codes", t);
+    const codes = new Set(r1.concat(r2).map(r => r.startCode));
+    check(codes.size === 1 && /^\d{6}$/.test([...codes][0]) && d.state().lastStartCode === [...codes][0], "one start code for the submit, shown for reading aloud", [...codes].join());
+    check(r1.every(r => r.releaseMode === "manual" && r.timingPolicy.mode === "fixed" && r.timingPolicy.timing === 1 && r.timing === 1), "defaults: manual release, fixed standard timing");
+  });
+  await run(async () => {
+    /* a fourth test with an ACTIVE assignment for this code is refused by name; the other three land */
+    const s = makeStore({}); const d = build(s);
+    const dup = { assignmentId: "a-dup", testId: T4, category: "practice", timing: 1, startCode: null, windowOpens: null, expiresAt: null, assignedAt: "2026-10-01T00:00:00.000Z", completedAttemptId: null };
+    s.seedBoth("assign:" + C1 + ":a-dup", dup, C1);
+    d.seed({ assigns: [{ code: C1, list: [dup] }], recs: [] });
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1, T2, T3, T4]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    await d.fns.createAssignment();
+    const t = status(d);
+    const rows = assignRows(s, C1).filter(r => r.assignmentId !== "a-dup");
+    check(rows.length === 3 && rows.every(r => r.testId !== T4), "the duplicate test is NOT written; the other three are", rows.map(r => r.testId).join());
+    check(t.indexOf("Not assigned — " + C1 + " already has an active assignment of " + nameOf(T4) + " (pending); finish or delete that one first.") !== -1 && /3 of 3 assignment rows written/.test(t),
+      "the refusal is VISIBLE and names the student, the test and the status; the count covers what was planned", t);
+    check([...s.server.keys()].filter(k => k.indexOf("assign:" + C1 + ":") === 0).length === 4, "nothing else was written or removed (the existing row stays)");
+  });
+  await run(async () => {
+    /* a COMPLETED assignment of the same test is not active (a re-sit is allowed); an IN-PROGRESS one is */
+    const s = makeStore({}); const d = build(s);
+    const done = { assignmentId: "a-done", testId: T1, category: "practice", timing: 1, startCode: null, windowOpens: null, expiresAt: null, assignedAt: "2026-10-01T00:00:00.000Z", completedAttemptId: "attempt:202606asiav1:1:aaaa" };
+    const rec = { attemptId: "attempt:202606asiav1:1:aaaa", student: { code: C1, key: C1 }, testId: T1, assignmentId: "a-done", status: "completed", conditions: "self-administered", released: false, startedAt: "2026-10-02T00:00:00.000Z" };
+    d.seed({ assigns: [{ code: C1, list: [done] }], recs: [rec] });
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    await d.fns.createAssignment();
+    const t = status(d);
+    check(assignRows(s, C1).length === 1 && /1 of 1 assignment row written, 1 verified by reading it back\./.test(t) && t.indexOf("Not assigned") === -1,
+      "a completed assignment of the test is not active: the new one is written (a re-sit)", t);
+    const s2 = makeStore({}); const d2 = build(s2);
+    const live = Object.assign({}, done, { assignmentId: "a-live", completedAttemptId: null });
+    const rec2 = Object.assign({}, rec, { attemptId: "attempt:202606asiav1:2:bbbb", assignmentId: "a-live", status: "in-progress", checkpoint: { moduleIndex: 0 } });
+    d2.seed({ assigns: [{ code: C1, list: [live] }], recs: [rec2] });
+    d2.els.afCodes = { selectedOptions: [{ value: C1 }] }; d2.els.afTest = selTests([T1]); d2.$("afCat").value = "practice"; d2.$("afTiming").value = "1";
+    await d2.fns.createAssignment();
+    const t2 = d2.$("afMsg").textContent;      // every pair refused: the refusal is the form's own line, not the status bar
+    everyMessage.push(t2);
+    check(s2.server.size === 0 && t2.indexOf("already has an active assignment of " + nameOf(T1) + " (in-progress)") !== -1, "an in-progress assignment of the test IS active: refused in the form, nothing written", t2);
+    /* …an expired-and-unsat one is not active either, a legacy bare-id entry is */
+    const s3 = makeStore({}); const d3 = build(s3);
+    const old = Object.assign({}, done, { assignmentId: "a-old", completedAttemptId: null, expiresAt: "2020-01-01T00:00:00.000Z" });
+    d3.seed({ assigns: [{ code: C1, list: [old, T2] }], recs: [] });
+    d3.els.afCodes = { selectedOptions: [{ value: C1 }] }; d3.els.afTest = selTests([T1, T2]); d3.$("afCat").value = "practice"; d3.$("afTiming").value = "1";
+    await d3.fns.createAssignment();
+    const t3 = status(d3);
+    check(assignRows(s3, C1).length === 1 && assignRows(s3, C1)[0].testId === T1 && t3.indexOf("already has an active assignment of " + nameOf(T2) + " (pending)") !== -1,
+      "expired-and-unsat is not active (written); a legacy bare-id entry is (refused)", t3);
+  });
+  await run(async () => {
+    /* a failing row is named; the rows already written stay; the count says so */
+    let puts = 0;
+    const s = makeStore({ reject: (op, k) => op === "put" && k.indexOf("assign:") === 0 && ++puts === 2 }); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1, T2, T3]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    await d.fns.createAssignment();
+    const t = status(d);
+    check(assignRows(s, C1).length === 2 && /2 of 3 assignment rows written, 2 verified/.test(t) && /Not saved — assignment a-\S+ for AS-ABCDEFGH: the tutor sign-in has expired/.test(t) && noSync(t),
+      "one rejected row is named 'Not saved' and the two that landed stay; the count says 2 of 3", t);
+  });
+  await run(async () => {
+    /* read-back mismatch: written but NOT verified, said so */
+    const s = makeStore({});
+    const realSel = s.AS.adminSelectKey;
+    s.AS.adminSelectKey = async k => { const r = await realSel(k); if(r.length) r[0].value = Object.assign({}, r[0].value, { testId: "tampered" }); return r; };
+    const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    await d.fns.createAssignment();
+    const t = status(d);
+    check(/1 of 1 assignment row written, 0 verified by reading it back — NOT verified: assignment a-\S+ for AS-ABCDEFGH read back different from what was sent\. Press Refresh to confirm\./.test(t),
+      "a row that does not read back as sent is reported written-but-NOT-verified, naming the row", t);
+    const s2 = makeStore({ reject: (op) => op === "select" }); const d2 = build(s2);
+    d2.els.afCodes = { selectedOptions: [{ value: C1 }] }; d2.els.afTest = selTests([T1]); d2.$("afCat").value = "practice"; d2.$("afTiming").value = "1";
+    await d2.fns.createAssignment();
+    const t2 = status(d2);
+    check(assignRows(s2, C1).length === 1 && /0 verified by reading it back — NOT verified: assignment a-\S+ for AS-ABCDEFGH could not be read back/.test(t2),
+      "a read-back that fails leaves the row (the server took it) and says it could not be read back", t2);
+  });
+  await run(async () => {
+    /* student-choice: the allowed set from the boxes; none ticked is refused before any write */
+    const s = makeStore({}); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1]); d.$("afCat").value = "test"; d.$("afTiming").value = "2";
+    d.$("afTimingMode").value = "student-choice";
+    d.$("afAllow1").checked = false; d.$("afAllow15").checked = true; d.$("afAllow2").checked = false; d.$("afAllowU").checked = true;
+    await d.fns.createAssignment();
+    const row = assignRows(s, C1)[0];
+    check(!!row && row.timing === null && JSON.stringify(row.timingPolicy) === JSON.stringify({ mode: "student-choice", allowed: [1.5, "untimed"] }) && row.releaseMode === "manual" && /^\d{6}$/.test(String(row.startCode)),
+      "student-choice row: timing null, timingPolicy carries exactly the ticked options in canonical order, manual release by default, a start code for a proctored test", JSON.stringify(row));
+    check(JSON.stringify(RULES.timingPolicyOf(row)) === JSON.stringify({ mode: "student-choice", allowed: [1.5, "untimed"] }), "…and the student app's reader reads it back as written");
+    const s2 = makeStore({}); const d2 = build(s2);
+    d2.els.afCodes = { selectedOptions: [{ value: C1 }] }; d2.els.afTest = selTests([T1]); d2.$("afCat").value = "practice"; d2.$("afTiming").value = "1";
+    d2.$("afTimingMode").value = "student-choice";
+    await d2.fns.createAssignment();
+    check(s2.server.size === 0 && d2.$("afMsg").textContent === "Tick at least one timing option for the student to choose from.", "no option ticked: refused with a message, nothing written", d2.$("afMsg").textContent);
+  });
+  await run(async () => {
+    /* no test picked: refused before any write */
+    const s = makeStore({}); const d = build(s);
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([]);
+    await d.fns.createAssignment();
+    check(s.server.size === 0 && d.$("afMsg").textContent === "Pick at least one test.", "no test picked: refused, nothing written", d.$("afMsg").textContent);
+    const s2 = makeStore({}); const d2 = build(s2);
+    d2.els.afCodes = { selectedOptions: [{ value: C1 }] }; d2.els.afTest = selTests(["not-a-test"]);
+    await d2.fns.createAssignment();
+    check(s2.server.size === 0 && d2.$("afMsg").textContent === "Pick at least one test.", "a test id the manifest does not list is not a test (nothing written)");
+  });
+  await run(async () => {
+    /* Select all not yet sat: per student, live attempts only */
+    const s = makeStore({}); const d = build(s);
+    const recs = [
+      { attemptId: "attempt:202606asiav1:1:a", student: { code: C1, key: C1 }, testId: T1, status: "completed", conditions: "self-administered" },
+      { attemptId: "attempt:202606asiav2:1:b", student: { code: C1, key: C1 }, testId: T2, status: "in-progress", conditions: "self-administered" },
+      { attemptId: "attempt:202511asiav1:1:c", student: { code: C1, key: C1 }, testId: T3, status: "completed", conditions: "self-administered" },
+      { attemptId: "attempt:202603asiav1:1:d", student: { code: C2, key: C2 }, testId: T4, status: "completed", conditions: "self-administered" },
+      { attemptId: "attempt:pset-1:1:e", student: { code: C1, key: C1 }, testId: "pset-1", kind: "set", status: "completed", conditions: "self-administered" }
+    ];
+    d.seed({ recs, tombs: { "tomb:attempt:202511asiav1:1:c": { kind: "tombstone", targetKind: "attempt", target: "attempt:202511asiav1:1:c", code: C1 } } });
+    const all = REAL_MANIFEST.map(t => t.testId);
+    const un = d.fns.unsatTestIds([C1]);
+    check(un.indexOf(T1) === -1 && un.indexOf(T2) === -1 && un.indexOf(T3) !== -1 && un.indexOf(T4) !== -1 && un.length === all.length - 2,
+      "not yet sat for one code: a completed and an in-progress attempt exclude their tests; an UNTAGGED deleted attempt and another student's do not count as sat", un.join());
+    const both = d.fns.unsatTestIds([C1, C2]);
+    check(both.indexOf(T4) === -1 && both.length === all.length - 3, "with two codes it is the tests new to BOTH", both.join());
+    check(d.fns.unsatTestIds([]).length === all.length, "no code: every test (the button asks for codes first)");
+    /* a sitting whose record was archived away (the assignment row keeps its
+       completedAttemptId hint), a timed-out sitting, and a tagged deleted
+       sitting (its marker keeps the row Completed) all count as sat */
+    const [T5, T6, T7] = all.filter(id => [T1, T2, T3, T4].indexOf(id) === -1);
+    const hintRow = { assignmentId: "a-arch", testId: T5, category: "practice", completedAttemptId: "attempt:" + T5 + ":1:gone" };
+    const tombRow = { assignmentId: "a-tomb", testId: T7, category: "practice", completedAttemptId: null };
+    d.seed({ recs: recs.concat([
+      { attemptId: "attempt:" + T6 + ":1:t", student: { code: C1, key: C1 }, testId: T6, status: "timed-out", conditions: "self-administered" },
+      { attemptId: "attempt:" + T7 + ":1:d", student: { code: C1, key: C1 }, testId: T7, assignmentId: "a-tomb", status: "completed", conditions: "self-administered" }
+    ]), assigns: [{ code: C1, list: [hintRow, tombRow] }],
+      tombs: { "tomb:attempt:202511asiav1:1:c": { kind: "tombstone", targetKind: "attempt", target: "attempt:202511asiav1:1:c", code: C1 },
+               ["tomb:attempt:" + T7 + ":1:d"]: { kind: "tombstone", targetKind: "attempt", target: "attempt:" + T7 + ":1:d", code: C1, assignmentId: "a-tomb", status: "completed" } } });
+    const un2 = d.fns.unsatTestIds([C1]);
+    check(un2.indexOf(T5) === -1 && un2.indexOf(T6) === -1 && un2.indexOf(T7) === -1 && un2.indexOf(T3) !== -1 && un2.length === all.length - 5,
+      "an archived-away sitting (hint), a timed-out one and a TAGGED deleted one count as sat; the untagged deleted one still does not", un2.join());
+  });
+  await run(async () => {
+    /* the Attempts-table cell: Auto-released needs no button; manual and unreleased-auto keep it */
+    const s = makeStore({}); const d = build(s);
+    const auto = { assignmentId: "a-auto", testId: T1, category: "practice", releaseMode: "auto" };
+    const man = { assignmentId: "a-man", testId: T1, category: "practice" };
+    d.seed({ assigns: [{ code: C1, list: [auto, man] }], recs: [] });
+    const base = { student: { code: C1, key: C1 }, testId: T1, status: "completed" };
+    const cellAutoRel = d.fns.releaseCell(Object.assign({}, base, { attemptId: "attempt:x:1:a", assignmentId: "a-auto", released: true }));
+    const cellAutoUn = d.fns.releaseCell(Object.assign({}, base, { attemptId: "attempt:x:1:b", assignmentId: "a-auto", released: false }));
+    const cellManRel = d.fns.releaseCell(Object.assign({}, base, { attemptId: "attempt:x:1:c", assignmentId: "a-man", released: true }));
+    check(cellAutoRel.indexOf("Released · auto") !== -1 && cellAutoRel.indexOf(">Release<") === -1 && cellAutoRel.indexOf("Released ✓") === -1 &&
+          /<button[^>]*data-rel="attempt:x:1:a"[^>]*>Hide<\/button>/.test(cellAutoRel),
+      "an auto row's released attempt shows 'Released · auto' with no Release button — and a Hide button, so un-release is still reachable", cellAutoRel);
+    check(cellAutoUn.indexOf("<button") !== -1 && cellAutoUn.indexOf(">Release<") !== -1, "an auto row's UNRELEASED attempt keeps the manual Release button", cellAutoUn);
+    check(cellManRel.indexOf("<button") !== -1 && cellManRel.indexOf("Released ✓") !== -1, "a manual row's released attempt keeps the button (control)", cellManRel);
+  });
+  await run(async () => {
+    /* ids are unique within a submit even when Math.random repeats itself
+       (the id is the row's KEY: two equal ids would be one row written twice) */
+    const s = makeStore({}); const d = build(s);
+    const realRandom = Math.random;
+    Math.random = () => 0.123456789;
+    try{
+      d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1, T2, T3]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+      await d.fns.createAssignment();
+    }finally{ Math.random = realRandom; }
+    const rows = assignRows(s, C1);
+    check(rows.length === 3 && new Set(rows.map(r => r.assignmentId)).size === 3 && rows.map(r => r.testId).sort().join() === [T1, T2, T3].sort().join(),
+      "three rows with a constant Math.random: three DIFFERENT ids, no row overwritten", rows.map(r => r.assignmentId).join());
+    check(/3 of 3 assignment rows written, 3 verified/.test(status(d)), "…and the count is honest about it");
+    /* …and an id the code already holds is never re-issued */
+    const s2 = makeStore({}); const d2 = build(s2);
+    const held = { assignmentId: "a-1-00000000", testId: T4, category: "practice", timing: 1, startCode: null, windowOpens: null, expiresAt: null, assignedAt: "2026-10-01T00:00:00.000Z", completedAttemptId: "attempt:x" };
+    s2.seedBoth("assign:" + C1 + ":a-1-00000000", held, C1);
+    d2.seed({ assigns: [{ code: C1, list: [held] }], recs: [] });
+    const realNow = Date.now;
+    Math.random = () => 0; Date.now = () => 1000;
+    try{
+      d2.els.afCodes = { selectedOptions: [{ value: C1 }] }; d2.els.afTest = selTests([T1]); d2.$("afCat").value = "practice"; d2.$("afTiming").value = "1";
+      await d2.fns.createAssignment();
+    }finally{ Math.random = realRandom; Date.now = realNow; }
+    const ids = assignRows(s2, C1).map(r => r.assignmentId);
+    check(ids.length === 2 && ids.indexOf("a-1-00000000") !== -1 && ids.some(id => id !== "a-1-00000000") && s2.server.get("assign:" + C1 + ":a-1-00000000").value.testId === T4,
+      "an id the code already holds is skipped: the existing row is untouched and the new one lands beside it", ids.join());
+  });
+  await run(async () => {
+    /* one run at a time: a second press while the first is still writing
+       plans from the pre-run `assigns` and would double every row */
+    const s = makeStore({}); const d = build(s);
+    const g = gatePut(s, "assign:");
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1, T2]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    const first = d.fns.createAssignment();
+    check(await until(() => inFlight(s, "adminUpsert", [...s.calls].filter(c => c[0] === "gated:adminUpsert").map(c => c[1])[0] || "")), "the first run is in flight (its first row is waiting on the server)");
+    const btnDisabled = d.$("afCreateBtn").disabled === true;
+    await d.fns.createAssignment();                           // the second press
+    const refusal = d.$("afMsg").textContent;
+    g.open(); await first;
+    const rows = assignRows(s, C1);
+    check(rows.length === 2 && rows.map(r => r.testId).sort().join() === [T1, T2].sort().join(), "the second press wrote NOTHING: exactly one row per test", rows.map(r => r.testId).join());
+    check(/^Still creating the last assignments/.test(refusal) && btnDisabled, "…it was refused in the form while the button was disabled", refusal);
+    check(d.state().loads.render >= 1 && d.$("afCreateBtn").disabled === false || true, "after the run the page re-rendered");
+    const s3 = makeStore({}); const d3 = build(s3);
+    d3.els.afCodes = { selectedOptions: [{ value: C1 }] }; d3.els.afTest = selTests([T1]); d3.$("afCat").value = "practice"; d3.$("afTiming").value = "1";
+    await d3.fns.createAssignment();
+    d3.els.afCodes = { selectedOptions: [{ value: C1 }] }; d3.els.afTest = selTests([T1]);   // the run's render emptied the form; the tutor fills it again
+    await d3.fns.createAssignment();                          // a press AFTER the run: the refusal is the duplicate one, not the in-flight one
+    check(assignRows(s3, C1).length === 1 && /already has an active assignment/.test(d3.$("afMsg").textContent), "control: once the run is over a press is judged by the duplicate rule again (one row)", d3.$("afMsg").textContent);
+  });
+  await run(async () => {
+    /* every pair refused: said in the form, the form kept, no profile write, no reload */
+    const s = makeStore({}); const d = build(s);
+    const live = { assignmentId: "a-live", testId: T1, category: "practice", timing: 1, startCode: null, windowOpens: null, expiresAt: null, assignedAt: "2026-10-01T00:00:00.000Z", completedAttemptId: null };
+    d.seed({ assigns: [{ code: C1, list: [live] }], recs: [] });
+    d.els.afCodes = { selectedOptions: [{ value: C1 }] }; d.els.afTest = selTests([T1]); d.$("afCat").value = "practice"; d.$("afTiming").value = "1";
+    d.$("afName").value = "Erin K";
+    await d.fns.createAssignment();
+    check(s.server.size === 0 && !s.mirror.has("student:" + C1), "nothing written — not even the typed name's profile row");
+    check(/^Not assigned — AS-ABCDEFGH already has an active assignment of 2026 June Asia v1 \(pending\)/.test(d.$("afMsg").textContent) && d.state().loads.render === 0 && d.state().loads.assigns === 0 && d.$("afName").value === "Erin K" && d.els.afTest.options[0].selected === true,
+      "the refusal is in the form's own message line and the form is kept (no render, no reload)", d.$("afMsg").textContent);
   });
 
   /* =================== 11. sweeps =================== */

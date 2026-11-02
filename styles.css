@@ -398,6 +398,22 @@
     font-size:14.5px; font-weight:600; margin-bottom:8px;
   }
   .sc-start{ margin-top:26px; padding:14px 40px; font-size:16px; }
+  .sc-start:disabled{ opacity:.45; cursor:not-allowed; }
+
+  /* Timing choice screen (assignment options, 2026-11-02): the start-code
+     screen's frame with a radio list where the digit boxes would be */
+  #screen-timing{ min-height:100vh; display:flex; flex-direction:column; background:#C9DFD3; }
+  .tc-options{ display:flex; flex-direction:column; gap:12px; margin:30px 0 10px; width:min(560px, 100%); }
+  .tc-opt{
+    display:flex; align-items:flex-start; gap:14px; background:#fff; border:1.5px solid var(--ink);
+    border-radius:12px; padding:14px 18px; text-align:left; cursor:pointer;
+  }
+  .tc-opt input{ width:20px; height:20px; margin:3px 0 0; flex:none; accent-color:var(--cb-blue); }
+  .tc-opt:has(input:checked){ border-color:var(--cb-blue); outline:2px solid var(--cb-blue); outline-offset:1px; }
+  .tc-opt:has(input:focus-visible){ outline:2px solid var(--cb-blue); outline-offset:1px; }
+  .tc-opt-text{ display:flex; flex-direction:column; gap:3px; }
+  .tc-opt-main{ font-size:17px; font-weight:700; }
+  .tc-opt-sub{ font-size:14px; color:var(--ink-soft); line-height:1.4; }
 
   /* five-minute alert (screenshot 23): dark card below the header timer */
   .five-min{
@@ -1140,7 +1156,9 @@
   .dstatus.ok{ background:#E3F3E8; color:#1E7A43; }
   .dstatus.warn{ background:#FFF3D6; color:#8A6D00; }
   .dstatus.to{ background:#FBE9EB; color:var(--cb-red); }
-  .dstatus.tm{ background:#EDE7FB; color:#4A3A8A; text-transform:none; }
+  /* inline-block: the pill moves to the next line WHOLE instead of slicing
+     its background across two lines (it carries "(student-selected)" now) */
+  .dstatus.tm{ background:#EDE7FB; color:#4A3A8A; text-transform:none; display:inline-block; }
   /* code shown beside a resolved name — both stay searchable */
   .dcode{ color:var(--ink-soft); font-size:12px; letter-spacing:.3px; }
   /* score release toggle (Phase D, score-visibility (b)) */
@@ -1172,11 +1190,21 @@
     display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:14px 18px;
     margin:12px 0 16px;
   }
-  .af-grid label{ display:flex; flex-direction:column; gap:6px; font-size:12.5px; font-weight:700; }
+  .af-grid label, .af-grid .af-field{ display:flex; flex-direction:column; gap:6px; font-size:12.5px; font-weight:700; }
   .af-grid select, .af-grid input{
     font-size:13.5px; padding:8px 10px; border:1.5px solid #9AA0AE; border-radius:8px; font-family:var(--sans);
   }
   .af-actions{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  /* bulk assign (2026-11-02): the Test control is a multi-select tall enough
+     to show the whole manifest (never a truncated list), with its two
+     select-all buttons beneath; the student-choice checkboxes sit in a row */
+  .af-grid label.af-tests{ grid-column:1 / -1; }
+  .af-grid select[multiple].af-multi{ min-height:120px; }
+  .af-selrow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-weight:400; }
+  .af-selrow .dash-rel{ margin:0; }
+  .af-allowed{ display:flex; gap:12px 18px; flex-wrap:wrap; font-weight:600; font-size:12.5px; }
+  .af-allowed label{ display:flex; flex-direction:row; align-items:center; gap:6px; font-weight:600; }
+  .af-allowed input{ width:16px; height:16px; margin:0; }
   .af-code{
     margin-top:16px; padding:14px 18px; background:#F4F8F4; border:1.5px solid #1E7A43;
     border-radius:10px; font-size:13px; font-weight:700; color:#1E7A43;
@@ -1244,6 +1272,9 @@
      back to the pseudonymous records */
   .sd-code{ opacity:.75; font-size:14px; letter-spacing:.4px; }
   .sd-badge{ background:#EDE7FB; color:#4A3A8A; border-radius:12px; padding:2px 10px; font-size:13px; font-weight:700; }
+  /* "(student-selected)" after a timing badge (2026-11-02): the Est.-style
+     honest mark — same weight, quieter colour, the reason in its title */
+  .sd-sel{ font-size:.86em; font-weight:600; opacity:.8; cursor:help; white-space:nowrap; }
   .sd-home{ background:rgba(255,255,255,.15); border:1.5px solid rgba(255,255,255,.6); color:#fff;
     border-radius:22px; padding:9px 20px; font-size:14.5px; font-weight:700; flex-shrink:0; }
   .sd-home:hover{ background:rgba(255,255,255,.25); }

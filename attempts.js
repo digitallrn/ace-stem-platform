@@ -585,6 +585,87 @@ window.StudentCode = (function(){
   };
 })();
 
+/* ================= assignment options (2026-11-02) =================
+   ONE reading of the two optional assignment-row fields, shared by app.js
+   (the student's start path) and dashboard.js (the form and its cards), so
+   the two sides can never disagree on what a row means. Both fields are
+   ADDITIVE: a row without them behaves exactly as it did before.
+
+     releaseMode   "manual" | "auto". Absent ⇒ manual (today's behaviour: the
+                   tutor releases from the dashboard). "auto": a completed or
+                   timed-out attempt is released at its completion transition.
+                   The decision that counts is the SERVER's (fn_upsert_attempt
+                   reads this row and ignores whatever the client sends); the
+                   client only mirrors it so local-first/devstorage mode shows
+                   Score Details at once.
+     timingPolicy  {mode:"fixed", timing} | {mode:"student-choice", allowed:[…]}.
+                   Absent ⇒ fixed at whatever `timing` the row carries (Phase
+                   G), standard when it carries none. `allowed` is read through
+                   the closed list TIMING_CHOICES: unknown entries are dropped,
+                   and an empty or malformed list falls back to FIXED at the
+                   row's own timing — never to "the student may pick anything".
+
+   Total functions over untrusted input: a row is tutor-written, but it reaches
+   the student through a cache, and a reader that throws would take the home
+   screen down with it. */
+window.AssignmentRules = (function(){
+  "use strict";
+  const TIMING_CHOICES = [1, 1.5, 2, "untimed"];
+  /* EXACT readings only: the numbers 1, 1.5, 2, their decimal spellings as a
+     <select>/<input> hands them over, and "untimed". Nothing is parsed —
+     parseFloat would read `1.5 anything` (or an attribute-context payload
+     starting with a digit) as a legal value, and the injection proof caught
+     exactly that in the allowed list. Anything else is null here. */
+  const EXACT = { "1": 1, "1.5": 1.5, "2": 2, "untimed": "untimed" };
+  function exactTiming(t){
+    if(t === 1 || t === 1.5 || t === 2 || t === "untimed") return t;
+    return (typeof t === "string" && Object.prototype.hasOwnProperty.call(EXACT, t)) ? EXACT[t] : null;
+  }
+  /* a timing value as the record and the clock understand it: 1 | 1.5 | 2 |
+     "untimed"; anything else is standard, exactly as timingMultiplier reads it */
+  function normTiming(t){
+    const v = exactTiming(t);
+    return v === null ? 1 : v;
+  }
+  /* the one-line label every surface uses for a timing value; "" for
+     standard unless `always` asks for it (the student-selected case, where
+     "Standard time" is itself the information) */
+  function timingLabel(t, always){
+    if(t === "untimed") return "Untimed";
+    if(t === 1.5) return "Extended time 1.5×";
+    if(t === 2) return "Extended time 2×";
+    return always ? "Standard time" : "";
+  }
+  /* the label a timing value wears where it is CHOSEN (the student's choice
+     screen, the tutor's form) — one table for both sides of the house */
+  function choiceLabel(t){
+    if(t === "untimed") return "Untimed";
+    if(t === 1.5) return "Time and a half (1.5×)";
+    if(t === 2) return "Double time (2×)";
+    return "Standard time";
+  }
+  /* the one sentence behind every "(student-selected)" mark */
+  const SELECTED_TITLE = "Timing chosen by the student when this sitting began, from the options the tutor allowed";
+  function releaseModeOf(a){
+    return (a && typeof a === "object" && a.releaseMode === "auto") ? "auto" : "manual";
+  }
+  function timingPolicyOf(a){
+    const row = (a && typeof a === "object") ? a : {};
+    const p = row.timingPolicy;
+    if(p && typeof p === "object" && p.mode === "student-choice"){
+      const wanted = Array.isArray(p.allowed) ? p.allowed.map(exactTiming).filter(x => x !== null) : [];
+      const allowed = TIMING_CHOICES.filter(c => wanted.indexOf(c) !== -1);
+      if(allowed.length) return { mode: "student-choice", allowed: allowed };
+      /* malformed: nothing to choose from — fixed at the row's own timing */
+    }
+    const fixed = (p && typeof p === "object" && p.mode === "fixed" && p.timing !== undefined && p.timing !== null)
+      ? p.timing : row.timing;
+    return { mode: "fixed", timing: normTiming(fixed) };
+  }
+  return { TIMING_CHOICES: TIMING_CHOICES.slice(), exactTiming, normTiming, timingLabel, choiceLabel, SELECTED_TITLE,
+           releaseModeOf, timingPolicyOf };
+})();
+
 /* ================= attempt recorder ================= */
 window.Attempts = (function(){
   "use strict";
@@ -961,7 +1042,7 @@ window.Attempts = (function(){
        bearing part — freezes the resolved question list with per-question
        provenance (source testId/bankId, its version, qid) at begin. The set
        object stays mutable in storage; this attempt's copy never moves. */
-    begin(test, studentCode, conditions, stateRef, assignmentId, timing, setMeta){
+    begin(test, studentCode, conditions, stateRef, assignmentId, timing, setMeta, opts){
       try{
         appState = stateRef;
         recEpoch++;
@@ -1013,6 +1094,14 @@ window.Attempts = (function(){
              rests on this field. */
           rec.releaseOnSubmit = setMeta.releaseOnSubmit !== false;
         }
+        /* Student-chosen timing (2026-11-02): the ONE new optional record
+           field. Present (and true) only when the assignment let the student
+           pick the timing and they did; omitted otherwise, so every other
+           record stays byte-for-byte what it has always been (the v1 archive
+           schema reads both). Stamped here, at begin, and never touched
+           again — resume, crash-resume and Review Mode read rec.timing and
+           this flag off the record, never the assignment. */
+        if(opts && opts.timingSelectedByStudent === true) rec.timingSelectedByStudent = true;
         dirty = true;
         save();
         startTicker();
@@ -1082,7 +1171,7 @@ window.Attempts = (function(){
       }catch(e){}
     },
 
-    finalize(lastEndedBy){
+    finalize(lastEndedBy, opts){
       try{
         if(!rec) return;
         closeClock();
@@ -1110,6 +1199,26 @@ window.Attempts = (function(){
            form attempts (where the derived value stays false). Form records
            are untouched: this branch is gated on the set kind. */
         if(rec.kind === "set" && rec.releaseOnSubmit !== false){
+          rec.released = true;
+        }
+        /* Form auto-release (2026-11-02). app.js passes the release mode of
+           the assignment this sitting ran under (state.activeAssignment —
+           re-found by rec.assignmentId on resume), and it is honoured only
+           when it names THIS record's assignment. Same standing as the set
+           rule above: the LOCAL-mode rule and a display convenience in
+           remote mode, where fn_upsert_attempt derives `released` from the
+           assignment row the tutor wrote and overwrites whatever the client
+           sent. Never for an in-progress record — finalize IS the completion
+           transition — and never for a sitting with no assignment. The
+           assignment's testId must ALSO equal the record's (the key's) testId,
+           exactly as the server requires: a row that still carries a legacy
+           id is refused on both sides, so a score is held, never shown and
+           then withdrawn by the next pull. Raw string equality on purpose —
+           resolving aliases here would recreate the asymmetry. */
+        if(rec.kind !== "set" && opts && opts.autoRelease === true &&
+           typeof rec.assignmentId === "string" && rec.assignmentId &&
+           opts.assignmentId === rec.assignmentId &&
+           typeof opts.testId === "string" && opts.testId === rec.testId){
           rec.released = true;
         }
         save();

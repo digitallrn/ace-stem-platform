@@ -165,7 +165,7 @@ function appWorld(state, windowExtra){
 /* ---------- dashboard.js functions with plain module state ---------- */
 const DASH_FNS = ["tombFor", "isDeletedStudent", "isTombstoned", "orphanStubs", "deleteGateOk", "statusBadge", "nameFor",
   "studentCell", "codeOptionLabel", "isFinishedAttempt", "isDeletableAttempt", "fmtDate", "num", "cnt", "countPair",
-  "scoreStr", "scorePct", "timingLabel", "timingBadgeHtml", "releaseCell", "viewAttempts", "sortVal",
+  "scoreStr", "scorePct", "timingLabel", "timingBadgeHtml", "releaseCell", "assignmentOf", "viewAttempts", "sortVal",
   "sameTest", "assignCountFor", "attemptCategoryMatches", "attemptsForAssignment", "assignRowStatus",
   "assignmentsAtDeletionOf", "deletedMayClose", "assignmentsAtDeletion", "localTombstone",
   "completedAttemptsOf", "deletedAttemptsOf", "seenCaveat", "knownCodeSet", "generateUnusedCode"];
@@ -183,11 +183,14 @@ function dashWorld(seed, genSeq){
   };
   const els = {};
   const $ = id => els[id] || (els[id] = { value: "", textContent: "" });
-  const factory = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date",
+  const factory = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date", "AssignmentRules",
     "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, sortKey = 'startedAt', sortDir = -1;\n" + body);
   const S = Object.assign({ tombs: {}, recs: [], assigns: [], profiles: {}, source: "storage" }, seed || {});
-  return factory(S, esc, escAttr, StudentCode, $, Date);
+  return factory(S, esc, escAttr, StudentCode, $, Date, RULES);
 }
+/* the shared assignment-row reader the dashboard page always has
+   (attempts.js window.AssignmentRules, loaded before dashboard.js) */
+const RULES = loadAttempts({}).sandbox.AssignmentRules;
 
 /* ---------- the SQL contract, as a checker that returns its failures ---------- */
 /* The contract reads CODE, not prose: comments are stripped first, so a gate,
@@ -322,8 +325,54 @@ function sqlContract(sql){
     check(real.length === 0, "the real migration satisfies every clause of the contract", real.join(" | "));
     const covered = ["fn_tombstone_attempt", "fn_tombstone_student", "fn_tombstone_attempt_any", "fn_protect_tombstones", "fn_student_deleted",
       "fn_get_assignments", "fn_get_own_attempts", "fn_get_profile", "fn_get_set", "fn_insert_bug", "fn_upsert_attempt"];
-    const later = covered.map(fn => [fn, newestDefining(fn)]).filter(([fn, f]) => f !== "2026-09-18_tombstones.sql");
-    check(later.length === 0, "every function the contract covers is LAST defined by the tombstone migration (a later restatement must carry the gates and be added here)", later.map(x => x.join(" -> ")).join(", "));
+    /* A later migration may restate a covered function ONLY when it is listed
+       here, and then its copy must carry every clause the contract applies to
+       that function — checked below against the restating file's own text,
+       so a restatement that dropped a gate reds this suite instead of
+       shipping. 2026-11-02_assignment_options.sql restates fn_upsert_attempt
+       to add the form auto-release branch. */
+    const RESTATED = { "2026-11-02_assignment_options.sql": ["fn_upsert_attempt"] };
+    const later = covered.map(fn => [fn, newestDefining(fn)])
+      .filter(([fn, f]) => f !== "2026-09-18_tombstones.sql" && (RESTATED[f] || []).indexOf(fn) === -1);
+    check(later.length === 0, "every function the contract covers is LAST defined by the tombstone migration or a sanctioned restatement (a later restatement must carry the gates and be added to RESTATED)", later.map(x => x.join(" -> ")).join(", "));
+    /* the clauses a restatement must carry, as a function of the BODY so
+       the controls below can run the same clauses on a doctored copy */
+    function restatementProbs(body, fn, f){
+      const probs = [];
+      if(!body) probs.push(fn + ": not defined in " + f);
+      if(!/if public\.fn_student_deleted\(p_code\) then\s*\n?\s*raise exception 'student deleted';/.test(body)) probs.push(fn + ": no 'student deleted' gate");
+      if(fn === "fn_upsert_attempt"){
+        if(!/select r\.owner_code,[\s\S]*?where r\.key = p_key\s*\n\s*for update;/.test(body)) probs.push("no FOR UPDATE row lock before the tomb check");
+        const gateAt = body.indexOf("raise exception 'attempt deleted'"), insAt = body.indexOf("insert into public.records");
+        if(gateAt === -1 || insAt === -1 || gateAt > insAt) probs.push("no 'attempt deleted' refusal before the write");
+        if(!/raise exception 'not your record'/.test(body)) probs.push("no owner check");
+      }
+      return probs;
+    }
+    Object.keys(RESTATED).forEach(f => {
+      const text = stripSql(readLf(path.join(MIG_DIR, f)));
+      RESTATED[f].forEach(fn => {
+        const body = fnBody(text, fn) || "";
+        const probs = restatementProbs(body, fn, f);
+        check(probs.length === 0, f + " restates " + fn + " with every gate the contract requires of it", probs.join(" | "));
+        /* and the check itself can fail: the SAME clauses run on a copy with a
+           gate removed must name that gate (not merely "something") */
+        const noStudentGate = body.replace("raise exception 'student deleted'", "raise notice 'student deleted'");
+        if(noStudentGate === body) check(false, "control could not be applied to " + fn + " in " + f + " (no 'student deleted' gate to remove)");
+        const d1 = restatementProbs(noStudentGate, fn, f);
+        check(d1.indexOf(fn + ": no 'student deleted' gate") !== -1, "control: the restatement check reds a copy of " + fn + " whose 'student deleted' gate was removed", d1.join(" | "));
+        if(fn === "fn_upsert_attempt"){
+          const noTombGate = body.replace("raise exception 'attempt deleted'", "raise notice 'attempt deleted'");
+          if(noTombGate === body) check(false, "control could not be applied (no 'attempt deleted' refusal to remove)");
+          const d2 = restatementProbs(noTombGate, fn, f);
+          check(d2.indexOf("no 'attempt deleted' refusal before the write") !== -1, "control: the restatement check reds a copy whose 'attempt deleted' refusal was removed", d2.join(" | "));
+          const noLock = body.replace(/\n\s*for update;/, ";");
+          if(noLock === body) check(false, "control could not be applied (no FOR UPDATE to remove)");
+          const d3 = restatementProbs(noLock, fn, f);
+          check(d3.indexOf("no FOR UPDATE row lock before the tomb check") !== -1, "control: the restatement check reds a copy whose row lock was dropped", d3.join(" | "));
+        }
+      });
+    });
     check(/service_role/.test(sqlSrc) && (sqlSrc.match(/revoke all on function public\.fn_[a-z_]+\([^)]*\)\s+from public, anon, authenticated, service_role;/g) || []).length === 5,
       "the five tombstone-side functions are revoked from service_role too (Supabase grants it EXECUTE by default)");
     const doctored = [
@@ -1455,8 +1504,8 @@ function sqlContract(sql){
       "\nconst calls = [];\nasync function deleteAttempt(r){ calls.push(['attempt', r.attemptId]); return { ok: true }; }\nasync function deleteStudent(c){ calls.push(['student', c]); return { ok: true }; }" +
       "\nreturn { viewStudents, confirmDeleteAttempt, confirmDeleteStudent, isDeletableAttempt, isInProgressAttempt, calls, get openAttemptId(){ return openAttemptId; }, setOpen(id){ openAttemptId = id; }, set(o){ Object.assign(S, o); tombs = S.tombs; recs = S.recs; assigns = S.assigns; profiles = S.profiles; source = S.source; } };";
     const S = { tombs: {}, recs: [], assigns: [], profiles: {}, source: "storage" };
-    const d = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date",
-      "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, openAttemptId = null;\n" + body)(S, esc, escAttr, StudentCode, $, Date);
+    const d = new Function("S", "esc", "escAttr", "StudentCode", "$", "Date", "AssignmentRules",
+      "let tombs = S.tombs, recs = S.recs, assigns = S.assigns, profiles = S.profiles, source = S.source, openAttemptId = null;\n" + body)(S, esc, escAttr, StudentCode, $, Date, RULES);
     const A = "attempt:t1:100:aaaa", B = "attempt:t1:200:bbbb", O = "attempt:t1:300:cccc";
     $("dashFilterTest").value = ""; $("dashFilterStudent").value = "";
     d.set({ recs: [rec(A), rec(B, { assignmentId: "a2" }), rec("attempt:t1:900:zzzz", { student: { code: OTHER, key: OTHER } })],

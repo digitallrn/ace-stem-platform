@@ -148,6 +148,28 @@
   </div>
 </div>
 
+<!-- ============ TIMING CHOICE (assignment options, 2026-11-02) ============
+     Shown only for an assignment whose timingPolicy is student-choice, before
+     the start code (proctored) or the loading beat (practice). Nothing starts
+     until an option is picked; the pick is stamped into the record at begin and
+     the assignment is never consulted for it again (resume reads the record). -->
+<div id="screen-timing" class="hidden">
+  <div class="sc-topbar">
+    <span></span>
+    <button class="sc-home" id="tcHomeBtn">Return to Home
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-6h4v6"/></svg>
+    </button>
+  </div>
+  <div class="sc-body tc-body">
+    <h1>Choose Your Timing</h1>
+    <p class="sc-sub">Your tutor has let you choose how much time you'll have on <b id="tcTestName"></b>.</p>
+    <p class="sc-sub">Pick one to continue. It applies to every module and can't be changed once the test begins.</p>
+    <div class="tc-options" id="tcOptions" role="radiogroup" aria-label="Timing options"></div>
+    <div class="sc-error hidden" id="tcError"></div>
+    <button class="pill yellow sc-start" id="tcContinueBtn" disabled>Continue</button>
+  </div>
+</div>
+
 <!-- ============ START CODE (Phase F §4, screenshot 24) ============ -->
 <div id="screen-startcode" class="hidden">
   <div class="sc-topbar">

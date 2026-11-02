@@ -138,6 +138,10 @@
       student: { code: PAYLOAD, key: "AS-XSSTEST2" },                 // hostile student code
       testId: test.testId, testName: PAYLOAD,                     // hostile test name
       testVersion: test.testVersion, assignmentId: null, timing: 1.5,
+      /* 2026-11-02: the student-selected mark renders on the literal true —
+         through the Past card, Score Details, the print DOM and every
+         dashboard row — beside the Phase G badge */
+      timingSelectedByStudent: true,
       conditions: "proctored", startedAt: "2026-07-30T14:00:00.000Z",
       lastSavedAt: "2026-07-30T15:00:00.000Z", submittedAt: "2026-07-30T15:00:00.000Z",
       status: "completed", released: true, modules: [], answers,
@@ -330,6 +334,19 @@
        the form Score Details drive selects its card from, so seeding it up
        front would hand that drive the set card instead of the form's. */
 
+    /* Assignment options (2026-11-02): a student-choice assignment of a test
+       whose MANIFEST name is hostile (the active card and the timing-choice
+       screen print the manifest's testName, not a record's), with hostile
+       releaseMode and timingPolicy entries. state.tests IS window.TEST_MANIFEST
+       (app.js), so a pushed entry is a real manifest test to the app. */
+    const TC_ID = "zztimingxss";
+    window.TEST_MANIFEST.push({ testId: TC_ID, testName: PAYLOAD, testVersion: "x", moduleCount: 4, questionCount: 98, sections: [], legacyIds: [] });
+    localStorage.setItem("as:assign:AS-XSSTEST2:a-tc", JSON.stringify({
+      assignmentId: "a-tc", testId: TC_ID, category: "practice", timing: null,
+      releaseMode: PAYLOAD,
+      timingPolicy: { mode: "student-choice", allowed: [PAYLOAD, 1.5, ATTR_PAY, "untimed"] },
+      windowOpens: null, expiresAt: null, assignedAt: "2026-11-02T00:00:00.000Z", completedAttemptId: null }));
+
     $("nameInput").value = "AS-XSSTEST2";
     $("signinBtn").click();
     await wait(900);
@@ -337,6 +354,26 @@
     results.push(audit("Home welcome banner (hostile display name)", $("welcomeMsg")));
     results.push(audit("Home user chip + avatar (hostile display name)",
       $("homeUserName").parentElement));
+    /* the active card (hostile manifest name), then the timing-choice screen
+       it opens: the name as text, the options from the closed list only */
+    results.push(audit("Active practice card (hostile manifest testName)", $("practiceCards")));
+    const tcCard = [...document.querySelectorAll("#practiceCards .pcard.clickable")]
+      .find(c => c.querySelector(".pcard-head").textContent.indexOf("PWN") !== -1);
+    if(tcCard){
+      tcCard.click();
+      await wait(200);
+      const tcScreen = $("screen-timing");
+      results.push(audit("Timing-choice screen (hostile manifest testName; hostile allowed entries)", tcScreen));
+      const opts = [...document.querySelectorAll("#tcOptions input")].map(i => i.value);
+      results.push({ surface: "Timing-choice options are only the allowed closed-list values; Continue starts disabled",
+        pass: !tcScreen.classList.contains("hidden") && opts.join(",") === "1.5,untimed" && $("tcContinueBtn").disabled === true &&
+              $("tcTestName").textContent === PAYLOAD && !tcScreen.querySelector("img") && !window.__XSS_FIRED,
+        note: "options: " + opts.join(",") + "; continue disabled: " + $("tcContinueBtn").disabled });
+      $("tcHomeBtn").click();
+      await wait(100);
+    } else {
+      results.push({ surface: "Timing-choice screen (hostile manifest testName; hostile allowed entries)", pass: false, note: "no active card rendered for the planted assignment" });
+    }
     /* Past cards live in two sections now: proctored sittings under Your
        Tests, everything else under Practice. Switch both toggles and take the
        card from wherever this record landed, so the proof follows the record
@@ -1214,6 +1251,7 @@
       testId: "pset-xss2", testName: PAYLOAD, testVersion: "unversioned",
       kind: "set", setId: "pset-xss2", setName: PAYLOAD, subject: "rw",
       releaseOnSubmit: true, assignmentId: null, timing: "untimed",
+      timingSelectedByStudent: PAYLOAD,           // not the literal true: the mark must not render, and nothing else may
       conditions: "self-administered", startedAt: "2026-07-31T16:00:00.000Z",
       lastSavedAt: PAYLOAD, submittedAt: PAYLOAD,
       status: "completed", released: true, modules: [],
@@ -1669,6 +1707,13 @@
               !box.querySelector("img") && !box.querySelector("b[data-x]") && !window.__XSS_FIRED,
         note: box ? (box.textContent.indexOf("has already seen") !== -1 ? "warning rendered, payload inert" : "no warning rendered: " + box.textContent.slice(0, 120))
                   : "#afOverlap missing" });
+      /* the Assignments table row for the planted student-choice assignment
+         (hostile releaseMode, hostile entries in allowed): closed-table text */
+      results.push(audit("Dashboard Assignments table (hostile releaseMode + timingPolicy entries)", $("dashBody")));
+      const tcRow = [...document.querySelectorAll("#dashBody table.dtable tbody tr")].find(tr => tr.textContent.indexOf("Student chooses") !== -1);
+      results.push({ surface: "Assignments row prints the allowed options from the closed list and Manual for a non-auto releaseMode",
+        pass: !!tcRow && tcRow.textContent.indexOf("Student chooses: 1.5×, untimed") !== -1 && tcRow.textContent.indexOf("Manual") !== -1 && !tcRow.querySelector("img"),
+        note: tcRow ? tcRow.textContent.replace(/\s+/g, " ").slice(0, 160) : "no student-choice row rendered" });
     } else {
       results.push({ surface: "Assignment overlap warning (hostile set name, status, date, ref)", pass: false, note: "assign form missing" });
     }
@@ -1986,6 +2031,10 @@
       pass: !pin.hasAttribute("onfocus") && pin.value === ATTR_PAY,
       note: "old textContent-based escaper planted onfocus here" });
 
+    /* the timing-choice entry pushed before sign-in (2026-11-02) goes with
+       the run, like the viewer's two above */
+    const tci = window.TEST_MANIFEST.findIndex(e => e && e.testId === TC_ID);
+    if(tci !== -1) window.TEST_MANIFEST.splice(tci, 1);
     clean();
     restoreCache();
     results.push({ surface: "The run leaves the offline content cache as it found it",

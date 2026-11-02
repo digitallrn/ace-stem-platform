@@ -125,11 +125,14 @@ function answersFor(testId){
 /* ---- the dashboard closure, rebuilt per case from the real source ---- */
 const NAMES = ["ensureDedupLoaded", "adoptDedup", "rearmDedup", "onDedupSettled", "renderKeepingInputs",
   "normalizeDedupIndex", "splitRef", "manifestEntry", "canonRef", "indexItem", "formRefs", "refText", "canonInfo",
-  "provHtml", "completedAttemptsOf", "recordAnswerKeys", "attemptRefs", "attemptLabel", "seenSetFor", "seenCaveat",
+  "provHtml", "completedAttemptsOf", "recordAnswerKeys", "attemptRefs", "attemptLabel", "seenSetFor", "seenSetForUncached", "seenCaveat",
   "markFor", "seenCounts", "countsText", "viaText", "markHtml", "selectedStudent", "setRefKeys",
   "dedupNoticeHtml", "overlapFor", "assignOverlapHtml", "overlapNotes", "refreshAssignOverlap",
   "builderHeldAs", "pushRef", "builderDuplicateGroups", "builderAddRef", "refKey", "fmtDay", "nameFor",
   "studentCell", "codeOptionLabel", "formCodes",
+  // bulk assign (2026-11-02): the overlap block follows the multi-select, and
+  // renderKeepingInputs re-syncs the timing-mode view after a restore
+  "formTests", "selectTests", "syncTimingModeView",
   // tombstones (2026-09-18): the seen set and the code pickers read these
   "tombFor", "isDeletedStudent", "isTombstoned", "deletedAttemptsOf",
   // retired bank items + the builder view itself (2026-09-30)
@@ -149,7 +152,7 @@ function decl(name){
 }
 const BODY = extracted.map(x => x[1]).join("\n") + "\n" +
   CONSTS.map(n => { try{ return extractConst(src, n); }catch(e){ return ""; } }).join("\n") + "\n" +
-  [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight")].join("\n");
+  [decl("bankIndexFresh"), decl("builderTestId"), decl("fullTests"), decl("setSaveInFlight"), decl("seenMemo")].join("\n");
 const PRESENT = extracted.filter(x => x[1] !== "").map(x => x[0]);
 
 const StudentCode = {
@@ -531,15 +534,18 @@ run("degrade", () => {
   /* an async settle must not wipe what the tutor typed, on any tab */
   const d6 = build({ fetch: "ok", fetched: REAL_INDEX, tab: "assign" });
   d6.seed({ recs: [formRec("202506asiav2")] });
-  d6.$("afTest").value = "202506asiav4";
+  /* the Test control is a multi-select since 2026-11-02 (bulk assign): its
+     selection is restored by option, exactly as the codes picker's is */
+  d6.els.afTest = mkSelect(["202506asiav4", "202506asiav2"], ["202506asiav4"]);
   d6.els.afCodes = mkSelect([CODE, OTHER], [CODE]);
   d6.$("afFree").value = "as-abcdefgh, junk";
   d6.$("afName").value = "Erin K";
   d6.$("afOverlap").innerHTML = "loading…";
   d6.fns.ensureDedupLoaded();
-  check(d6.loads.render === 1 && d6.$("afFree").value === "as-abcdefgh, junk" && d6.$("afName").value === "Erin K" && d6.$("afTest").value === "202506asiav4" &&
+  check(d6.loads.render === 1 && d6.$("afFree").value === "as-abcdefgh, junk" && d6.$("afName").value === "Erin K" &&
+        d6.$("afTest").selectedOptions.length === 1 && d6.$("afTest").selectedOptions[0].value === "202506asiav4" &&
         d6.$("afCodes").selectedOptions.length === 1 && d6.$("afCodes").selectedOptions[0].value === CODE,
-    "settling on the Assignments tab re-renders once and RESTORES every typed value and the multi-select", JSON.stringify([d6.loads.render, d6.$("afFree").value, d6.$("afName").value]));
+    "settling on the Assignments tab re-renders once and RESTORES every typed value and both multi-selects (codes AND tests)", JSON.stringify([d6.loads.render, d6.$("afFree").value, d6.$("afName").value, d6.$("afTest").selectedOptions.map(o => o.value)]));
   check(d6.$("afOverlap").innerHTML.indexOf("has already seen 25 of") !== -1 && d6.$("afOverlap").innerHTML.indexOf("AS-ABCDEFGH") !== -1 &&
         d6.$("afOverlap").innerHTML.indexOf("junk") === -1 && d6.$("afOverlap").innerHTML.indexOf("no completed attempts in storage") !== -1,
     "…and recomputes the overlap block from the restored codes (typed codes parsed exactly as Create assignment parses them)");
@@ -551,7 +557,7 @@ run("degrade", () => {
   /* the keystroke path: no recompute until a valid code or the test changes */
   const d8 = build({ inlined: REAL_INDEX, tab: "assign" });
   d8.seed({ recs: [formRec("202506asiav2")] });
-  d8.$("afTest").value = "202506asiav4"; d8.els.afCodes = mkSelect([CODE], [CODE]); d8.$("afFree").value = "AS-BCD";
+  d8.els.afTest = mkSelect(["202506asiav4"], ["202506asiav4"]); d8.els.afCodes = mkSelect([CODE], [CODE]); d8.$("afFree").value = "AS-BCD";
   d8.fns.refreshAssignOverlap();
   const first = d8.$("afOverlap").innerHTML;
   d8.$("afOverlap").innerHTML = "SENTINEL"; d8.$("afFree").value = "AS-BCDF";

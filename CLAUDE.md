@@ -217,6 +217,104 @@ hidden (it writes). Keep the test-bank's Stage-3
 anchor `state.assignments = assigns;` appearing exactly once in app.js
 (build_stage3_preview.py replaces its first occurrence).
 
+**Assignment options (2026-11-02): auto score release, the student's timing
+choice, bulk assign.** Two ADDITIVE fields on the assignment row —
+`releaseMode: "manual" | "auto"` (absent ⇒ manual, today's behaviour) and
+`timingPolicy: {mode:"fixed", timing} | {mode:"student-choice", allowed:[…]}`
+(absent ⇒ fixed at the row's Phase G `timing`; a student-choice row carries
+`timing: null`) — read ONLY through `window.AssignmentRules` (attempts.js;
+app.js and dashboard.js both call it, so the two sides cannot disagree). An
+`allowed` list with nothing valid in it falls back to FIXED at the row's
+timing, never to a free pick. Rows without the fields behave exactly as
+before. **Auto release is decided SERVER-SIDE**: `fn_upsert_attempt`
+(`supabase/migrations/2026-11-02_assignment_options.sql`, a `create or
+replace` restatement of the 2026-09-21 body plus one branch) releases a FORM
+attempt at its in-progress → completed/timed-out transition when the
+assignment row it names is this code's, says `auto`, and names the test in
+the attempt's KEY; the client's own `released` is discarded on every write
+as it always was, an in-progress write never releases, and a row already
+completed on the server is never re-released by rewriting it. The recorder
+mirrors the rule at `finalize` (app.js passes the active assignment's mode
+and id; honoured only when the id is the record's own) — the local /
+artifact / `?devstorage=1` rule and a display convenience in remote mode.
+The dashboard's Attempts cell reads **Released · auto** with no Release
+button once an auto row's attempt is released — a statement about the
+assignment, not about who flipped the record, which the client cannot know —
+plus a small **Hide** button, because un-releasing is a real action and
+that cell is its only path; an unreleased attempt under an auto row keeps
+the manual Release button (the migration not yet applied, a legacy-id
+mismatch the server refused). The recorder's mirror carries the server's
+testId equality too (`opts.testId === rec.testId`, raw strings), so a row
+that still names a legacy id is held on both sides. **Deploy order: apply
+the migration FIRST** (inert until an auto row exists). App-first is not
+wrong but it flickers: the student's device mirrors the release locally,
+and the next pull brings the old function's released=false until the file
+lands — a score shown, then withdrawn, not held. Stated limit: a student holding an auto row for test X can get
+the early release of any attempt of X they sit — the server cannot tell
+which of their assignments a sitting belongs to beyond the client-stamped
+assignmentId; the bulk form's duplicate refusal keeps an auto and a manual
+assignment of one test from being active together. **The timing choice**:
+`startAssignment` sends a student-choice row to `screen-timing` first (both
+categories); the pick lives in `state.pendingTiming`, keyed to the
+assignment, and `startTestFlowLoaded` REFUSES to begin without a valid pick
+for that very assignment (it shows the screen instead — the second layer
+behind the Continue button's own check). Continue (`continueTimingChoice`)
+re-runs `assignmentState` before dispatching — the student can sit on that
+screen past the assignment's expiry, and for a practice row it is the last
+gate — and reads the radio through `exactTiming` (junk is "no pick", never
+Standard); both pending fields are cleared by every session reset
+(tutor entry, the deletion landings, Sign out). `Attempts.begin` stamps the pick
+as `rec.timing` plus `rec.timingSelectedByStudent: true` — **the only new
+record field, top-level** (the brief asked for `conditions.…`, but
+`conditions` is a string enum every bucketing rule compares, so it cannot
+grow a key) — omitted otherwise, so every other record is byte-for-byte as
+before and the v1 archive reads both. Resume, crash-resume and Review Mode
+read `record.timing`, never the assignment. Surfaces: the Score Details hero
+line (which the printed report keeps), the Past card and the dashboard's
+rows and detail show the timing with an Est.-style "(student-selected)"
+mark when the flag is the literal `true`; "Standard time" appears only in
+that case. Old-tab limit: a tab loaded before this deploy starts a
+student-choice row at standard timing (`timing` null → 1) with no choice —
+reload open tabs. **Bulk assign**: the Assign form's Test control is a
+multi-select over the whole manifest (never truncated), with Select all and
+Select all not yet sat (per CHOSEN student: no live completed, timed-out or
+in-progress form attempt; deleted attempts do not count as sat); one shared
+set of options; every (code × test) pair becomes its own row with its own
+assignmentId (`newAssignmentId`: eight hex digits plus a counter, unique
+among the submit's ids AND the code's existing rows — the id is the row's
+key, and a bulk submit mints many per second), written one at a time, each
+READ BACK through `freshAssignmentRow` (the server's copy in remote mode)
+and compared by `canonJson` — keys sorted, because jsonb reorders them and
+a plain stringify compare called every correct remote row "different" —
+and the status line says "N of M … written, V verified", names every
+refused and failed row, and leads with "Not saved" when nothing landed;
+while a run is in flight (`createInFlight`) the button is disabled and a
+second press is refused in the form, since it would plan from the pre-run
+`assigns` and double every row; a submit where every pair is refused stays
+in the form (no profile write, no reload). "Not yet sat" also counts a test
+whose assignment row reads Completed or In progress (the archived-away
+sitting's hint, a tagged deleted sitting's marker). A pair whose test already has an ACTIVE assignment
+(pending or in-progress — not completed, not expired-and-unsat; a legacy
+bare-id entry counts) for that code is refused by name, because the student
+app's crash-resume slot `state.resumeRecords` is still keyed by canonical
+testId (unchanged in this batch — the per-assignment card resume is not).
+Every control and the plan are read before the first await. The student
+home sorts both sections by display name (`sortAssignmentsForHome`: forms by
+testName, sets by setName, ties by assignedAt then id); the flipped
+default — nothing assigned, nothing shown — is unchanged. Proofs:
+`tests/assignment-options.test.js` (the readers, the recorder for real, a
+model and a textual gate of the SQL branch with every guard removed in turn,
+the start path for real with a mutant control, the sort, the labels, the
+cells, the screen) and `tests/tutor-writes.test.js` §13 (the real
+`createAssignment`: three rows for three tests, a fourth refused for an
+active duplicate, a named failure, the read-back, student-choice rows,
+the Auto-released cell); each file's header says how to run it against the
+pre-change sources to watch it go red. `tests/tombstone.test.js` and
+`tests/set-release-rule.test.js` now check the NEWEST file defining
+`fn_upsert_attempt` (tombstone's `RESTATED` list sanctions this one and
+re-applies its gates to it). Human checks F and G are in the migration
+header.
+
 ## Read first
 `SCHEMA-v1.2.md` — the data contract. It's authoritative over instinct,
 including for anything below.

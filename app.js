@@ -44,6 +44,8 @@
     assignments: null,           // Phase F: assignment objects; [] once resolved
     activeAssignment: null,      // the assignment the running attempt started through
     pendingStart: null,          // {test, assignment} while the Start Code screen is up
+    pendingChoice: null,         // {test, assignment, allowed} while the timing-choice screen is up (2026-11-02)
+    pendingTiming: null,         // {assignmentId, timing} the student picked there; consumed at begin
     displayName: null,           // from the student:<CODE> profile row; null = show the code
     timing: 1,                   // Phase G §1: 1 | 1.5 | 2 | "untimed"
     untimed: false,              // current module runs count-up with no auto-submit
@@ -64,7 +66,7 @@
   function el(id){ return document.getElementById(id); }
   function show(id){ el(id).classList.remove("hidden"); }
   function hide(id){ el(id).classList.add("hidden"); }
-  const SCREENS = ["screen-signin","screen-home","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-setdone","screen-scoredetails","screen-scorecalc","screen-dashboard"];
+  const SCREENS = ["screen-signin","screen-home","screen-timing","screen-startcode","screen-loading","screen-loaderror","screen-ready","screen-moduleover","screen-break","screen-test","screen-submitted","screen-setdone","screen-scoredetails","screen-scorecalc","screen-dashboard"];
   // body-level overlays that live outside the SCREENS set — a screen change
   // (e.g. the timer expiring under an open save-fail/bug modal) must not leave
   // them floating as a full-screen click blocker over the next screen
@@ -158,6 +160,8 @@
     state.moduleState = {};
     state.reviewMode = null;
     state.pendingStart = null;
+    state.pendingChoice = null;          // a choice screen or a pick from the student's session dies with it
+    state.pendingTiming = null;
     state.activeAssignment = null;
     state.userName = "Student";
     state.displayName = null;
@@ -543,6 +547,8 @@
     state.currentTest = null;
     state.moduleState = {};
     state.pendingStart = null;
+    state.pendingChoice = null;
+    state.pendingTiming = null;
     state.reviewMode = null;
     forgetSession();
     state.userName = "Student";
@@ -584,6 +590,8 @@
     state.activeAssignment = null;
     state.reviewMode = null;
     state.pendingStart = null;
+    state.pendingChoice = null;
+    state.pendingTiming = null;
     /* PAINT FIRST. resetTestChrome only closes overlays: until a showOnly
        runs, the student is still looking at a live test screen whose
        currentTest is now null, and a Next/Back/navigator click would throw.
@@ -807,6 +815,9 @@
     state.pastAttempts = [];
     state.tombstoned = {};
     state.resumeRecords = {};
+    state.pendingStart = null;
+    state.pendingChoice = null;
+    state.pendingTiming = null;
     el("nameInput").value = "";
     el("signinError").classList.add("hidden");
     showOnly("screen-signin");
@@ -2239,8 +2250,30 @@
       renderHome();                               // repaint the now-expired/opened/completed state
       return;
     }
+    /* a student-choice timing policy (2026-11-02) puts the choice screen first,
+       for both categories; the pick it leaves is what startTestFlowLoaded
+       stamps at begin. Fixed rows go straight on as they always have. */
+    if(AssignmentRules.timingPolicyOf(a).mode === "student-choice"){ openTimingChoice(test, a); return; }
     if(a.category === "test") openStartCode(test, a);   // ceremony gates proctored sittings (§4)
     else startTestFlow(test, a);
+  }
+
+  /* Home cards in display-name order (2026-11-02): with many assignments the
+     list has to be scannable, and storage order is arrival order. Forms sort
+     by the manifest's testName — what the card shows — and sets by their set
+     name; ties by assignedAt, then assignmentId, so the order is stable. The
+     filter that decides WHAT shows (category, state, the empty states) is
+     untouched: this only orders what it already produced. */
+  function homeSortKey(a){
+    if(isSetAssign(a)) return String(a.setName || "Practice Set");
+    const t = testById(a.testId);
+    return t ? String(t.testName || "") : String(a.testId || "");
+  }
+  function sortAssignmentsForHome(list){
+    return (list || []).slice().sort((x, y) =>
+      homeSortKey(x).localeCompare(homeSortKey(y), undefined, { numeric: true, sensitivity: "base" }) ||
+      String(x.assignedAt || "").localeCompare(String(y.assignedAt || "")) ||
+      String(x.assignmentId || "").localeCompare(String(y.assignmentId || "")));
   }
 
   /* Both home sections are always present now (screenshot 29). An empty
@@ -2255,7 +2288,7 @@
       renderPastCards(wrap, r => r.conditions === "proctored", "No completed tests yet.");
       return;
     }
-    const testAssigns = (state.assignments || []).filter(a => a.category === "test");
+    const testAssigns = sortAssignmentsForHome((state.assignments || []).filter(a => a.category === "test"));
     // an assignment for an unpublished testId yields no card, so branch on
     // cards that actually render rather than the raw assignment count
     const cards = testAssigns.map(assignmentCard).filter(Boolean);
@@ -2273,7 +2306,7 @@
      is [] rather than null after any successful resolve; the || [] covers the
      pre-sign-in initial value only. */
   function renderActiveCards(wrap){
-    const practice = (state.assignments || []).filter(a => a.category === "practice" || isSetAssign(a));
+    const practice = sortAssignmentsForHome((state.assignments || []).filter(a => a.category === "practice" || isSetAssign(a)));
     // branch on renderable cards, not raw count — assignments for unpublished
     // testIds would otherwise skip the empty-state and leave the section blank
     const cards = practice.map(a => isSetAssign(a) ? setAssignmentCard(a) : assignmentCard(a)).filter(Boolean);
@@ -2403,7 +2436,7 @@
       } else if(canView && c !== null && g !== null){
         scoreLine = `<div class="pcard-total">${c}<span class="pcard-total-of">/ ${g} correct</span></div>`;
       }
-      const badge = timingBadge(record.timing);
+      const badgeHtml = timingBadgeHtml(record);       // escaped inside; "" for plain standard timing
       const card = document.createElement("div");
       card.className = "pcard";
       card.innerHTML = `
@@ -2411,7 +2444,7 @@
         <div class="pcard-body">
           <div class="pcard-status"><span class="pc-ico">✓</span> Completed
             <span class="pc-date">${fmtCardDate(record.startedAt)}</span></div>
-          ${badge ? `<div class="pcard-badge">${escapeHtml(badge)}</div>` : ""}
+          ${badgeHtml ? `<div class="pcard-badge">${badgeHtml}</div>` : ""}
           ${scoreLine}
           <div class="pcard-action">${canView
             ? '<button class="pcard-link">View Score Details</button>'
@@ -2453,10 +2486,31 @@
     withTestContent(entry, full => startTestFlowLoaded(full, assignment));
   }
   function startTestFlowLoaded(test, assignment){
+    /* Phase G §1 timing, read by POLICY (2026-11-02). A fixed row carries the
+       tutor's value as it always has. A student-choice row needs the pick its
+       own choice screen left in state.pendingTiming — for THIS assignment and
+       within its allowed set — and without one NOTHING starts: the screen is
+       shown instead, never a default the tutor did not set. This is the
+       second layer behind the Continue button's own check, and the one place
+       a sitting reads the assignment's policy: from begin on, the record's
+       own timing is what resume, crash-resume and Review Mode read. */
+    const policy = AssignmentRules.timingPolicyOf(assignment);
+    let timing = policy.timing, studentPicked = false;
+    if(policy.mode === "student-choice"){
+      const pt = state.pendingTiming;
+      if(!assignment || !pt || pt.assignmentId !== assignment.assignmentId || policy.allowed.indexOf(pt.timing) === -1){
+        state.pendingTiming = null;
+        openTimingChoice(test, assignment);
+        return;
+      }
+      timing = pt.timing;
+      studentPicked = true;
+    }
+    state.pendingTiming = null;                                // consumed: one pick starts one sitting
     state.reviewMode = null;     // a live sitting must never inherit review's read-only gates
     state.currentTest = test;
     state.activeAssignment = assignment || null;
-    state.timing = (assignment && assignment.timing) || 1;    // Phase G §1: default standard
+    state.timing = timing;
     state.moduleIndex = 0;
     state.moduleState = {};
     test.modules.forEach(m=>{
@@ -2465,10 +2519,93 @@
     const conditions = (assignment && assignment.category === "test")
       ? "proctored" : "self-administered";
     Attempts.begin(test, state.userName, conditions, state,    // spec §3: record on test start
-      assignment ? assignment.assignmentId : null, state.timing);
+      assignment ? assignment.assignmentId : null, state.timing, undefined,
+      studentPicked ? { timingSelectedByStudent: true } : undefined);
     showOnly("screen-loading");
     state.readyTimer = setTimeout(()=>{ state.readyTimer = null; showReady(true); }, 2200);
   }
+
+  /* ================= TIMING CHOICE (assignment options, 2026-11-02) =========
+     An assignment whose timingPolicy is student-choice shows this screen
+     BEFORE the start code (proctored) or the loading beat (practice). Nothing
+     starts until one of the ALLOWED options is picked: Continue is disabled
+     until a radio is on, the handler re-checks the value against the allowed
+     set, and startTestFlowLoaded refuses to begin without a valid pick for
+     this very assignment. The pick lives in state.pendingTiming only until
+     begin stamps it into the record. The option labels are constants and the
+     test name is test data — both escaped like any other render surface. */
+  function timingChoiceLabel(t){ return AssignmentRules.choiceLabel(t); }   // the tutor's form uses the same table
+  function timingChoiceNote(t){
+    if(t === "untimed") return "No countdown — each module ends when you submit it.";
+    if(t === 1.5) return "Every module clock runs 1.5× its standard length.";
+    if(t === 2) return "Every module clock runs twice its standard length.";
+    return "Every module runs on its standard clock, as on test day.";
+  }
+  function openTimingChoice(test, assignment){
+    const policy = AssignmentRules.timingPolicyOf(assignment);
+    if(policy.mode !== "student-choice"){
+      /* nothing to choose: the fixed route, start code included — never a
+         way around the ceremony for a proctored row (both callers check the
+         mode first, so this is the defensive branch, and it must be right) */
+      if(assignment && assignment.category === "test") openStartCode(test, assignment);
+      else startTestFlow(test, assignment);
+      return;
+    }
+    state.pendingTiming = null;
+    state.pendingChoice = { test: testById(test.testId) || test, assignment, allowed: policy.allowed };
+    el("tcTestName").textContent = String(test.testName || "this test");
+    el("tcOptions").innerHTML = policy.allowed.map(t => `
+      <label class="tc-opt">
+        <input type="radio" name="tcTiming" value="${escapeHtml(String(t))}">
+        <span class="tc-opt-text"><span class="tc-opt-main">${escapeHtml(timingChoiceLabel(t))}</span>
+          <span class="tc-opt-sub">${escapeHtml(timingChoiceNote(t))}</span></span>
+      </label>`).join("");
+    el("tcContinueBtn").disabled = true;
+    el("tcError").classList.add("hidden");
+    showOnly("screen-timing");
+  }
+  /* the checked radio as an EXACT closed-list value, or null: a value the
+     table does not know is "nothing picked", never a pick of Standard */
+  function pickedTimingChoice(){
+    const on = document.querySelector('#tcOptions input[name="tcTiming"]:checked');
+    return on ? AssignmentRules.exactTiming(on.value) : null;
+  }
+  el("tcOptions").addEventListener("change", ()=>{
+    el("tcContinueBtn").disabled = pickedTimingChoice() === null;
+  });
+  el("tcHomeBtn").addEventListener("click", ()=>{
+    state.pendingChoice = null;
+    state.pendingTiming = null;
+    showOnly("screen-home");
+  });
+  /* Continue: validate the pick, then RE-RUN the gate the card ran — the
+     student can sit on this screen past the assignment's expiry (or until
+     the same assignment became resumable elsewhere), and for a practice row
+     this is the last check before the sitting begins (the proctored route
+     re-checks expiry on the start-code screen as well). A second click
+     while the first is already starting does nothing. */
+  function continueTimingChoice(){
+    const pc = state.pendingChoice;
+    if(!pc) return;
+    const picked = pickedTimingChoice();
+    if(picked === null || pc.allowed.indexOf(picked) === -1){
+      el("tcError").textContent = "Pick one of the timing options to continue.";
+      el("tcError").classList.remove("hidden");
+      return;
+    }
+    if(assignmentState(pc.assignment) !== "ready"){
+      state.pendingChoice = null;
+      state.pendingTiming = null;
+      renderHome();                               // repaint the now-expired/resumable/completed state
+      showOnly("screen-home");
+      return;
+    }
+    state.pendingTiming = { assignmentId: pc.assignment.assignmentId, timing: picked };
+    state.pendingChoice = null;
+    if(pc.assignment.category === "test") openStartCode(pc.test, pc.assignment);   // the code still gates a proctored sitting
+    else startTestFlow(pc.test, pc.assignment);
+  }
+  el("tcContinueBtn").addEventListener("click", continueTimingChoice);
 
   /* ================= START CODE (Phase F §4, screenshot 24) ================= */
   const scDigits = Array.from(document.querySelectorAll(".sc-digit"));
@@ -2502,6 +2639,7 @@
   });
   el("scHomeBtn").addEventListener("click", ()=>{
     state.pendingStart = null;
+    state.pendingTiming = null;                  // a pick made for this sitting dies with it
     showOnly("screen-home");
   });
   el("scStartBtn").addEventListener("click", ()=>{
@@ -2654,11 +2792,22 @@
   function accommodatedLimitSec(mod, timing){
     return Math.round(mod.timeLimitMinutes * 60 * timingMultiplier(timing));
   }
-  function timingBadge(timing){
-    if(timing === "untimed") return "Untimed";
-    if(timing === 1.5) return "Extended time 1.5×";
-    if(timing === 2) return "Extended time 2×";
-    return "";
+  /* The timing line a RECORD earns (2026-11-02): the Phase G badge, plus
+     "Standard time" when the student chose it (the choice is then the
+     information), and the student-selected mark in the Est.-style honest
+     labelling — a small annotated suffix, never a different number. Both
+     fields are read strictly: the flag counts only as the literal true, so a
+     crafted record cannot smuggle text in through it. */
+  function studentSelectedTiming(record){ return !!(record && record.timingSelectedByStudent === true); }
+  function timingBadgeFor(record){
+    const sel = studentSelectedTiming(record);
+    const lbl = AssignmentRules.timingLabel(record ? record.timing : undefined, sel);
+    return lbl ? { text: lbl, selected: sel } : null;
+  }
+  const SELECTED_MARK = '<span class="sd-sel" title="' + escapeHtml(AssignmentRules.SELECTED_TITLE) + '">(student-selected)</span>';
+  function timingBadgeHtml(record){
+    const b = timingBadgeFor(record);
+    return b ? escapeHtml(b.text) + (b.selected ? " " + SELECTED_MARK : "") : "";
   }
 
   function beginModule(idx, resume){
@@ -3784,7 +3933,16 @@
         showBreak();
       }
     } else {
-      Attempts.finalize(endedBy || "submitted");
+      /* the assignment's release mode rides along (2026-11-02): "auto" lets
+         the recorder mirror released:true on the completed record for local
+         storage and for the student's own view; the server derives its own
+         answer from the assignment row and overwrites whatever is sent */
+      const aa = state.activeAssignment;
+      Attempts.finalize(endedBy || "submitted", aa ? {
+        autoRelease: AssignmentRules.releaseModeOf(aa) === "auto",
+        assignmentId: aa.assignmentId,
+        testId: aa.testId                 // the recorder requires it to equal the record's, as the server does
+      } : undefined);
       delete state.resumeRecords[state.currentTest.testId];   // completed ≠ resumable
       // which home section the finished attempt lands in; read after the
       // assignment is cleared below
@@ -5074,7 +5232,7 @@
     const rawRw = tally["Reading and Writing"].correct;
     const rawMath = tally["Math"].correct;
     const scaled = scaledScores(test, rawRw, rawMath, moduleRaw);
-    const badge = timingBadge(record.timing);
+    const badgeHtml = timingBadgeHtml(record);        // escaped inside; carries the student-selected mark
     const dateStr = fmtCardDate(record.startedAt);
 
     // hero
@@ -5178,7 +5336,7 @@
         <div class="sd-hero-top">
           <div>
             <h1>Score Details</h1>
-            <div class="sd-hero-sub"><b>${escapeHtml(displayLabel())}</b>${state.displayName ? ' <span class="sd-code">' + escapeHtml(state.userName) + '</span>' : ""} · ${escapeHtml(test.testName)} · ${escapeHtml(dateStr)}${badge ? ' · <span class="sd-badge">' + escapeHtml(badge) + '</span>' : ""}</div>
+            <div class="sd-hero-sub"><b>${escapeHtml(displayLabel())}</b>${state.displayName ? ' <span class="sd-code">' + escapeHtml(state.userName) + '</span>' : ""} · ${escapeHtml(test.testName)} · ${escapeHtml(dateStr)}${badgeHtml ? ' · <span class="sd-badge">' + badgeHtml + '</span>' : ""}</div>
           </div>
           <button class="sd-home" id="sdHomeBtn">Return to Home</button>
         </div>

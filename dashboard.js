@@ -40,6 +40,9 @@ window.Dashboard = (function(){
   let setSaveInFlight = 0;       // set saves running — a PAGE-level lock: Cancel can close the saving
                                  // builder, but Edit/Delete/New set wait until the save (and the reload
                                  // of `sets` it ends with) has settled
+  let createInFlight = false;    // a Create assignment run (bulk: many rows) in progress — a second press
+                                 // would plan from the pre-run `assigns` and double every row; kept
+                                 // OUTSIDE setSaveInFlight so the set lock's semantics are unchanged
   let pullsInFlight = new Set();  // one Set per Refresh pull still running (loadFromStorage): the keys
                                   // this page wrote — server-accepted — since that pull's snapshot was
                                   // taken, which its rows must not put back (tutorPut/tutorDelete add)
@@ -188,10 +191,11 @@ window.Dashboard = (function(){
      only in the DOM, so snapshot the known fields, render, restore them and
      put the caret back. The Assignments overlap block is then recomputed
      from the restored codes. */
-  const KEPT_VALUES = ["afFree", "afName", "afTest", "afCat", "afTiming", "afOpens", "afExpires", "afResetCode",
+  const KEPT_VALUES = ["afFree", "afName", "afCat", "afTiming", "afOpens", "afExpires", "afResetCode",
+                       "afRelease", "afTimingMode",
                        "saSet", "saFree", "saLimit", "saExpires"];
-  const KEPT_CHECKS = ["saHold"];
-  const KEPT_MULTI = ["afCodes", "saCodes"];
+  const KEPT_CHECKS = ["saHold", "afAllow1", "afAllow15", "afAllow2", "afAllowU"];
+  const KEPT_MULTI = ["afCodes", "afTest", "saCodes"];     // afTest is a multi-select since 2026-11-02 (bulk assign)
   function renderKeepingInputs(){
     const vals = {}, checks = {}, multi = {};
     KEPT_VALUES.forEach(id => { const el = $(id); if(el) vals[id] = el.value; });
@@ -213,7 +217,7 @@ window.Dashboard = (function(){
         try{ el.focus(); if(caret !== null && el.setSelectionRange) el.setSelectionRange(caret, caret); }catch(e){}
       }
     }
-    if(tab === "assign") refreshAssignOverlap();
+    if(tab === "assign"){ syncTimingModeView(); refreshAssignOverlap(); }
   }
 
   /* Shape-defensive normalization: the index is a committed file, but the
@@ -352,8 +356,19 @@ window.Dashboard = (function(){
              when: when, whenText: fmtDay(when),      // formatted once per attempt, not per mark
              status: String(r.status || "") };
   }
+  /* A per-pass memo (2026-11-02): the overlap block is one call per selected
+     test, and the seen set depends on the CODE alone — pure over recs, tombs,
+     dedup and the manifest, none of which move inside one synchronous pass.
+     Null outside a pass, so every other caller computes fresh. */
+  let seenMemo = null;
   function seenSetFor(code){
     if(!dedup || !code) return null;
+    if(seenMemo && seenMemo.has(code)) return seenMemo.get(code);
+    const seen = seenSetForUncached(code);
+    if(seenMemo) seenMemo.set(code, seen);
+    return seen;
+  }
+  function seenSetForUncached(code){
     const seen = { canon: Object.create(null), fam: Object.create(null), attempts: 0, unindexed: 0, unindexedAttempts: 0,
                    deleted: deletedAttemptsOf(code).length, deletedStudent: isDeletedStudent(code) };
     completedAttemptsOf(code).forEach(r => {
@@ -496,13 +511,18 @@ window.Dashboard = (function(){
       .sort((a, b) => String(a.att.when || "").localeCompare(String(b.att.when || "")));
     return o;
   }
-  function assignOverlapHtml(codes, testId){
+  /* `selected` (2026-11-02): how many tests the form has chosen, for the
+     no-codes hint; `bare` omits the staleness notice because the caller
+     prints it once ahead of several blocks */
+  function assignOverlapHtml(codes, testId, selected, bare){
     ensureDedupLoaded();
     if(dedupState !== "ready") return dedupNoticeHtml();
     const t = manifestEntry(String(testId == null ? "" : testId));
-    const tname = t ? t.testName : String(testId || "");
-    const stale = dedupNoticeHtml();
-    if(!codes.length || !testId)
+    const tname = (selected > 1) ? "each of the " + selected + " selected tests" : (t ? t.testName : String(testId || ""));
+    const stale = bare ? "" : dedupNoticeHtml();
+    if(!testId)                            // the multi-select starts with nothing chosen (2026-11-02)
+      return stale + '<p class="dash-hint">Pick a test (or several) above to see how much of each the chosen students have already seen, by canonical id.</p>';
+    if(!codes.length)
       return stale + '<p class="dash-hint">Pick student codes to see how much of ' + esc(tname) +
         ' each has already seen (by canonical id) in their completed attempts.</p>';
     return stale + codes.map(code => {
@@ -555,10 +575,18 @@ window.Dashboard = (function(){
     ensureDedupLoaded();                   // adopt an inlined/late index BEFORE the signature reads dedupState
     const parsed = formCodes();
     const codes = parsed.codes.filter(c => parsed.bad.indexOf(c) === -1);
-    const sig = codes.join(",") + "|" + t.value + "|" + dedupState;
+    const tests = formTests();             // one block per selected test (bulk assign, 2026-11-02)
+    const sig = codes.join(",") + "|" + tests.join(",") + "|" + dedupState;
     if(sig === overlapSig) return;
     overlapSig = sig;
-    box.innerHTML = assignOverlapHtml(codes, t.value);
+    /* the staleness notice and the "pick codes" hint once, not once per
+       test; each code's seen set built once for the whole pass */
+    seenMemo = new Map();
+    try{
+      if(!tests.length) box.innerHTML = assignOverlapHtml(codes, "");
+      else if(!codes.length || dedupState !== "ready") box.innerHTML = assignOverlapHtml(codes, tests[0], tests.length);
+      else box.innerHTML = dedupNoticeHtml() + tests.map(id => assignOverlapHtml(codes, id, 0, true)).join("");
+    }finally{ seenMemo = null; }
   }
 
   /* ---- the builder's ONE rule for what it already holds ----
@@ -748,15 +776,40 @@ window.Dashboard = (function(){
       `. The record is kept as it was for audit and is shown to no student; it cannot be un-deleted here.</p>`;
   }
   // Phase G §1: extended-time / untimed badge (blank for standard timing)
-  function timingLabel(t){
-    if(t === "untimed") return "Untimed";
-    if(t === 1.5) return "Extended time 1.5×";
-    if(t === 2) return "Extended time 2×";
-    return "";
+  function timingLabel(t){ return AssignmentRules.timingLabel(t, false); }
+  /* A RECORD's timing badge (2026-11-02): the Phase G label, plus "Standard
+     time" when the student chose it (the choice is then the information), and
+     the "(student-selected)" mark in the Est.-style honest labelling. The
+     flag is read strictly — only the literal true counts — so a crafted
+     record cannot put text through it; the label is from a closed table. */
+  function timingBadgeHtml(r){
+    const sel = !!(r && r.timingSelectedByStudent === true);
+    const lbl = AssignmentRules.timingLabel(r && r.timing, sel);
+    if(!lbl) return "";
+    return ` <span class="dstatus tm">${esc(lbl)}${sel ? ' <span class="sd-sel" title="' + escAttr(AssignmentRules.SELECTED_TITLE) + '">(student-selected)</span>' : ""}</span>`;
   }
-  function timingBadgeHtml(t){
-    const lbl = timingLabel(t);
-    return lbl ? ` <span class="dstatus tm">${esc(lbl)}</span>` : "";
+  /* An ASSIGNMENT row's timing, as the Assignments table shows it: the fixed
+     value, or the options a student-choice row offers. */
+  function assignTimingText(a){
+    const p = AssignmentRules.timingPolicyOf(a);
+    if(p.mode === "student-choice"){
+      return "Student chooses: " + p.allowed.map(t => t === "untimed" ? "untimed" : t === 1 ? "standard" : t + "×").join(", ");
+    }
+    return AssignmentRules.timingLabel(p.timing, false) || "Standard";
+  }
+  function releaseModeText(a){
+    return AssignmentRules.releaseModeOf(a) === "auto" ? "Auto-release" : "Manual";
+  }
+  /* The assignment row a record was sat under, from the page's own list —
+     null when the record names none or the row is gone. The record's
+     assignmentId is untrusted, but here it is only a lookup key. */
+  function assignmentOf(r){
+    const code = r && r.student && r.student.key;
+    const aid = r && r.assignmentId;
+    if(!code || typeof aid !== "string" || !aid) return null;
+    const e = assigns.find(x => x.code === code);
+    if(!e || !Array.isArray(e.list)) return null;
+    return e.list.find(a => a && typeof a === "object" && a.assignmentId === aid) || null;
   }
   /* Codes resolve to names for display only. The code is always shown too, so
      both stay searchable and a row can still be matched to the pseudonymous
@@ -1126,6 +1179,20 @@ window.Dashboard = (function(){
   function releaseCell(r){
     if(r.status === "in-progress") return "—";
     if(isTombstoned(r)) return "—";              // a deleted record has no student to release to
+    /* an Auto-release assignment's attempt that IS released shows no Release
+       button (2026-11-02): there is no flip for the tutor to make. The badge
+       states a fact about the ASSIGNMENT (it auto-releases) — not who flipped
+       this record, which the client cannot know (the migration not yet
+       applied, or a legacy-id mismatch, leaves the manual button, and a
+       release pressed by hand then lands here too). The one control that
+       stays is Hide: un-releasing is a real action (a disputed sitting, a
+       talk before the score), and this is the only path to it. An UNRELEASED
+       attempt under an auto row keeps the manual button — the tutor's way to
+       finish the job by hand. */
+    if(r.released === true && AssignmentRules.releaseModeOf(assignmentOf(r)) === "auto"){
+      return '<span class="dstatus ok" title="Released — this assignment was created with Auto-release, so scores release when the student submits">Released · auto</span> ' +
+        `<button class="dash-rel rel-on" data-rel="${escAttr(r.attemptId)}" title="Hide scores from the student again">Hide</button>`;
+    }
     return `<button class="dash-rel ${r.released ? "rel-on" : ""}" data-rel="${escAttr(r.attemptId)}"
       title="${r.released ? "Hide scores from the student again" : "Let the student see this attempt in their Past view"}">${
       r.released ? "Released ✓" : "Release"}</button>`;
@@ -1194,7 +1261,7 @@ window.Dashboard = (function(){
           <td><b>${scoreStr(r)}</b></td>
           <td>${statusBadge(r)}</td>
           <td>${releaseCell(r)}</td>
-          <td>${esc(r.conditions || "unknown")}${timingBadgeHtml(r.timing)}</td>
+          <td>${esc(r.conditions || "unknown")}${timingBadgeHtml(r)}</td>
         </tr>`).join("") +
       `</tbody></table><p class="dash-hint">Click a row for the full question-by-question review.</p>`;
   }
@@ -1557,6 +1624,7 @@ window.Dashboard = (function(){
       .map(e => e.code).sort();
     const d = new Date();
     const today = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+    const manifestTests = (window.TEST_MANIFEST || []).filter(t => t && t.testId);
     const rows = [];
     assigns.forEach(entry => entry.list.forEach(a => {
       if(typeof a === "string"){
@@ -1567,16 +1635,30 @@ window.Dashboard = (function(){
     }));
     const rowsHtml = rows.map(r => {
       if(r.legacy){
-        return `<tr><td>${studentCell(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>Standard</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
+        return `<tr><td>${studentCell(r.code)}</td><td>${esc(r.a.testId)}</td><td>practice (legacy)</td><td>Standard</td><td>Manual</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td></tr>`;
       }
       const a = r.a;
       const st = assignRowStatus(r.code, a);
       const deletable = st === "pending" || st === "expired";
+      const auto = AssignmentRules.releaseModeOf(a) === "auto";
+      /* a practice-SET row lists here too (it is an assignment); its name,
+         limit and release rule are the set's own, never the form fields */
+      const isSet = a.kind === "set";
+      const nameCell = isSet
+        ? esc(a.setName || a.setId || "?") + ' <span class="dstatus tm">set</span>'
+        : esc((testsById[a.testId] && testsById[a.testId].testName) || a.testId);
+      const timingCell = isSet
+        ? (a.timeLimitMinutes ? esc(String(a.timeLimitMinutes)) + " min" : "Untimed")
+        : esc(assignTimingText(a));
+      const releaseCellHtml = isSet
+        ? (a.holdRelease === true ? "Held — release manually" : "Releases on submit")
+        : (auto ? '<span class="dstatus ok" title="Scores are released the moment the student submits — no Release button to press">Auto-release</span>' : esc(releaseModeText(a)));
       return `<tr>
         <td>${studentCell(r.code)} <button class="dash-rel copy-link" data-code="${escAttr(r.code)}" title="Copy a link that signs this student in">Link</button></td>
-        <td>${esc((testsById[a.testId] && testsById[a.testId].testName) || a.testId)}</td>
+        <td>${nameCell}</td>
         <td>${esc(a.category || "?")}</td>
-        <td>${esc(timingLabel(a.timing) || "Standard")}</td>
+        <td>${timingCell}</td>
+        <td>${releaseCellHtml}</td>
         <td>${a.startCode ? "<b>" + esc(String(a.startCode)) + "</b>" : "—"}</td>
         <td>${fmtDay(a.windowOpens)}</td>
         <td>${fmtDay(a.expiresAt)}</td>
@@ -1600,36 +1682,54 @@ window.Dashboard = (function(){
             <label>Student name (display)
               <input id="afName" placeholder="Erin K" autocomplete="off"
                 title="Shown to the student and in this dashboard. Stored in its own profile row — never inside an attempt record."></label>
-            <label>Test
-              <select id="afTest">${(window.TEST_MANIFEST || []).map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select></label>
+            <label class="af-tests">Tests — pick one or several; each becomes its own assignment, with the options below
+              <select id="afTest" class="af-multi" multiple size="${Math.min(Math.max(manifestTests.length, 4), 14)}">${manifestTests.map(t => `<option value="${escAttr(t.testId)}">${esc(t.testName)}</option>`).join("")}</select>
+              <span class="af-selrow">
+                <button type="button" class="dash-rel" id="afSelAll" title="Select every test in the library">Select all</button>
+                <button type="button" class="dash-rel" id="afSelUnsat" title="Select every test that none of the chosen students has a finished or in-progress attempt of in storage (archived-away sittings count only through their assignment's completed mark)">Select all not yet sat</button>
+                <span class="dash-hint" id="afSelMsg"></span>
+              </span></label>
             <label>Category
               <select id="afCat">
                 <option value="test">Test — proctored, start code</option>
                 <option value="practice">Practice — self-administered</option>
               </select></label>
-            <label>Timing
-              <select id="afTiming">
-                <option value="1">Standard</option>
-                <option value="1.5">Time and a half (1.5×)</option>
-                <option value="2">Double time (2×)</option>
-                <option value="untimed">Untimed</option>
+            <label>Score release
+              <select id="afRelease" title="Manual: you press Release on the attempt. Auto-release: the server releases the scores the moment the student submits.">
+                <option value="manual">Manual — release from this dashboard</option>
+                <option value="auto">Auto-release — scores open at submit</option>
               </select></label>
+            <label>Timing
+              <select id="afTimingMode">
+                <option value="fixed">Fixed — one timing, set here</option>
+                <option value="student-choice">Student chooses — from the options ticked</option>
+              </select></label>
+            <label id="afTimingFixedWrap">Fixed timing
+              <select id="afTiming">${AssignmentRules.TIMING_CHOICES.map(t =>
+                `<option value="${escAttr(String(t))}">${esc(AssignmentRules.choiceLabel(t))}</option>`).join("")}</select></label>
+            <div class="af-field hidden" id="afTimingChoiceWrap">Options the student may choose from
+              <span class="af-allowed">
+                <label><input type="checkbox" id="afAllow1" checked> Standard</label>
+                <label><input type="checkbox" id="afAllow15" checked> 1.5×</label>
+                <label><input type="checkbox" id="afAllow2" checked> 2×</label>
+                <label><input type="checkbox" id="afAllowU" checked> Untimed</label>
+              </span></div>
             <label>Window opens (optional)
               <input type="date" id="afOpens"></label>
             <label>Expires (end of day)
               <input type="date" id="afExpires" value="${today}"></label>
           </div>
           <div class="af-actions">
-            <button class="pill" id="afCreateBtn" style="padding:10px 26px;">Create assignment</button>
+            <button class="pill" id="afCreateBtn" style="padding:10px 26px;" ${createInFlight ? "disabled" : ""}>Create assignment</button>
             <button class="pill ghost" id="afNameBtn" style="padding:10px 20px;"
               title="Save just the display name for the selected code(s) — leaves assignments untouched">Save name only</button>
             <span class="dash-hint" id="afMsg"></span>
           </div>
-          <div class="canon-assign" id="afOverlap">${assignOverlapHtml([], ((window.TEST_MANIFEST || [])[0] || {}).testId || "")}</div>
+          <div class="canon-assign" id="afOverlap">${assignOverlapHtml([], "")}</div>
           ${lastStartCode ? `<div class="af-code">Start code — read this aloud<div class="af-code-big">${esc(lastStartCode)}</div></div>` : ""}
         </div>
         ${rows.length ? `<table class="dtable"><thead><tr>
-            <th>Student</th><th>Test</th><th>Category</th><th>Timing</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
+            <th>Student</th><th>Test</th><th>Category</th><th>Timing</th><th>Release</th><th>Start code</th><th>Opens</th><th>Expires</th><th>Status</th><th></th>
           </tr></thead><tbody>${rowsHtml}</tbody></table>
           <p class="dash-hint">Assignments with an attempt (in-progress or completed) can't be deleted.</p>`
           : '<p class="dash-empty">No assignments yet. A student with no assignments sees an empty home screen — everything has to be assigned.</p>'}
@@ -1703,6 +1803,110 @@ window.Dashboard = (function(){
     $("dashStatus").textContent = ok
       ? "Sign-in link for " + code + " copied — it signs them in and clears itself from the address bar."
       : "Clipboard unavailable — the link is in the dialog.";
+  }
+
+  /* ---- bulk assign (2026-11-02): the Tests control is a multi-select ----
+     Tests chosen in the form, deduplicated and limited to the manifest (the
+     only tests that can be sat). The control's selected options are the
+     truth; a plain `.value` is honoured when the element is not a
+     multi-select (a single-select's selection IS its value). */
+  function formTests(){
+    const t = $("afTest");
+    if(!t) return [];
+    const sel = (t.selectedOptions && t.selectedOptions.length)
+      ? Array.from(t.selectedOptions).map(o => o.value)
+      : (t.value ? [t.value] : []);
+    return Array.from(new Set(sel)).filter(id => !!manifestEntry(String(id)));
+  }
+  function selectTests(ids){
+    const t = $("afTest");
+    if(t && t.options) Array.from(t.options).forEach(o => { o.selected = ids.indexOf(o.value) !== -1; });
+    refreshAssignOverlap();
+  }
+  /* Tests NONE of these codes has sat, by canonical id: no live (non-deleted)
+     finished or in-progress form attempt in storage, AND no assignment row
+     of the test that reads Completed or In progress — which is how a sitting
+     whose record was archived away (the row's completedAttemptId hint) or
+     deleted while tagged (its marker keeps the row Completed, 25ef8f7) still
+     counts. An UNTAGGED deleted attempt closes no row and so does not count
+     as sat — the tutor removed it. Sets are not tests. Judged per student,
+     so with several codes it is the tests new to all of them. Honest limit:
+     a row with neither record nor hint (remote mode never carries the hint,
+     and archive-then-delete leaves none) reads unsat — "in storage" is the
+     word the button uses for that reason. */
+  function unsatTestIds(codes){
+    const sat = Object.create(null);
+    const canonOf = id => (testsById[id] || {}).testId || id;
+    recs.forEach(r => {
+      if(!r || !r.student || codes.indexOf(r.student.key) === -1) return;
+      if(r.kind === "set" || isTombstoned(r)) return;
+      if(["completed", "timed-out", "in-progress"].indexOf(r.status) === -1) return;
+      const canon = canonOf(r.testId);
+      if(canon) sat[canon] = true;
+    });
+    codes.forEach(code => {
+      const e = assigns.find(x => x.code === code);
+      if(!e || !Array.isArray(e.list)) return;
+      e.list.forEach(a => {
+        if(!a || typeof a !== "object" || a.kind === "set" || !a.testId) return;
+        const st = assignRowStatus(code, a);
+        if(st === "completed" || st === "in-progress") sat[canonOf(a.testId)] = true;
+      });
+    });
+    return (window.TEST_MANIFEST || []).filter(t => t && t.testId && !sat[t.testId]).map(t => t.testId);
+  }
+  /* An ACTIVE assignment of this test for this code — pending or in progress
+     — which a new assignment of the same test would collide with: the
+     student app's crash-resume slot is per canonical test (state.resumeRecords
+     in app.js), so two startable or resumable assignments of one form cannot
+     be told apart there. Completed and expired-unsat ones are not active. A
+     legacy bare-id entry is a startable practice assignment, so it counts.
+     Sets are never tests. Returns {a, status} or null. */
+  function activeAssignmentFor(code, testId){
+    const e = assigns.find(x => x.code === code);
+    if(!e || !Array.isArray(e.list)) return null;
+    for(const a of e.list){
+      if(typeof a === "string"){ if(sameTest(a, testId)) return { a: { testId: a, legacy: true }, status: "pending" }; continue; }
+      if(!a || typeof a !== "object" || a.kind === "set" || !sameTest(a.testId, testId)) continue;
+      const st = assignRowStatus(code, a);
+      if(st === "pending" || st === "in-progress") return { a: a, status: st };
+    }
+    return null;
+  }
+  /* the Fixed-timing select and the student-choice checkboxes show one at a
+     time, following the Timing mode control (also after a re-render restores
+     the mode) */
+  function syncTimingModeView(){
+    const mode = $("afTimingMode");
+    if(!mode) return;
+    const choice = mode.value === "student-choice";
+    const fw = $("afTimingFixedWrap"), cw = $("afTimingChoiceWrap");
+    if(fw && fw.classList) fw.classList.toggle("hidden", choice);
+    if(cw && cw.classList) cw.classList.toggle("hidden", !choice);
+  }
+  /* One serialisation for "the same row": object keys SORTED. Postgres jsonb
+     hands a row back with its keys in canonical order (shorter first, then
+     bytewise), so a plain JSON.stringify compare would call every correct
+     remote row "different from what was sent". Arrays keep their order —
+     `allowed` is a list. */
+  function canonJson(v){
+    if(Array.isArray(v)) return "[" + v.map(canonJson).join(",") + "]";
+    if(v && typeof v === "object") return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + canonJson(v[k])).join(",") + "}";
+    return JSON.stringify(v);
+  }
+  /* An assignment id no row in `taken` holds: epoch seconds plus eight hex
+     digits, and a counter suffix if even that collides. A bulk submit mints
+     up to one id per manifest test for ONE code inside the same second, and
+     the key is assign:<code>:<id>, so two equal ids would be one row written
+     twice — the second silently replacing the first. `taken` is the set of
+     ids this submit has issued plus every id the code already holds. */
+  function newAssignmentId(taken){
+    const sec = Math.floor(Date.now() / 1000);
+    for(let n = 0; ; n++){
+      const rand = Math.random().toString(16).slice(2, 10).padEnd(8, "0");
+      const id = "a-" + sec + "-" + rand + (n ? "-" + n : "");
+      if(!taken.has(id)){ taken.add(id); return id; }
+    }
   }
 
   /* Codes chosen in the form: multi-select plus free entry. */
@@ -1961,6 +2165,9 @@ window.Dashboard = (function(){
   }
 
   async function createAssignment(){
+    /* one run at a time: a second press mid-run would plan from the `assigns`
+       this run has not refreshed yet, refuse nothing, and double every row */
+    if(createInFlight){ $("afMsg").textContent = "Still creating the last assignments — wait for the status line."; return; }
     const { codes, bad, deleted } = formCodes();
     if(bad.length){ $("afMsg").textContent = "These codes don't look right: " + bad.join(", "); return; }
     if(deleted.length){ $("afMsg").textContent = "Deleted — a retired code can't be assigned to: " + deleted.join(", "); return; }
@@ -1970,37 +2177,105 @@ window.Dashboard = (function(){
        render() that rebuilds this form with its defaults, and the card would
        land for the wrong test */
     const nameIn = $("afName").value.trim();     // a name typed here is saved as a profile row, separate from the assignment
-    const testId = $("afTest").value;
+    /* bulk assign (2026-11-02): one or several tests, ONE shared set of
+       options; every (code × test) pair becomes its own assignment row with
+       its own assignmentId — no multi-test row shape exists */
+    const testIds = formTests();
+    if(!testIds.length){ $("afMsg").textContent = "Pick at least one test."; return; }
     const category = $("afCat").value;
     const timingRaw = $("afTiming").value;                       // Phase G §1
-    const timing = timingRaw === "untimed" ? "untimed" : parseFloat(timingRaw);
+    const timing = AssignmentRules.normTiming(timingRaw);
+    /* releaseMode and timingPolicy (2026-11-02) — additive fields; a row
+       without them reads as manual / fixed, exactly what these defaults say */
+    const releaseEl = $("afRelease");
+    const releaseMode = (releaseEl && releaseEl.value === "auto") ? "auto" : "manual";
+    const modeEl = $("afTimingMode");
+    const studentChoice = !!(modeEl && modeEl.value === "student-choice");
+    let timingPolicy;
+    if(studentChoice){
+      const allowed = [];
+      if($("afAllow1").checked)  allowed.push(1);
+      if($("afAllow15").checked) allowed.push(1.5);
+      if($("afAllow2").checked)  allowed.push(2);
+      if($("afAllowU").checked)  allowed.push("untimed");
+      if(!allowed.length){ $("afMsg").textContent = "Tick at least one timing option for the student to choose from."; return; }
+      timingPolicy = { mode: "student-choice", allowed: allowed };
+    } else {
+      timingPolicy = { mode: "fixed", timing: timing };
+    }
     const startCode = category === "test"
       ? String(Math.floor(100000 + Math.random() * 900000)) : null;
     const opens = $("afOpens").value ? new Date($("afOpens").value + "T00:00:00").toISOString() : null;
     const expires = $("afExpires").value ? new Date($("afExpires").value + "T23:59:00").toISOString() : null;
+    /* The plan, decided from the page's own lists BEFORE anything is written:
+       a (code, test) pair whose test already has an ACTIVE assignment for
+       that code is refused — named in the status line, never skipped quietly
+       — because a second startable or resumable assignment of one form would
+       share the student app's per-test crash-resume slot. Everything else is
+       written below, one row at a time. */
+    const plan = [], refused = [];
+    codes.forEach(code => testIds.forEach(testId => {
+      const dup = activeAssignmentFor(code, testId);
+      if(dup) refused.push({ code: code, testId: testId, status: dup.status });
+      else plan.push({ code: code, testId: testId });
+    }));
+    const testName = id => (testsById[id] && testsById[id].testName) || id;
+    const refusalLines = refused.map(r => "Not assigned — " + r.code + " already has an active assignment of " + testName(r.testId) +
+      " (" + r.status + "); finish or delete that one first.");
+    /* nothing to write: a refusal like the ones above it — said in the
+       form, the form kept, no profile written, no reload */
+    if(!plan.length){ $("afMsg").textContent = refusalLines.join(" "); return; }
+    /* the ids this submit will issue, unique among themselves AND among the
+       rows each code already holds (an id is the row's KEY) */
+    const taken = new Set();
+    codes.forEach(code => { const e = assigns.find(x => x.code === code);
+      ((e && e.list) || []).forEach(a => { if(a && typeof a === "object" && a.assignmentId) taken.add(a.assignmentId); }); });
+    createInFlight = true;
+    const btn = $("afCreateBtn");
+    if(btn) btn.disabled = true;
+    try{
     const prof = nameIn ? await saveProfiles(codes, nameIn) : null;
     /* Phase H §3: one row per assignment. No read-modify-write, so the
        Phase F clobber is gone — concurrent writers touch different keys.
-       Per-code outcome: the server can take some codes and reject the rest
-       (a session expiring mid-loop), and a blanket "try again" would
-       duplicate the ones that landed. */
-    const assigned = [], notes = [];
-    for(const code of codes){
+       Per-row outcome: the server can take some rows and reject the rest (a
+       session expiring mid-loop), and a blanket "try again" would duplicate
+       the ones that landed, so each row is reported on its own and the ones
+       written stay. Each is READ BACK from where it now lives (the server in
+       remote mode) and compared with what was sent — by canonical
+       serialisation, since jsonb reorders keys; a row that does not read
+       back as sent is written-but-unverified, and the line says so. */
+    const written = [], notes = [], failures = [], unverified = [];
+    const assignedByTest = Object.create(null), codesAssigned = Object.create(null);
+    let n = 0;
+    for(const p of plan){
+      n++;
+      $("dashStatus").textContent = "Creating assignment " + n + " of " + plan.length + " — " + testName(p.testId) + " for " + p.code + "…";
       const a = {
-        assignmentId: "a-" + Math.floor(Date.now()/1000) + "-" + Math.random().toString(16).slice(2, 6),
-        testId, category, startCode, timing,
+        assignmentId: newAssignmentId(taken),
+        testId: p.testId, category: category, startCode: startCode,
+        timing: studentChoice ? null : timing,        // the Phase G field; null when the student picks (readers default to standard)
+        timingPolicy: timingPolicy,
+        releaseMode: releaseMode,
         windowOpens: opens, expiresAt: expires,
         assignedAt: new Date().toISOString(),
         completedAttemptId: null
       };
-      const key = "assign:" + code + ":" + a.assignmentId;
-      const res = await tutorPut(key, code, a);
-      if(!res.ok){ notes.push(res.message); continue; }
-      assigned.push(code);
+      const key = "assign:" + p.code + ":" + a.assignmentId;
+      const res = await tutorPut(key, p.code, a);
+      if(!res.ok){ failures.push(res.message); continue; }
+      written.push(p);
+      (assignedByTest[p.testId] = assignedByTest[p.testId] || []).push(p.code);
+      codesAssigned[p.code] = true;
       if(res.warning) notes.push(res.warning);
-      /* tidy the vestigial __none marker (absent == empty since 2026-08-01)
-         if this browser still holds one; not a failed assignment if it
-         can't go, so it is noted rather than counted */
+      const back = await freshAssignmentRow(key).catch(() => null);   // the server's copy in remote mode
+      if(!back || canonJson(back) !== canonJson(a)){
+        unverified.push(describeRow(key) + (back ? " read back different from what was sent" : " could not be read back"));
+      }
+    }
+    /* tidy the vestigial __none marker (absent == empty since 2026-08-01)
+       once per code that now has a row, if this browser still holds one; not
+       a failed assignment if it can't go, so it is noted rather than counted */
+    for(const code of Object.keys(codesAssigned)){
       const sentinel = "assign:" + code + ":__none";
       if(await AttemptStore.get(sentinel)){
         const t = await tutorDelete(sentinel);
@@ -2008,17 +2283,34 @@ window.Dashboard = (function(){
       }
     }
     if(prof) notes.push(...prof.messages);
-    lastStartCode = assigned.length ? startCode : null;   // never read a code aloud for a sitting that doesn't exist
+    lastStartCode = written.length ? startCode : null;   // never read a code aloud for a sitting that doesn't exist
+    const lines = [];
+    Object.keys(assignedByTest).forEach(testId => {
+      lines.push("Assigned " + testId + " to " + assignedByTest[testId].join(", ") + (AttemptStore.isRemote() ? " (on the server)." : "."));
+    });
+    /* the N-of-N count: right after what landed when something did; after
+       the failures when nothing did, so a rejection still leads with its
+       "Not saved" and the row it names */
+    const countLine = written.length + " of " + plan.length + " assignment row" + (plan.length === 1 ? "" : "s") + " written, " +
+      (written.length - unverified.length) + " verified by reading " + (written.length === 1 ? "it" : "each") + " back" +
+      (unverified.length ? " — NOT verified: " + unverified.join("; ") + ". Press Refresh to confirm." : ".");
+    if(written.length) lines.push(countLine);
+    lines.push(...refusalLines);
+    lines.push(...failures);
+    if(!written.length) lines.push(countLine);
+    lines.push(...notes);
     /* canonical-id overlap, repeated in the status line so the warning
        survives the re-render that empties the form (information only —
-       the assignment was made as asked) */
-    notes.push(...overlapNotes(assigned, testId));
-    $("dashStatus").textContent =
-      (assigned.length
-        ? "Assigned " + testId + " to " + assigned.join(", ") + (AttemptStore.isRemote() ? " (on the server)." : ".")
-        : "") +
-      (notes.length ? (assigned.length ? " " : "") + notes.join(" ") : "");
+       the assignment was made as asked); per test, for the codes it landed
+       for — each code's seen set built once for the whole pass */
+    seenMemo = new Map();
+    try{ Object.keys(assignedByTest).forEach(testId => lines.push(...overlapNotes(assignedByTest[testId], testId))); }
+    finally{ seenMemo = null; }
+    $("dashStatus").textContent = lines.join(" ");
     await loadAssignsAndBugs();
+    }finally{
+      createInFlight = false;
+    }
     render();
   }
 
@@ -2522,7 +2814,7 @@ window.Dashboard = (function(){
           <td>${studentCell(r.student && r.student.code)}</td>
           <td>${fmtDate(r.startedAt)}</td>
           <td><b>${scoreStr(r)}</b></td>
-          <td>${statusBadge(r)}${timingBadgeHtml(r.timing)}</td>
+          <td>${statusBadge(r)}${timingBadgeHtml(r)}</td>
           <td>${releaseCell(r)}</td>
         </tr>`).join("") + "</tbody></table></div>";
     }).join("");
@@ -3267,7 +3559,7 @@ window.Dashboard = (function(){
     const canDelete = isDeletableAttempt(r);
     $("dashDetailBody").innerHTML = `
       <h2>${studentCell(r.student && r.student.code)} — ${esc(r.testName || r.testId)}</h2>
-      <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r.timing)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
+      <p class="dash-hint">${fmtDate(r.startedAt)} · ${esc(r.conditions||"unknown")}${timingBadgeHtml(r)} · ${statusBadge(r)} · score <b>${scoreStr(r)}</b>
         ${num(r.score && r.score.noKey) ? " · " + num(r.score.noKey) + " keyless" : ""} · version ${esc(r.testVersion||"?")}</p>
       ${tombstoneNoteHtml(r)}
       ${canOpen ? '<p><button class="dash-rel" id="dashStudentView">Open student view →</button></p>' : ""}
@@ -3664,6 +3956,27 @@ window.Dashboard = (function(){
     if(afT) afT.addEventListener("change", refreshAssignOverlap);
     if(afC) afC.addEventListener("change", refreshAssignOverlap);
     if(afF) afF.addEventListener("input", refreshAssignOverlap);
+    /* bulk assign (2026-11-02): the two select-all buttons and the timing
+       mode switch. "Not yet sat" is judged per chosen student, so it asks
+       for the codes first rather than guessing from everyone's history. */
+    const selAll = $("afSelAll"), selUnsat = $("afSelUnsat"), tmode = $("afTimingMode");
+    if(selAll) selAll.addEventListener("click", () => {
+      const all = (window.TEST_MANIFEST || []).filter(t => t && t.testId).map(t => t.testId);
+      selectTests(all);
+      $("afSelMsg").textContent = "All " + all.length + " tests selected.";
+    });
+    if(selUnsat) selUnsat.addEventListener("click", () => {
+      const parsed = formCodes();
+      const codes = parsed.codes.filter(c => parsed.bad.indexOf(c) === -1);
+      if(!codes.length){ $("afSelMsg").textContent = "Pick or enter the student code(s) first — “not yet sat” is judged per student."; return; }
+      const ids = unsatTestIds(codes);
+      const total = (window.TEST_MANIFEST || []).filter(t => t && t.testId).length;
+      selectTests(ids);
+      $("afSelMsg").textContent = ids.length + " of " + total + " tests selected — none of " + codes.join(", ") +
+        " has a finished or in-progress attempt of them in storage" + (ids.length === total ? " (nothing sat yet)." : ".");
+    });
+    if(tmode) tmode.addEventListener("change", syncTimingModeView);
+    syncTimingModeView();
     const gb = $("afGenBtn");
     if(gb) gb.addEventListener("click", appendGeneratedCode);
     document.querySelectorAll("#dashBody .copy-link").forEach(btn =>

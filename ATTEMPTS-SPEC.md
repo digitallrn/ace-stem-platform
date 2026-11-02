@@ -43,6 +43,11 @@ limited, hence the checkpoint schedule in §3 rather than a write per click.
   "testName": "2024 March C",
   "testVersion": "2026-07-20-a",    // which build of the test data was served
   "conditions": "proctored",        // "proctored" | "self-administered" | "unknown"
+  "timing": 1,                      // Phase G §1: 1 | 1.5 | 2 | "untimed" — the clock this sitting ran on
+  "timingSelectedByStudent": true,  // OPTIONAL (2026-11-02): present, and true, only when the
+                                    // assignment let the student choose the timing and they did;
+                                    // omitted otherwise. Top-level on purpose — `conditions` is a
+                                    // string enum, not a bag. Stamped at begin, never changed.
 
   "startedAt": "2026-07-23T18:02:11.000Z",
   "lastSavedAt": "2026-07-23T19:44:52.000Z",
@@ -357,6 +362,21 @@ Rules that prevent this:
 
 ## 10. Notes / decisions
 
+- **Assignment options (2026-11-02).** An assignment row may carry
+  `releaseMode: "manual" | "auto"` and `timingPolicy: {mode:"fixed", timing} |
+  {mode:"student-choice", allowed:[…]}`; both are additive (absent ⇒ manual /
+  fixed at the row's `timing`) and are read only through
+  `window.AssignmentRules`. `auto` releases a completed or timed-out form
+  attempt at its completion transition, decided by `fn_upsert_attempt` from
+  the assignment row — never from anything the client sends (§7 stands: the
+  client's `released` is always discarded); the recorder mirrors it at
+  `finalize` for storage with no server. A student-choice row makes the
+  student pick before the start code (or the loading beat); the pick is the
+  record's `timing` and sets `timingSelectedByStudent: true` (§2) — the record
+  is the only source for resume and review. Bulk assign writes one row per
+  (code × test) and refuses a test that already has an active (pending or
+  in-progress) assignment for that code: crash-resume is still keyed by
+  canonical testId. See CLAUDE.md for the full statement and the proofs.
 - **Assignments are the only source of student-visible material (2026-08-01).**
   A student code with no assignments sees nothing: both Your Tests and Practice
   and Prepare render their empty states. **This reverses the Phase D / Phase F
